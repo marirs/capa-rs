@@ -1,0 +1,28 @@
+[package]
+name = "capars"
+version = "0.1.0"
+description = "try to clone https://github.com/fireeye/capa"
+authors = ["Andrey Mnatsakanov <andrey@3ig.kiev.ua>"]
+edition = "2018"
+
+[dependencies]
+thiserror = "1.0.26"
+goblin = "0.4.2"
+capstone = "0.10.0"
+ring = "*"
+data-encoding = "*"
+regex = "*"
+serde_json = "1.0.68"
+maplit = "1.0.2"
+itertools = "*"
+yaml-rust = "0.4.4"
+md-5 = "0.9"
+sha-1 = "0.9"
+sha2 = "0.9"
+petgraph = "0.6.0"
+hex = "0.4.3"
+serde = { version = "1.0", features = ["derive"] }
+pdb = "0.7.0"
+
+[features]
+verbose = []

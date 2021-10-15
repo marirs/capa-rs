@@ -1,0 +1,11 @@
+Cargo.lock
+target/
+
+.idea/
+.vscode/
+
+*.exe*
+*.dll*
+*.raw*
+.DS_Store
+
