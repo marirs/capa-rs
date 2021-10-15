@@ -63,7 +63,7 @@ impl OrdinalHelper {
 }
 
 static API_COLLECTION_FILES: &'static [&'static (&'static str, &'static str)] =
-    &[&("win_7", "apiscout_win7_prof-n_sp1.json")];
+    &[&("win_7", "assets/apiscout_win7_prof-n_sp1.json")];
 
 #[derive(Debug)]
 pub struct WinApiResolver {

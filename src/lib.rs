@@ -57,8 +57,8 @@ pub enum Os {
 impl std::fmt::Display for Os {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Os::WINDOWS => write!(f, "windows"),
-            Os::HPUX => write!(f, "hpux"),
+            Os::WINDOWS => write!(f, "Windows"),
+            Os::HPUX => write!(f, "HP Unix"),
             Os::NETBSD => write!(f, "NetBSD"),
             Os::LINUX => write!(f, "Linux"),
             Os::HURD => write!(f, "Hurd"),
