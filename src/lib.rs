@@ -1,14 +1,12 @@
 mod error;
-mod helpers;
 use error::Error;
 mod result;
 use result::Result;
 mod extractor;
 pub mod rules;
 use goblin::Object;
-use md5::Digest;
-
-use smda::{function::Function, Arch, Format};
+use std::collections::HashMap;
+use smda::{function::Function, FileArchitecture, FileFormat};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub enum Os {
@@ -70,8 +68,8 @@ pub struct CapabilityExtractorSettings {}
 
 #[derive(Debug)]
 pub struct CapabilityExtractor {
-    format: Format,
-    arch: Arch,
+    format: FileFormat,
+    arch: FileArchitecture,
     endian: Endian,
     os: Os,
 }
@@ -85,13 +83,13 @@ impl CapabilityExtractor {
         let buffer = std::fs::read(path)?;
         match Object::parse(&buffer)? {
             Object::Elf(elf) => Ok(CapabilityExtractor {
-                format: Format::ELF,
+                format: FileFormat::ELF,
                 arch: extractor::elf::get_arch(&elf)?,
                 endian: extractor::elf::get_endian(&elf)?,
                 os: extractor::elf::get_os(&elf)?,
             }),
             Object::PE(pe) => Ok(CapabilityExtractor {
-                format: Format::PE,
+                format: FileFormat::PE,
                 arch: extractor::pe::get_arch(&pe)?,
                 endian: extractor::pe::get_endian(&pe)?,
                 os: extractor::pe::get_os(&pe)?,
@@ -111,7 +109,7 @@ pub fn proceed_file(
     logger(&format!("loading rules..."));
     let rules = rules::RuleSet::new(rule_path)?;
     logger(&format!("loaded {} rules", rules.rules.len()));
-    let mut meta = Meta::new(file_name, rule_path, &extractor)?;
+    let mut meta = Meta::new(rule_path, &extractor)?;
     let (capabilities, counts) = find_capabilities(&rules, &extractor, logger)?;
 
     meta.update_capabilities(&capabilities, &counts)?;
@@ -337,9 +335,9 @@ pub fn find_file_capabilities<'a>(
         extractor.extract_file_features()?,
         extractor.extract_global_features()?
     ) {
-        //not all file features may have virtual addresses.
-        //if not, then at least ensure the feature shows up in the index.
-        //the set of addresses will still be empty.
+        // not all file features may have virtual addresses.
+        // if not, then at least ensure the feature shows up in the index.
+        // the set of addresses will still be empty.
         if va > 0 {
             match file_features.get_mut(&feature) {
                 Some(s) => {
@@ -355,9 +353,7 @@ pub fn find_file_capabilities<'a>(
             }
         }
     }
-    // println!("{:?}", file_features);
-    //logger.debug("analyzed file and extracted %d features",
-    // len(file_features))
+
     for (f1, f2) in function_features {
         file_features.insert(f1.clone(), f2.clone());
     }
@@ -375,12 +371,8 @@ pub struct FunctionCapabilities {
 
 #[derive(Debug, serde::Serialize)]
 pub struct BasicProperties {
-    md5: String,
-    sha1: String,
-    sha256: String,
-    path: String,
-    format: Format,
-    arch: Arch,
+    format: FileFormat,
+    arch: FileArchitecture,
     os: Os,
     base_address: u64,
     compilation_time: u64,
@@ -428,24 +420,12 @@ pub struct Meta {
 
 impl Meta {
     pub fn new(
-        sample_path: &str,
         rules_path: &str,
         extractor: &extractor::Extractor,
     ) -> Result<Meta> {
-        let mut md5_hasher = md5::Md5::new();
-        let mut sha1_hasher = sha1::Sha1::new();
-        let mut sha256_hasher = sha2::Sha256::new();
-
-        md5_hasher.update(extractor.get_buf()?);
-        sha1_hasher.update(extractor.get_buf()?);
-        sha256_hasher.update(extractor.get_buf()?);
 
         return Ok(Meta {
             basic_properties: BasicProperties {
-                md5: hex::encode(md5_hasher.finalize()),
-                sha1: hex::encode(sha1_hasher.finalize()),
-                sha256: hex::encode(sha256_hasher.finalize()),
-                path: sample_path.to_string(),
                 format: Meta::get_format(extractor)?,
                 arch: Meta::get_arch(extractor)?,
                 os: Meta::get_os(extractor)?,
@@ -472,22 +452,22 @@ impl Meta {
                     offset: s.2,
                 })
                 .collect(),
-            attacks: std::collections::HashMap::new(),
-            mbc: std::collections::HashMap::new(),
-            capability_namespaces: std::collections::HashMap::new(),
+            attacks: HashMap::new(),
+            mbc: HashMap::new(),
+            capability_namespaces: HashMap::new(),
             #[cfg(feature = "verbose")]
             rules_path: rules_path.to_string(),
             #[cfg(feature = "verbose")]
             features: 0,
             #[cfg(feature = "verbose")]
-            functions_capabilities: std::collections::HashMap::new(),
+            functions_capabilities: HashMap::new(),
         });
     }
 
     pub fn update_capabilities(
         &mut self,
-        capabilities: &std::collections::HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
-        counts: &std::collections::HashMap<u64, usize>,
+        capabilities: &HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+        counts: &HashMap<u64, usize>,
     ) -> Result<()> {
         for (rule, _) in capabilities {
             if rule
@@ -594,21 +574,21 @@ impl Meta {
         Ok(())
     }
 
-    pub fn get_format(extractor: &extractor::Extractor) -> Result<Format> {
+    pub fn get_format(extractor: &extractor::Extractor) -> Result<FileFormat> {
         Ok(extractor.report.format.clone())
     }
 
-    pub fn get_arch(extractor: &extractor::Extractor) -> Result<Arch> {
+    pub fn get_arch(extractor: &extractor::Extractor) -> Result<FileArchitecture> {
         if extractor.report.bitness == 32 {
-            return Ok(Arch::I386);
+            return Ok(FileArchitecture::I386);
         } else if extractor.report.bitness == 64 {
-            return Ok(Arch::AMD64);
+            return Ok(FileArchitecture::AMD64);
         }
         Err(Error::UnsupportedArchError)
     }
 
     pub fn get_os(extractor: &extractor::Extractor) -> Result<Os> {
-        if let Format::PE = extractor.report.format {
+        if let FileFormat::PE = extractor.report.format {
             return Ok(Os::WINDOWS);
         } else {
             return Ok(Os::LINUX);
@@ -618,15 +598,14 @@ impl Meta {
 
 pub fn match_fn<'a>(
     rules: &'a Vec<crate::rules::Rule>,
-    features: &std::collections::HashMap<crate::rules::features::Feature, Vec<u64>>,
+    features: &HashMap<crate::rules::features::Feature, Vec<u64>>,
     va: &u64,
     logger: &dyn Fn(&str),
 ) -> Result<(
-    std::collections::HashMap<crate::rules::features::Feature, Vec<u64>>,
-    std::collections::HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<crate::rules::features::Feature, Vec<u64>>,
+    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
 )> {
-    let mut results: std::collections::HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
-        std::collections::HashMap::new();
+    let mut results: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
     let mut features = features.clone();
     for (_index, rule) in rules.iter().enumerate() {
         logger(&format!(
@@ -652,7 +631,7 @@ pub fn match_fn<'a>(
 }
 
 pub fn index_rule_matches(
-    features: &mut std::collections::HashMap<crate::rules::features::Feature, Vec<u64>>,
+    features: &mut HashMap<crate::rules::features::Feature, Vec<u64>>,
     rule: &crate::rules::Rule,
     locations: Vec<u64>,
 ) -> Result<()> {

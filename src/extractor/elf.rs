@@ -1,12 +1,12 @@
 use crate::error::Error;
 use crate::result::Result;
-use crate::{Arch, Endian, Os};
+use crate::{FileArchitecture, Endian, Os};
 use goblin::elf::Elf;
 
-pub fn get_arch(elf: &Elf) -> Result<Arch> {
+pub fn get_arch(elf: &Elf) -> Result<FileArchitecture> {
     match elf.header.e_machine {
-        0x03 => Ok(Arch::I386),
-        0x3e => Ok(Arch::AMD64),
+        0x03 => Ok(FileArchitecture::I386),
+        0x3e => Ok(FileArchitecture::AMD64),
         _ => Err(Error::UnsupportedArchError),
     }
 }

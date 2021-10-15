@@ -76,30 +76,30 @@ static REGS_64BIT: &'static [&str] = &[
 ];
 
 #[derive(Debug, Clone, Copy, Serialize)]
-pub enum Format {
+pub enum FileFormat {
     ELF,
     PE,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
-pub enum Arch {
+pub enum FileArchitecture {
     I386,
     AMD64,
 }
 
-impl std::fmt::Display for Arch {
+impl std::fmt::Display for FileArchitecture {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Arch::I386 => write!(f, "i386"),
-            Arch::AMD64 => write!(f, "amd64"),
+            FileArchitecture::I386 => write!(f, "i386"),
+            FileArchitecture::AMD64 => write!(f, "amd64"),
         }
     }
 }
 
 #[derive(Debug)]
 pub struct BinaryInfo {
-    format: Format,
-    architecture: Arch,
+    file_format: FileFormat,
+    file_architecture: FileArchitecture,
     base_addr: u64,
     binary: Vec<u8>,
     raw_data: Vec<u8>,
@@ -127,8 +127,8 @@ impl BinaryInfo {
 
     pub fn new() -> BinaryInfo {
         BinaryInfo {
-            format: Format::ELF,
-            architecture: Arch::I386,
+            file_format: FileFormat::ELF,
+            file_architecture: FileArchitecture::I386,
             base_addr: 0,
             binary: vec![],
             raw_data: vec![],
@@ -644,7 +644,7 @@ impl Disassembler {
                 //                binary_info.imports = pe.imports.iter().map(|s| (s.dll.to_string(), s.name.to_string())).collect();
             }
             Object::PE(pe) => {
-                binary_info.format = Format::PE;
+                binary_info.file_format = FileFormat::PE;
                 binary_info.base_addr = pe::get_base_address(&file_content)?;
                 binary_info.bitness = pe::get_bitness(&file_content)?;
                 binary_info.code_areas = pe::get_code_areas(&file_content, &pe)?;

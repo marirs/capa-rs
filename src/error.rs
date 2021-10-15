@@ -18,8 +18,8 @@ pub enum Error {
     FromSloceError(#[from] std::array::TryFromSliceError),
     #[error("logic error")]
     LogicError(&'static str, u32),
-    #[error("capstone error")]
-    CapstoneError(capstone::Error),
+    // #[error("capstone error")]
+    // CapstoneError(capstone::Error),
     #[error("regex error")]
     RegexError(#[from] regex::Error),
     #[error("utf convert error")]

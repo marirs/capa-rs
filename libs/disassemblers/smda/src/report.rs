@@ -1,13 +1,13 @@
 use crate::{
-    error::Error, function::Function, statistics::DisassemblyStatistics, Arch, DisassemblyResult,
-    Format, Result,
+    error::Error, function::Function, statistics::DisassemblyStatistics, FileArchitecture, DisassemblyResult,
+    FileFormat, Result,
 };
 use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct DisassemblyReport {
-    pub format: Format,
-    pub architecture: Arch,
+    pub format: FileFormat,
+    pub architecture: FileArchitecture,
     pub base_addr: u64,
     binary_size: u64,
     binweight: u32,
@@ -35,8 +35,8 @@ pub struct DisassemblyReport {
 impl DisassemblyReport {
     pub fn new(disassembly: &mut DisassemblyResult) -> Result<DisassemblyReport> {
         let mut res = DisassemblyReport {
-            format: disassembly.binary_info.format.clone(),
-            architecture: disassembly.binary_info.architecture.clone(),
+            format: disassembly.binary_info.file_format.clone(),
+            architecture: disassembly.binary_info.file_architecture.clone(),
             base_addr: disassembly.binary_info.base_addr,
             binary_size: disassembly.binary_info.binary_size,
             binweight: 0,

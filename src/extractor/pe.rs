@@ -1,12 +1,12 @@
 use crate::error::Error;
 use crate::result::Result;
-use crate::{Arch, Endian, Os};
+use crate::{FileArchitecture, Endian, Os};
 use goblin::pe::PE;
 
-pub fn get_arch(pe: &PE) -> Result<Arch> {
+pub fn get_arch(pe: &PE) -> Result<FileArchitecture> {
     match pe.header.coff_header.machine {
-        goblin::pe::header::COFF_MACHINE_X86 => Ok(Arch::I386),
-        goblin::pe::header::COFF_MACHINE_X86_64 => Ok(Arch::AMD64),
+        goblin::pe::header::COFF_MACHINE_X86 => Ok(FileArchitecture::I386),
+        goblin::pe::header::COFF_MACHINE_X86_64 => Ok(FileArchitecture::AMD64),
         _ => Err(Error::UnsupportedArchError),
     }
 }

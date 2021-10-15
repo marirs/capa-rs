@@ -49,7 +49,7 @@ impl Extractor {
         Err(Error::UnsupportedOsError)
     }
 
-    pub fn extract_arch(&self) -> Result<crate::Arch> {
+    pub fn extract_arch(&self) -> Result<crate::FileArchitecture> {
         Ok(self.report.architecture.clone())
     }
 
@@ -147,7 +147,7 @@ impl Extractor {
         let mut res = vec![];
         res.push((
             crate::rules::features::Feature::Format(crate::rules::features::FormatFeature::new(
-                if let crate::Format::PE = self.report.format {
+                if let crate::FileFormat::PE = self.report.format {
                     "pe"
                 } else {
                     "elf"

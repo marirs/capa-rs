@@ -1,10 +1,10 @@
-use crate::{error::Error, Arch, DisassemblyReport, DisassemblyResult, Result};
+use crate::{error::Error, FileArchitecture, DisassemblyReport, DisassemblyResult, Result};
 use capstone::prelude::*;
 use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct Instruction {
-    arch: Arch,
+    arch: FileArchitecture,
     bitness: u32,
     pub offset: u64,
     bytes: String,
@@ -14,7 +14,7 @@ pub struct Instruction {
 
 impl Instruction {
     pub fn new(
-        arch: Arch,
+        arch: FileArchitecture,
         bitness: &u32,
         ins: &(u64, String, String, Option<String>),
     ) -> Result<Instruction> {
@@ -144,7 +144,7 @@ impl Instruction {
 
 #[derive(Debug)]
 pub struct Function {
-    arch: crate::Arch,
+    arch: crate::FileArchitecture,
     pub bitness: u32,
     pub offset: u64,
     blocks: HashMap<u64, Vec<Instruction>>,
@@ -162,7 +162,7 @@ pub struct Function {
 impl Function {
     pub fn new(disassembly: &DisassemblyResult, function_offset: &u64) -> Result<Function> {
         let f = Function {
-            arch: disassembly.binary_info.architecture.clone(),
+            arch: disassembly.binary_info.file_architecture.clone(),
             bitness: disassembly.binary_info.bitness.clone(),
             offset: function_offset.clone(),
             blocks: Function::parse_blocks(
@@ -212,7 +212,7 @@ impl Function {
             let mut instructions = vec![];
             for ins in block {
                 instructions.push(Instruction::new(
-                    disassembly.binary_info.architecture,
+                    disassembly.binary_info.file_architecture,
                     &disassembly.binary_info.bitness,
                     ins,
                 )?);
