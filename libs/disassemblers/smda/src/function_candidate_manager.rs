@@ -653,10 +653,7 @@ impl FunctionCandidateManager {
         Ok(())
     }
 
-    pub fn update_candidates(
-        &mut self,
-        state: &FunctionAnalysisState,
-    ) -> Result<()> {
+    pub fn update_candidates(&mut self, state: &FunctionAnalysisState) -> Result<()> {
         // if let Ok(_s) = std::env::var("HIGH_ACCURACY") {
         if let Ok(conflicts) = state.identify_call_conflicts(&self.all_call_refs) {
             for (candidate_addr, conflict) in conflicts {

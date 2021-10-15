@@ -1,4 +1,4 @@
-use crate::{error::Error, FileArchitecture, DisassemblyReport, DisassemblyResult, Result};
+use crate::{error::Error, DisassemblyReport, DisassemblyResult, FileArchitecture, Result};
 use capstone::prelude::*;
 use std::collections::HashMap;
 

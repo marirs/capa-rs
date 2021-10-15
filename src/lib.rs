@@ -5,8 +5,8 @@ use result::Result;
 mod extractor;
 pub mod rules;
 use goblin::Object;
-use std::collections::HashMap;
 use smda::{function::Function, FileArchitecture, FileFormat};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub enum Os {
@@ -419,11 +419,7 @@ pub struct Meta {
 }
 
 impl Meta {
-    pub fn new(
-        rules_path: &str,
-        extractor: &extractor::Extractor,
-    ) -> Result<Meta> {
-
+    pub fn new(rules_path: &str, extractor: &extractor::Extractor) -> Result<Meta> {
         return Ok(Meta {
             basic_properties: BasicProperties {
                 format: Meta::get_format(extractor)?,

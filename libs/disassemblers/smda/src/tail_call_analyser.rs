@@ -61,7 +61,11 @@ impl TailCallAnalyser {
             {
                 Ok(f) => {
                     if disassembler.tailcall_analyzer.functions[&f].is_tailcall_function {
-                        disassembler.analyse_function(tailcall.destination_function, false, high_accuracy)?;
+                        disassembler.analyse_function(
+                            tailcall.destination_function,
+                            false,
+                            high_accuracy,
+                        )?;
                         continue;
                     }
                     disassembler
@@ -72,7 +76,11 @@ impl TailCallAnalyser {
                     state.revert_analysis()?;
                 }
                 _ => {
-                    disassembler.analyse_function(tailcall.destination_function, false, high_accuracy)?;
+                    disassembler.analyse_function(
+                        tailcall.destination_function,
+                        false,
+                        high_accuracy,
+                    )?;
                     continue;
                 }
             }
@@ -88,7 +96,11 @@ impl TailCallAnalyser {
                     .contains(&tailcall.destination_function)
                 {
                     //# analyze the (previously) broken function a second time
-                    disassembler.analyse_function(tailcall.destination_function, false, high_accuracy)?;
+                    disassembler.analyse_function(
+                        tailcall.destination_function,
+                        false,
+                        high_accuracy,
+                    )?;
                     let addr_function = disassembler
                         .tailcall_analyzer
                         .get_function_by_start_addr(tailcall.destination_function)?;

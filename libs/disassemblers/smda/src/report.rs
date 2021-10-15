@@ -1,6 +1,6 @@
 use crate::{
-    error::Error, function::Function, statistics::DisassemblyStatistics, FileArchitecture, DisassemblyResult,
-    FileFormat, Result,
+    error::Error, function::Function, statistics::DisassemblyStatistics, DisassemblyResult,
+    FileArchitecture, FileFormat, Result,
 };
 use std::collections::HashMap;
 

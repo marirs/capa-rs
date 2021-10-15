@@ -692,7 +692,11 @@ impl Disassembler {
         Ok(symbol_offsets.iter().map(|a| *a).collect())
     }
 
-    pub fn analyse_buffer(&mut self, bin: BinaryInfo, high_accuracy: bool) -> Result<&DisassemblyResult> {
+    pub fn analyse_buffer(
+        &mut self,
+        bin: BinaryInfo,
+        high_accuracy: bool,
+    ) -> Result<&DisassemblyResult> {
         //LOGGER.debug("Analyzing buffer with %d bytes @0x%08x",
         // binary_info.binary_size, binary_info.base_addr)
         self.update_label_providers(&bin)?;
@@ -1029,7 +1033,12 @@ impl Disassembler {
         Ok(())
     }
 
-    fn analyse_function(&mut self, start_addr: u64, as_gap: bool, high_accuracy: bool) -> Result<FunctionAnalysisState> {
+    fn analyse_function(
+        &mut self,
+        start_addr: u64,
+        as_gap: bool,
+        high_accuracy: bool,
+    ) -> Result<FunctionAnalysisState> {
         self.tailcall_analyzer.init()?;
         let mut _i = 0;
         let mut state = FunctionAnalysisState::new(start_addr)?;

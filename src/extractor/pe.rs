@@ -1,6 +1,6 @@
 use crate::error::Error;
 use crate::result::Result;
-use crate::{FileArchitecture, Endian, Os};
+use crate::{Endian, FileArchitecture, Os};
 use goblin::pe::PE;
 
 pub fn get_arch(pe: &PE) -> Result<FileArchitecture> {
