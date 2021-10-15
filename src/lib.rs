@@ -3,34 +3,13 @@ mod helpers;
 use error::Error;
 mod result;
 use result::Result;
-mod disassembler;
 mod extractor;
 pub mod rules;
 use goblin::Object;
 use md5::Digest;
-#[macro_use]
-extern crate maplit;
 
-#[derive(Debug, Clone, serde::Serialize)]
-pub enum Format {
-    ELF,
-    PE,
-}
+use smda::{function::Function, Arch, Format};
 
-#[derive(Debug, Clone, serde::Serialize)]
-pub enum Arch {
-    I386,
-    AMD64,
-}
-
-impl std::fmt::Display for Arch {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Arch::I386 => write!(f, "i386"),
-            Arch::AMD64 => write!(f, "amd64"),
-        }
-    }
-}
 #[derive(Debug, Clone, serde::Serialize)]
 pub enum Os {
     WINDOWS,
@@ -126,8 +105,9 @@ pub fn proceed_file(
     file_name: &str,
     rule_path: &str,
     logger: &dyn Fn(&str),
+    high_accuracy: bool,
 ) -> result::Result<String> {
-    let extractor = extractor::Extractor::new(file_name)?;
+    let extractor = extractor::Extractor::new(file_name, high_accuracy)?;
     logger(&format!("loading rules..."));
     let rules = rules::RuleSet::new(rule_path)?;
     logger(&format!("loaded {} rules", rules.rules.len()));
@@ -141,7 +121,7 @@ pub fn proceed_file(
 pub fn find_function_capabilities<'a>(
     ruleset: &'a crate::rules::RuleSet,
     extractor: &crate::extractor::Extractor,
-    f: &crate::disassembler::function::Function,
+    f: &Function,
     logger: &dyn Fn(&str),
 ) -> Result<(
     std::collections::HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
@@ -375,7 +355,7 @@ pub fn find_file_capabilities<'a>(
             }
         }
     }
-    println!("{:?}", file_features);
+    // println!("{:?}", file_features);
     //logger.debug("analyzed file and extracted %d features",
     // len(file_features))
     for (f1, f2) in function_features {

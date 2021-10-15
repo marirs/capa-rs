@@ -1,22 +1,28 @@
 use crate::error::Error;
 use crate::result::Result;
-use std::convert::TryInto;
+use std::{collections::HashMap, convert::TryInto};
 
 pub mod elf;
 pub mod pe;
 
+use smda::{
+    function::{Function, Instruction},
+    report::DisassemblyReport,
+    Disassembler,
+};
+
 #[derive(Debug)]
 pub struct Extractor {
-    pub report: crate::disassembler::report::DisassemblyReport,
+    pub report: DisassemblyReport,
     buf: Vec<u8>,
     path: String,
 }
 
 impl Extractor {
-    pub fn new(path: &str) -> Result<Extractor> {
+    pub fn new(path: &str, high_accuracy: bool) -> Result<Extractor> {
         Ok(Extractor {
-            report: crate::disassembler::Disassembler::disassemble_file(path)?,
-            buf: crate::disassembler::Disassembler::load_file(path)?,
+            report: Disassembler::disassemble_file(path, high_accuracy)?,
+            buf: Disassembler::load_file(path)?,
             path: path.to_string(),
         })
     }
@@ -29,9 +35,7 @@ impl Extractor {
         Ok(self.report.base_addr)
     }
 
-    pub fn get_functions(
-        &self,
-    ) -> Result<&std::collections::HashMap<u64, crate::disassembler::function::Function>> {
+    pub fn get_functions(&self) -> smda::Result<&HashMap<u64, Function>> {
         self.report.get_functions()
     }
 
@@ -70,7 +74,7 @@ impl Extractor {
 
     pub fn extract_function_features(
         &self,
-        f: &crate::disassembler::function::Function,
+        f: &Function,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         //extract function calls to
@@ -215,8 +219,8 @@ impl Extractor {
     }
     pub fn extract_basic_block_features(
         &self,
-        f: &crate::disassembler::function::Function,
-        bb: &(&u64, &Vec<crate::disassembler::function::Instruction>),
+        f: &Function,
+        bb: &(&u64, &Vec<Instruction>),
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         res.push((
@@ -253,9 +257,9 @@ impl Extractor {
 
     pub fn extract_insn_features(
         &self,
-        f: &crate::disassembler::function::Function,
-        bb: &(&u64, &Vec<crate::disassembler::function::Instruction>),
-        insn: &crate::disassembler::function::Instruction,
+        f: &Function,
+        bb: &(&u64, &Vec<Instruction>),
+        insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         res.extend(self.extract_insn_api_features(f, bb, insn)?);
@@ -275,9 +279,9 @@ impl Extractor {
 
     pub fn extract_function_indirect_call_characteristic_features(
         &self,
-        _f: &crate::disassembler::function::Function,
-        _bb: &(&u64, &Vec<crate::disassembler::function::Instruction>),
-        insn: &crate::disassembler::function::Instruction,
+        _f: &Function,
+        _bb: &(&u64, &Vec<Instruction>),
+        insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         if insn.mnemonic != "call" {
@@ -308,9 +312,9 @@ impl Extractor {
 
     pub fn extract_function_calls_from(
         &self,
-        f: &crate::disassembler::function::Function,
-        _bb: &(&u64, &Vec<crate::disassembler::function::Instruction>),
-        insn: &crate::disassembler::function::Instruction,
+        f: &Function,
+        _bb: &(&u64, &Vec<Instruction>),
+        insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         if insn.mnemonic != "call" {
@@ -352,9 +356,9 @@ impl Extractor {
     }
     pub fn extract_insn_segment_access_features(
         &self,
-        _f: &crate::disassembler::function::Function,
-        _bb: &(&u64, &Vec<crate::disassembler::function::Instruction>),
-        insn: &crate::disassembler::function::Instruction,
+        _f: &Function,
+        _bb: &(&u64, &Vec<Instruction>),
+        insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         if let Some(o) = &insn.operands {
@@ -383,9 +387,9 @@ impl Extractor {
 
     pub fn extract_insn_cross_section_cflow(
         &self,
-        f: &crate::disassembler::function::Function,
-        _bb: &(&u64, &Vec<crate::disassembler::function::Instruction>),
-        insn: &crate::disassembler::function::Instruction,
+        f: &Function,
+        _bb: &(&u64, &Vec<Instruction>),
+        insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         if ["call", "jmp"].contains(&&insn.mnemonic[..]) {
@@ -429,9 +433,9 @@ impl Extractor {
 
     pub fn extract_insn_peb_access_characteristic_features(
         &self,
-        _f: &crate::disassembler::function::Function,
-        _bb: &(&u64, &Vec<crate::disassembler::function::Instruction>),
-        insn: &crate::disassembler::function::Instruction,
+        _f: &Function,
+        _bb: &(&u64, &Vec<Instruction>),
+        insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         if !["push", "mov"].contains(&&insn.mnemonic[..]) {
@@ -462,9 +466,9 @@ impl Extractor {
 
     pub fn extract_insn_mnemonic_features(
         &self,
-        _f: &crate::disassembler::function::Function,
-        _bb: &(&u64, &Vec<crate::disassembler::function::Instruction>),
-        insn: &crate::disassembler::function::Instruction,
+        _f: &Function,
+        _bb: &(&u64, &Vec<Instruction>),
+        insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         res.push((
@@ -478,9 +482,9 @@ impl Extractor {
 
     pub fn extract_insn_nzxor_characteristic_features(
         &self,
-        f: &crate::disassembler::function::Function,
-        bb: &(&u64, &Vec<crate::disassembler::function::Instruction>),
-        insn: &crate::disassembler::function::Instruction,
+        f: &Function,
+        bb: &(&u64, &Vec<Instruction>),
+        insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         if !["xor", "xorpd", "xorps", "pxor"].contains(&&insn.mnemonic[..]) {
@@ -507,9 +511,9 @@ impl Extractor {
 
     pub fn extract_insn_offset_features(
         &self,
-        f: &crate::disassembler::function::Function,
-        _bb: &(&u64, &Vec<crate::disassembler::function::Instruction>),
-        insn: &crate::disassembler::function::Instruction,
+        f: &Function,
+        _bb: &(&u64, &Vec<Instruction>),
+        insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         //# examples:
@@ -558,9 +562,9 @@ impl Extractor {
 
     pub fn extract_insn_string_features(
         &self,
-        _f: &crate::disassembler::function::Function,
-        _bb: &(&u64, &Vec<crate::disassembler::function::Instruction>),
-        insn: &crate::disassembler::function::Instruction,
+        _f: &Function,
+        _bb: &(&u64, &Vec<Instruction>),
+        insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         //# example:
@@ -585,9 +589,9 @@ impl Extractor {
 
     pub fn extract_insn_bytes_features(
         &self,
-        _f: &crate::disassembler::function::Function,
-        _bb: &(&u64, &Vec<crate::disassembler::function::Instruction>),
-        insn: &crate::disassembler::function::Instruction,
+        _f: &Function,
+        _bb: &(&u64, &Vec<Instruction>),
+        insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         for data_ref in insn.get_data_refs(&self.report)? {
@@ -609,9 +613,9 @@ impl Extractor {
 
     pub fn extract_insn_number_features(
         &self,
-        f: &crate::disassembler::function::Function,
-        _bb: &(&u64, &Vec<crate::disassembler::function::Instruction>),
-        insn: &crate::disassembler::function::Instruction,
+        f: &Function,
+        _bb: &(&u64, &Vec<Instruction>),
+        insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         //# example:
@@ -664,9 +668,9 @@ impl Extractor {
 
     pub fn extract_insn_api_features(
         &self,
-        f: &crate::disassembler::function::Function,
-        _bb: &(&u64, &Vec<crate::disassembler::function::Instruction>),
-        insn: &crate::disassembler::function::Instruction,
+        f: &Function,
+        _bb: &(&u64, &Vec<Instruction>),
+        insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         if f.apirefs.contains_key(&insn.offset) {
@@ -745,7 +749,7 @@ impl Extractor {
         }
         let mut res = vec![];
         while todo.len() > 0 {
-            println!("{}", todo.len());
+            // println!("{}", todo.len());
             let (off, mzx, pex, key) = todo.pop().unwrap();
             //The MZ header has one field we will check
             //e_lfanew is at 0x3c
@@ -777,22 +781,21 @@ impl Extractor {
 
     pub fn get_basic_blocks<'a>(
         &self,
-        f: &'a crate::disassembler::function::Function,
-    ) -> Result<&'a std::collections::HashMap<u64, Vec<crate::disassembler::function::Instruction>>>
-    {
+        f: &'a Function,
+    ) -> smda::Result<&'a std::collections::HashMap<u64, Vec<Instruction>>> {
         f.get_blocks()
     }
 
     pub fn get_instructions<'a>(
         &self,
-        _f: &'a crate::disassembler::function::Function,
-        bb: &'a (&u64, &Vec<crate::disassembler::function::Instruction>),
-    ) -> Result<&'a Vec<crate::disassembler::function::Instruction>> {
+        _f: &'a Function,
+        bb: &'a (&u64, &Vec<Instruction>),
+    ) -> Result<&'a Vec<Instruction>> {
         Ok(bb.1)
     }
 }
 
-pub fn is_mov_imm_to_stack(ins: &crate::disassembler::function::Instruction) -> Result<bool> {
+pub fn is_mov_imm_to_stack(ins: &Instruction) -> Result<bool> {
     if !ins.mnemonic.starts_with("mov") {
         return Ok(false);
     }
@@ -810,7 +813,7 @@ pub fn is_mov_imm_to_stack(ins: &crate::disassembler::function::Instruction) -> 
     Ok(false)
 }
 
-pub fn get_operands(ins: &crate::disassembler::function::Instruction) -> Result<(String, String)> {
+pub fn get_operands(ins: &Instruction) -> Result<(String, String)> {
     if let Some(s) = &ins.operands {
         let parts: Vec<&str> = s.split(",").collect();
         if parts.len() > 1 {
@@ -853,10 +856,7 @@ pub fn generate_symbols(dll: &Option<String>, symbol: &Option<String>) -> Result
     Ok(res)
 }
 
-pub fn derefs(
-    report: &crate::disassembler::report::DisassemblyReport,
-    p: &u64,
-) -> Result<Vec<u64>> {
+pub fn derefs(report: &DisassemblyReport, p: &u64) -> Result<Vec<u64>> {
     let mut res = vec![];
     let mut depth = 0;
     let mut pp = *p;
@@ -883,7 +883,7 @@ pub fn derefs(
 }
 
 pub fn read_bytes<'a>(
-    report: &'a crate::disassembler::report::DisassemblyReport,
+    report: &'a DisassemblyReport,
     va: &u64,
     num_bytes: usize,
 ) -> Result<&'a [u8]> {
@@ -896,10 +896,7 @@ pub fn read_bytes<'a>(
     }
 }
 
-pub fn read_string(
-    report: &crate::disassembler::report::DisassemblyReport,
-    offset: &u64,
-) -> Result<String> {
+pub fn read_string(report: &DisassemblyReport, offset: &u64) -> Result<String> {
     let alen = detect_ascii_len(report, offset)?;
     if alen > 1 {
         return Ok(std::str::from_utf8(read_bytes(report, offset, alen)?)?.to_string());
@@ -912,10 +909,7 @@ pub fn read_string(
     Ok("".to_string())
 }
 
-pub fn detect_ascii_len(
-    report: &crate::disassembler::report::DisassemblyReport,
-    offset: &u64,
-) -> Result<usize> {
+pub fn detect_ascii_len(report: &DisassemblyReport, offset: &u64) -> Result<usize> {
     let mut ascii_len = 0;
     let mut rva = offset - report.base_addr;
     let mut ch = report.buffer[rva as usize];
@@ -930,10 +924,7 @@ pub fn detect_ascii_len(
     Ok(0)
 }
 
-pub fn detect_unicode_len(
-    report: &crate::disassembler::report::DisassemblyReport,
-    offset: &u64,
-) -> Result<usize> {
+pub fn detect_unicode_len(report: &DisassemblyReport, offset: &u64) -> Result<usize> {
     let mut unicode_len = 0;
     let mut rva = offset - report.base_addr;
     let mut ch = report.buffer[rva as usize];
@@ -959,9 +950,9 @@ pub fn all_zeros(bytez: &[u8]) -> Result<bool> {
 }
 
 pub fn is_security_cookie(
-    f: &crate::disassembler::function::Function,
-    _bb: &(&u64, &Vec<crate::disassembler::function::Instruction>),
-    insn: &crate::disassembler::function::Instruction,
+    f: &Function,
+    _bb: &(&u64, &Vec<Instruction>),
+    insn: &Instruction,
 ) -> Result<bool> {
     //# security cookie check should use SP or BP
     if let Some(o) = &insn.operands {

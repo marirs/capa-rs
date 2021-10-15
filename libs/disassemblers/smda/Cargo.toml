@@ -1,0 +1,23 @@
+[package]
+name = "smda"
+version = "0.1.5"
+authors = ["Marirs <marirs@gmail.com>"]
+include = ["assets", "src"]
+edition = "2018"
+
+[dependencies]
+capstone = "0.10.0"
+data-encoding = "2.3.2"
+goblin = "0.4.3"
+hex = "0.4.3"
+itertools = "0.10.1"
+maplit = "1.0.2"
+regex = "1.5.4"
+ring = "0.17.0-alpha.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.68"
+thiserror = "1.0.30"
+
+[lib]
+name = "smda"
+path = "src/lib.rs"

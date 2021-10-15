@@ -649,8 +649,8 @@ impl Rule {
         match self.statement.evaluate(features) {
             Ok(s) => Ok(s),
             Err(e) => {
-                println!("rule {:?}", self);
-                println!("rule error {:?}", e);
+                // println!("rule {:?}", self);
+                // println!("rule error {:?}", e);
                 Err(e)
             }
         }

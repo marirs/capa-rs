@@ -13,7 +13,6 @@ data-encoding = "*"
 goblin = "0.4.3"
 hex = "0.4.3"
 itertools = "0.10.1"
-maplit = "1.0.2"
 md-5 = "0.9.1"
 pdb = "0.7.0"
 petgraph = "0.6.0"
@@ -23,8 +22,28 @@ serde_json = "1.0.68"
 serde = { version = "1.0", features = ["derive"] }
 sha-1 = "0.9.8"
 sha2 = "0.9.8"
+smda = { path = "libs/disassemblers/smda" }
 thiserror = "1.0.30"
 yaml-rust = "0.4.5"
 
+[lib]
+name = "capa"
+path = "src/lib.rs"
+
+[workspace]
+members = [
+    "libs/disassemblers/smda"
+]
+
 [features]
 verbose = []
+
+[profile.dev]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+debug-assertions = false
+debug = false
+opt-level = 3
+lto = true
