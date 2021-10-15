@@ -18,6 +18,8 @@ fn main() {
                         Err(e) => println!("serde_json_error: {}", e),
                         Ok(data) => {
                             let data = data.as_object().unwrap();
+                            let features = data.get("features");
+
                             // print the file basic properties
                             if let Some(meta) = data.get("meta") {
                                 let meta = meta.as_object().unwrap();
@@ -32,6 +34,13 @@ fn main() {
                                         Cell::new(k)
                                             .with_style(Attr::ForegroundColor(color::BRIGHT_BLUE)),
                                         Cell::new(v.as_str().unwrap()),
+                                    ]));
+                                }
+                                if let Some(f) = features {
+                                    tbl.add_row(Row::new(vec![
+                                        Cell::new("features")
+                                            .with_style(Attr::ForegroundColor(color::BRIGHT_BLUE)),
+                                        Cell::new(&f.as_u64().unwrap().to_string()),
                                     ]));
                                 }
                                 tbl.printstd();
@@ -126,6 +135,48 @@ fn main() {
                                                 Attr::ForegroundColor(color::BRIGHT_CYAN),
                                             ),
                                             Cell::new(&ns),
+                                        ]));
+                                    }
+                                    tbl.printstd();
+                                }
+                            }
+                            println!();
+
+                            // print the Function/feature/capabilities
+                            if let Some(extra) = data.get("functions_capabilities") {
+                                let extra = extra.as_object().unwrap();
+                                if !extra.is_empty() {
+                                    let mut tbl = Table::new();
+                                    tbl.set_titles(Row::new(vec![
+                                        Cell::new_align("Function", Alignment::LEFT),
+                                        Cell::new_align("Address", Alignment::LEFT),
+                                        Cell::new_align("Features", Alignment::LEFT),
+                                        Cell::new_align("Capabilities", Alignment::LEFT),
+                                    ]));
+                                    for (function, v) in &*extra {
+                                        let caps = v.as_object().unwrap();
+                                        let address =
+                                            caps.get("address").unwrap().as_str().unwrap();
+                                        let features = caps
+                                            .get("features")
+                                            .unwrap()
+                                            .as_u64()
+                                            .unwrap()
+                                            .to_string();
+                                        let capabilities =
+                                            caps.get("capabilities").unwrap().as_array().unwrap();
+                                        let capabilities = capabilities
+                                            .iter()
+                                            .map(|x| x.as_str().unwrap().to_string())
+                                            .collect::<Vec<_>>();
+
+                                        tbl.add_row(Row::new(vec![
+                                            Cell::new(&("@".to_string() + function)).with_style(
+                                                Attr::ForegroundColor(color::BRIGHT_CYAN),
+                                            ),
+                                            Cell::new(address),
+                                            Cell::new(&features),
+                                            Cell::new(&capabilities.join("\n")),
                                         ]));
                                     }
                                     tbl.printstd();
