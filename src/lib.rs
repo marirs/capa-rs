@@ -110,28 +110,28 @@ pub fn from_file(
     logger(&format!("loading rules..."));
     let rules = rules::RuleSet::new(rule_path)?;
     logger(&format!("loaded {} rules", rules.rules.len()));
-    let mut meta;
+    let mut file_capabilities;
     #[cfg(not(feature = "meta"))]
     {
-        meta = FileCapabilities::new()?;
+        file_capabilities = FileCapabilities::new()?;
     }
     #[cfg(feature = "meta")]
     {
-        meta = FileCapabilities::new(&extractor)?;
+        file_capabilities = FileCapabilities::new(&extractor)?;
     }
 
     #[cfg(not(feature = "verbose"))]
     {
         let (capabilities, _counts) = find_capabilities(&rules, &extractor, logger)?;
-        meta.update_capabilities(&capabilities)?;
+        file_capabilities.update_capabilities(&capabilities)?;
     }
     #[cfg(feature = "verbose")]
     {
         let (capabilities, counts) = find_capabilities(&rules, &extractor, logger)?;
-        meta.update_capabilities(&capabilities, &counts)?;
+        file_capabilities.update_capabilities(&capabilities, &counts)?;
     }
 
-    Ok(meta)
+    Ok(file_capabilities)
 }
 
 pub fn find_function_capabilities<'a>(
