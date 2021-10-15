@@ -7,8 +7,6 @@ pub enum Error {
     #[error("{0}")]
     RegexError(#[from] regex::Error),
     #[error("{0}")]
-    JsonParseError(#[from] serde_json::Error),
-    #[error("{0}")]
     FromHexError(#[from] hex::FromHexError),
     #[error("{0}")]
     YamlError(#[from] yaml_rust::ScanError),

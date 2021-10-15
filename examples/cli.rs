@@ -1,3 +1,5 @@
+use serde_json::to_string_pretty;
+
 fn main() {
     for (i, arg) in std::env::args().enumerate() {
         if i == 1 {
@@ -10,7 +12,12 @@ fn main() {
                 true,
             ) {
                 Err(e) => println!("{:?}", e),
-                Ok(s) => println!("{}", s),
+                Ok(s) => {
+                    match to_string_pretty(&s) {
+                        Ok(data) => println!("{}", data),
+                        Err(e) => println!("serde_json_error: {}", e),
+                    }
+                },
             }
         }
     }

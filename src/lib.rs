@@ -64,8 +64,8 @@ pub enum Endian {
     Little,
 }
 
-#[derive(Debug)]
-pub struct CapabilityExtractorSettings {}
+// #[derive(Debug)]
+// pub struct CapabilityExtractorSettings {}
 
 #[derive(Debug)]
 pub struct CapabilityExtractor {
@@ -78,7 +78,7 @@ pub struct CapabilityExtractor {
 impl CapabilityExtractor {
     pub fn new(
         file_name: &str,
-        _settings: Option<CapabilityExtractorSettings>,
+        // _settings: Option<CapabilityExtractorSettings>,
     ) -> result::Result<CapabilityExtractor> {
         let path = std::path::Path::new(file_name);
         let buffer = std::fs::read(path)?;
@@ -105,7 +105,7 @@ pub fn proceed_file(
     rule_path: &str,
     logger: &dyn Fn(&str),
     high_accuracy: bool,
-) -> result::Result<String> {
+) -> result::Result<FileCapabilities> {
     let extractor = extractor::Extractor::new(file_name, high_accuracy)?;
     logger(&format!("loading rules..."));
     let rules = rules::RuleSet::new(rule_path)?;
@@ -131,7 +131,7 @@ pub fn proceed_file(
         meta.update_capabilities(&capabilities, &counts)?;
     }
 
-    Ok(serde_json::to_string_pretty(&meta)?)
+    Ok(meta)
 }
 
 pub fn find_function_capabilities<'a>(
@@ -386,20 +386,20 @@ pub struct Meta {
     base_address: usize,
 }
 
-#[derive(Debug, Serialize)]
-pub struct Section {
-    name: String,
-    address: u64,
-    size: usize,
-}
-
-#[derive(Debug, Serialize)]
-pub struct Import {
-    lib: String,
-    symbol: String,
-    #[serde(serialize_with = "to_hex")]
-    offset: usize,
-}
+// #[derive(Debug, Serialize)]
+// pub struct Section {
+//     name: String,
+//     address: u64,
+//     size: usize,
+// }
+//
+// #[derive(Debug, Serialize)]
+// pub struct Import {
+//     lib: String,
+//     symbol: String,
+//     #[serde(serialize_with = "to_hex")]
+//     offset: usize,
+// }
 
 fn to_hex<S>(x: &usize, s: S) -> std::result::Result<S::Ok, S::Error>
 where
