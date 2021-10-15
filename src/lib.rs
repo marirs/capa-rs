@@ -5,10 +5,11 @@ use result::Result;
 mod extractor;
 pub mod rules;
 use goblin::Object;
+use serde::Serialize;
 use smda::{function::Function, FileArchitecture, FileFormat};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub enum Os {
     WINDOWS,
     HPUX,
@@ -109,10 +110,27 @@ pub fn proceed_file(
     logger(&format!("loading rules..."));
     let rules = rules::RuleSet::new(rule_path)?;
     logger(&format!("loaded {} rules", rules.rules.len()));
-    let mut meta = Meta::new(rule_path, &extractor)?;
-    let (capabilities, counts) = find_capabilities(&rules, &extractor, logger)?;
+    let mut meta;
+    #[cfg(not(feature = "meta"))]
+    {
+        meta = FileCapabilities::new()?;
+    }
+    #[cfg(feature = "meta")]
+    {
+        meta = FileCapabilities::new(&extractor)?;
+    }
 
-    meta.update_capabilities(&capabilities, &counts)?;
+    #[cfg(not(feature = "verbose"))]
+    {
+        let (capabilities, _counts) = find_capabilities(&rules, &extractor, logger)?;
+        meta.update_capabilities(&capabilities)?;
+    }
+    #[cfg(feature = "verbose")]
+    {
+        let (capabilities, counts) = find_capabilities(&rules, &extractor, logger)?;
+        meta.update_capabilities(&capabilities, &counts)?;
+    }
+
     Ok(serde_json::to_string_pretty(&meta)?)
 }
 
@@ -122,18 +140,12 @@ pub fn find_function_capabilities<'a>(
     f: &Function,
     logger: &dyn Fn(&str),
 ) -> Result<(
-    std::collections::HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
-    std::collections::HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     usize,
 )> {
-    let mut function_features: std::collections::HashMap<
-        crate::rules::features::Feature,
-        Vec<u64>,
-    > = std::collections::HashMap::new();
-    let mut bb_matches: std::collections::HashMap<
-        &crate::rules::Rule,
-        Vec<(u64, (bool, Vec<u64>))>,
-    > = std::collections::HashMap::new();
+    let mut function_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
+    let mut bb_matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
 
     for (feature, va) in itertools::chain!(
         extractor.extract_function_features(f)?,
@@ -150,8 +162,7 @@ pub fn find_function_capabilities<'a>(
     let _n_blocks = blocks.len();
     for (index, bb) in blocks.iter().enumerate() {
         logger(&format!("\tblock {} from {}", index, _n_blocks));
-        let mut bb_features: std::collections::HashMap<crate::rules::features::Feature, Vec<u64>> =
-            std::collections::HashMap::new();
+        let mut bb_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
         for (feature, va) in extractor.extract_basic_block_features(f, &bb)? {
             match bb_features.get_mut(&feature) {
                 Some(s) => s.push(va),
@@ -245,19 +256,15 @@ pub fn find_capabilities(
     extractor: &crate::extractor::Extractor,
     logger: &dyn Fn(&str),
 ) -> Result<(
-    std::collections::HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
-    std::collections::HashMap<u64, usize>,
+    HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<u64, usize>,
 )> {
-    let mut all_function_matches: std::collections::HashMap<
-        &crate::rules::Rule,
-        Vec<(u64, (bool, Vec<u64>))>,
-    > = std::collections::HashMap::new();
-    let mut all_bb_matches: std::collections::HashMap<
-        &crate::rules::Rule,
-        Vec<(u64, (bool, Vec<u64>))>,
-    > = std::collections::HashMap::new();
+    let mut all_function_matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
+        HashMap::new();
+    let mut all_bb_matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
+        HashMap::new();
 
-    let mut meta = std::collections::HashMap::new();
+    let mut meta = HashMap::new();
     let functions = extractor.get_functions()?;
     let _n_funcs = functions.len();
     logger(&format!("functions capabilities started"));
@@ -301,7 +308,7 @@ pub fn find_capabilities(
     logger(&format!("functions capabilities finish"));
     //# collection of features that captures the rule matches within function and BB scopes.
     //# mapping from feature (matched rule) to set of addresses at which it matched.
-    let mut function_and_lower_features = std::collections::HashMap::new();
+    let mut function_and_lower_features = HashMap::new();
     for (rule, results) in itertools::chain!(&all_function_matches, &all_bb_matches) {
         let locations: Vec<u64> = results.iter().map(|a| a.0).collect();
         index_rule_matches(&mut function_and_lower_features, rule, locations)?;
@@ -310,7 +317,7 @@ pub fn find_capabilities(
     let (all_file_matches, feature_count) =
         find_file_capabilities(ruleset, extractor, &function_and_lower_features, logger)?;
 
-    let mut matches = std::collections::HashMap::new();
+    let mut matches = HashMap::new();
     for (rule, res) in itertools::chain!(&all_bb_matches, &all_function_matches, &all_file_matches)
     {
         matches.insert((*rule).clone(), res.clone());
@@ -323,14 +330,13 @@ pub fn find_capabilities(
 pub fn find_file_capabilities<'a>(
     ruleset: &'a crate::rules::RuleSet,
     extractor: &crate::extractor::Extractor,
-    function_features: &std::collections::HashMap<crate::rules::features::Feature, Vec<u64>>,
+    function_features: &HashMap<crate::rules::features::Feature, Vec<u64>>,
     logger: &dyn Fn(&str),
 ) -> Result<(
-    std::collections::HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     usize,
 )> {
-    let mut file_features: std::collections::HashMap<crate::rules::features::Feature, Vec<u64>> =
-        std::collections::HashMap::new();
+    let mut file_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
     for (feature, va) in itertools::chain!(
         extractor.extract_file_features()?,
         extractor.extract_global_features()?
@@ -362,30 +368,32 @@ pub fn find_file_capabilities<'a>(
     Ok((matches, file_features.len()))
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Serialize)]
 pub struct FunctionCapabilities {
-    address: u64,
+    #[serde(serialize_with = "to_hex")]
+    address: usize,
     features: usize,
     capabilities: Vec<String>,
 }
 
-#[derive(Debug, serde::Serialize)]
-pub struct BasicProperties {
+#[cfg(feature = "meta")]
+#[derive(Debug, Serialize)]
+pub struct Meta {
     format: FileFormat,
     arch: FileArchitecture,
     os: Os,
-    base_address: u64,
-    compilation_time: u64,
+    #[serde(serialize_with = "to_hex")]
+    base_address: usize,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Serialize)]
 pub struct Section {
     name: String,
     address: u64,
     size: usize,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Serialize)]
 pub struct Import {
     lib: String,
     symbol: String,
@@ -400,59 +408,34 @@ where
     s.serialize_str(&format!("0x{:08x}", x))
 }
 
-#[derive(Debug, serde::Serialize)]
-pub struct Meta {
-    basic_properties: BasicProperties,
-    #[serde(skip_serializing)]
-    sections: Vec<Section>,
-    #[serde(skip_serializing)]
-    imports: Vec<Import>,
-    attacks: std::collections::HashMap<String, std::collections::HashSet<String>>,
-    mbc: std::collections::HashMap<String, std::collections::HashSet<String>>,
-    capability_namespaces: std::collections::HashMap<String, String>,
-    #[cfg(feature = "verbose")]
-    rules_path: String,
+#[derive(Debug, Serialize)]
+pub struct FileCapabilities {
+    #[cfg(feature = "meta")]
+    meta: Meta,
+    attacks: HashMap<String, HashSet<String>>,
+    mbc: HashMap<String, HashSet<String>>,
+    capability_namespaces: HashMap<String, String>,
     #[cfg(feature = "verbose")]
     features: usize,
     #[cfg(feature = "verbose")]
-    functions_capabilities: std::collections::HashMap<u64, FunctionCapabilities>,
+    functions_capabilities: HashMap<u64, FunctionCapabilities>,
 }
 
-impl Meta {
-    pub fn new(rules_path: &str, extractor: &extractor::Extractor) -> Result<Meta> {
-        return Ok(Meta {
-            basic_properties: BasicProperties {
-                format: Meta::get_format(extractor)?,
-                arch: Meta::get_arch(extractor)?,
-                os: Meta::get_os(extractor)?,
-                base_address: extractor.get_base_address()?,
-                compilation_time: 0,
+impl FileCapabilities {
+    pub fn new(
+        #[cfg(feature = "meta")] extractor: &extractor::Extractor,
+    ) -> Result<FileCapabilities> {
+        return Ok(FileCapabilities {
+            #[cfg(feature = "meta")]
+            meta: Meta {
+                format: FileCapabilities::get_format(extractor)?,
+                arch: FileCapabilities::get_arch(extractor)?,
+                os: FileCapabilities::get_os(extractor)?,
+                base_address: extractor.get_base_address()? as usize,
             },
-            sections: extractor
-                .report
-                .sections
-                .iter()
-                .map(|s| Section {
-                    name: s.0.trim_matches(char::from(0)).to_string(),
-                    address: s.1,
-                    size: s.2,
-                })
-                .collect(),
-            imports: extractor
-                .report
-                .imports
-                .iter()
-                .map(|s| Import {
-                    lib: s.0.clone(),
-                    symbol: s.1.clone(),
-                    offset: s.2,
-                })
-                .collect(),
             attacks: HashMap::new(),
             mbc: HashMap::new(),
             capability_namespaces: HashMap::new(),
-            #[cfg(feature = "verbose")]
-            rules_path: rules_path.to_string(),
             #[cfg(feature = "verbose")]
             features: 0,
             #[cfg(feature = "verbose")]
@@ -463,7 +446,7 @@ impl Meta {
     pub fn update_capabilities(
         &mut self,
         capabilities: &HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
-        counts: &HashMap<u64, usize>,
+        #[cfg(feature = "verbose")] counts: &HashMap<u64, usize>,
     ) -> Result<()> {
         for (rule, _) in capabilities {
             if rule
@@ -546,14 +529,15 @@ impl Meta {
         {
             self.features = counts[&0];
         }
+
         #[cfg(feature = "verbose")]
         for (addr, count) in counts {
             if addr == &0 {
                 continue;
             }
             let mut fc = FunctionCapabilities {
-                address: addr.clone(),
-                features: count.clone(),
+                address: *addr as usize,
+                features: *count,
                 capabilities: vec![],
             };
             for (rule, caps) in capabilities {
