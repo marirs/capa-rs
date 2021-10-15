@@ -31,7 +31,7 @@ pub fn get_base_address(binary: &[u8]) -> Result<u64> {
             return Ok(u64::from_le_bytes(bb));
         }
     }
-    Err(Error::PEBaseAdressError)
+    Err(Error::PEBaseAddressError)
 }
 
 pub fn get_pe_offset(binary: &[u8]) -> Result<u64> {

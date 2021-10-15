@@ -5,7 +5,7 @@ pub enum Error {
     #[error("not enough bytes in buffer")]
     NotEnoughBytesError(u64, u64),
     #[error("pe base address error")]
-    PEBaseAdressError,
+    PEBaseAddressError,
     #[error("unsuported pe bitness id: {0}")]
     UnsupportedPEBitnessIDError(u16),
     #[error("invalid rule: {0} - {1}")]
@@ -28,7 +28,7 @@ pub enum Error {
     FromHexError(#[from] hex::FromHexError),
 
     #[error("{0}")]
-    FromSloceError(#[from] std::array::TryFromSliceError),
+    FromSliceError(#[from] std::array::TryFromSliceError),
     #[error("{0}")]
     CapstoneError(capstone::Error),
     #[error("{0}")]
