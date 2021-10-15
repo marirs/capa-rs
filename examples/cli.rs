@@ -4,7 +4,7 @@ use serde_json::to_value;
 fn main() {
     for (i, arg) in std::env::args().enumerate() {
         if i == 1 {
-            match capa::proceed_file(
+            match capa::from_file(
                 arg.as_str(),
                 "rules",
                 &|_s| {

@@ -100,7 +100,7 @@ impl CapabilityExtractor {
     }
 }
 
-pub fn proceed_file(
+pub fn from_file(
     file_name: &str,
     rule_path: &str,
     logger: &dyn Fn(&str),
