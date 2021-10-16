@@ -37,7 +37,8 @@ verbose = []
 meta = []
 
 [[example]]
-name = "cli"
+name = "capa_cli"
+path = "examples/capa_cli.rs"
 required-features = ["meta"]
 
 [profile.dev]
