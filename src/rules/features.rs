@@ -862,7 +862,7 @@ impl PartialEq for BytesFeature {
 
 impl Eq for BytesFeature {}
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ArchFeature {
     value: String,
     description: String,
@@ -893,7 +893,23 @@ impl ArchFeature {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+impl std::hash::Hash for ArchFeature {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        "arch_feature".hash(state);
+        self.value.to_lowercase().hash(state);
+    }
+}
+
+impl PartialEq for ArchFeature {
+    fn eq(&self, other: &ArchFeature) -> bool {
+        self.value.to_lowercase() == other.value.to_lowercase()
+    }
+}
+
+impl Eq for ArchFeature {}
+
+
+#[derive(Debug, Clone)]
 pub struct OsFeature {
     value: String,
     description: String,
@@ -924,7 +940,23 @@ impl OsFeature {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+impl std::hash::Hash for OsFeature {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        "os_feature".hash(state);
+        self.value.to_lowercase().hash(state);
+    }
+}
+
+impl PartialEq for OsFeature {
+    fn eq(&self, other: &OsFeature) -> bool {
+        self.value.to_lowercase() == other.value.to_lowercase()
+    }
+}
+
+impl Eq for OsFeature {}
+
+
+#[derive(Debug, Clone)]
 pub struct FormatFeature {
     value: String,
     description: String,
@@ -954,3 +986,18 @@ impl FormatFeature {
         Ok((false, vec![]))
     }
 }
+
+impl std::hash::Hash for FormatFeature {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        "format_feature".hash(state);
+        self.value.to_lowercase().hash(state);
+    }
+}
+
+impl PartialEq for FormatFeature {
+    fn eq(&self, other: &FormatFeature) -> bool {
+        self.value.to_lowercase() == other.value.to_lowercase()
+    }
+}
+
+impl Eq for FormatFeature {}
