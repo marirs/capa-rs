@@ -1,5 +1,6 @@
 use prettytable::{color, format::Alignment, Attr, Cell, Row, Table};
 use serde_json::{to_value, Map, Value};
+use std::time::Instant;
 
 fn main() {
     let filename = match std::env::args()
@@ -13,6 +14,7 @@ fn main() {
         }
     };
 
+    let start = Instant::now();
     match capa::from_file(&filename, "rules", true, true, &|_s| {
         //                                           println!("{}", s);
     }) {
@@ -74,6 +76,8 @@ fn main() {
             }
         }
     }
+    println!("Time taken (seconds): {:?}", start.elapsed());
+    println!();
 }
 
 /// Gets the Meta information and returns as a TABLE for stdout
