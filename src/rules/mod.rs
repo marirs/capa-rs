@@ -559,7 +559,8 @@ impl Rule {
                                     //     &val[..val.len() - " or more".len()],
                                     //     10,
                                     // )?;
-                                    let min = (&val[..val.len() - " or more".len()]).parse::<i64>()?;
+                                    let min =
+                                        (&val[..val.len() - " or more".len()]).parse::<i64>()?;
                                     let max = 0xFFFFFFFF_u32;
                                     return Ok(StatementElement::Statement(Box::new(
                                         Statement::Range(RangeStatement::new(
@@ -571,7 +572,8 @@ impl Rule {
                                     )));
                                 } else if val.ends_with(" or fewer") {
                                     let min = 0_u32;
-                                    let max = (&val[..val.len() - " or fewer".len()]).parse::<i64>()?;
+                                    let max =
+                                        (&val[..val.len() - " or fewer".len()]).parse::<i64>()?;
                                     // let max = i64::from_str_radix(
                                     //     &val[..val.len() - " or fewer".len()],
                                     //     10,
@@ -666,10 +668,7 @@ pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
         let fname = entry
             .path()
             .to_str()
-            .ok_or_else(|| Error::InvalidRule(
-                line!(),
-                format!("file error {:?}", entry),
-            ))?
+            .ok_or_else(|| Error::InvalidRule(line!(), format!("file error {:?}", entry)))?
             .to_string();
         if entry.file_type()?.is_dir() {
             if fname.contains(".github") {
