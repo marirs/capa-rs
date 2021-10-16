@@ -299,7 +299,7 @@ impl FunctionAnalysisState {
                     || potential_starts.contains(&self.instructions[i + 1].0)) {
                         break;
                 }
-                
+
                 if END_INS.contains(&Some(current.2.as_ref().unwrap().as_str())) {
                     break;
                 }
