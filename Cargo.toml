@@ -27,10 +27,10 @@ prettytable-rs = "0.8.0"
 name = "capa"
 path = "src/lib.rs"
 
-[workspace]
-members = [
-    "libs/disassemblers/smda"
-]
+#[workspace]
+#members = [
+#    "libs/disassemblers/smda"
+#]
 
 [features]
 verbose = []

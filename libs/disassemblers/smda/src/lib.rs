@@ -685,11 +685,12 @@ impl Disassembler {
             if !provider.is_symbol_provider()? {
                 continue;
             }
-            for (s, _a) in provider.get_functions_symbols()? {
+            // for (s, _a) in provider.get_functions_symbols()? {
+            for s in (provider.get_functions_symbols()?).keys() {
                 symbol_offsets.insert(*s);
             }
         }
-        Ok(symbol_offsets.iter().map(|a| *a).collect())
+        Ok(symbol_offsets.iter().copied().collect())
     }
 
     pub fn analyse_buffer(
@@ -742,7 +743,7 @@ impl Disassembler {
             } else {
                 self.fc_manager.update_analysis_aborted(
                     &gap_candidate,
-                    &format!("Gap candidate did not fulfil function criteria."),
+                    "Gap candidate did not fulfil function criteria.",
                 )?;
             }
             next_gap = self.fc_manager.get_next_gap(true, &self.disassembly)?;
