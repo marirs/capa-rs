@@ -13,7 +13,7 @@ pub enum Error {
     #[error("{0}")]
     PdbError(#[from] pdb::Error),
 
-    #[error("io error")]
+    #[error("{0}")]
     IoError(#[from] std::io::Error),
     #[error("{0}")]
     FromSliceError(#[from] std::array::TryFromSliceError),
@@ -21,7 +21,7 @@ pub enum Error {
     ParseIntError(#[from] std::num::ParseIntError),
     #[error("{0}")]
     Utf8Error(#[from] std::str::Utf8Error),
-    #[error("utf16 error")]
+    #[error("utf16 error: {0}")]
     FromUtf16Error(#[from] std::string::FromUtf16Error),
 
     #[error("unsupported format")]
@@ -45,6 +45,6 @@ pub enum Error {
     #[error("range statement error")]
     RangeStatementError,
 
-    #[error("not implemented error")]
+    #[error("not implemented")]
     NoiImplementedError,
 }
