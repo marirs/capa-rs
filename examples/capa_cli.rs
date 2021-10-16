@@ -17,7 +17,7 @@ fn main() {
         &filename,
         "rules",
         true,
-        false,
+        true,
         &|_s| {
             //                                           println!("{}", s);
         }

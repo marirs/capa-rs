@@ -629,7 +629,11 @@ impl Disassembler {
         }
     }
 
-    pub fn disassemble_file(file_name: &str, high_accuracy: bool, resolve_tailcalls: bool) -> Result<DisassemblyReport> {
+    pub fn disassemble_file(
+        file_name: &str,
+        high_accuracy: bool,
+        resolve_tailcalls: bool,
+    ) -> Result<DisassemblyReport> {
         let mut disassembler = Disassembler::new()?;
         let file_content = Disassembler::load_file(file_name)?;
         let mut binary_info = BinaryInfo::new();
@@ -752,11 +756,13 @@ impl Disassembler {
 
         //# third pass, fix potential tailcall functions that were identified during analysis
         if resolve_tailcalls {
-            let tailcalled_functions =
-                TailCallAnalyser::resolve_tailcalls(self, &mut state.unwrap(), high_accuracy)?;
-            for addr in tailcalled_functions {
-                self.fc_manager
-                    .add_tailcall_candidate(&addr, &self.disassembly)?;
+            if let Some(s) = &mut state {
+                let tailcalled_functions =
+                    TailCallAnalyser::resolve_tailcalls(self, s, high_accuracy)?;
+                for addr in tailcalled_functions {
+                    self.fc_manager
+                        .add_tailcall_candidate(&addr, &self.disassembly)?;
+                }
             }
             //LOGGER.debug("Finished tailcall analysis, functions.")
         }
@@ -1195,7 +1201,7 @@ impl Disassembler {
                             &self.get_disasm_window_buffer(state.block_start + cache_pos as u64),
                             state.block_start + cache_pos as u64,
                         )
-                        .map_err( Error::CapstoneError)?;
+                        .map_err(Error::CapstoneError)?;
                     if cache.len() == 0 {
                         break;
                     }
