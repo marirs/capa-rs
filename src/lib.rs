@@ -104,10 +104,11 @@ impl CapabilityExtractor {
 pub fn from_file(
     file_name: &str,
     rule_path: &str,
-    logger: &dyn Fn(&str),
     high_accuracy: bool,
+    resolve_tailcalls: bool,
+    logger: &dyn Fn(&str),
 ) -> result::Result<FileCapabilities> {
-    let extractor = extractor::Extractor::new(file_name, high_accuracy)?;
+    let extractor = extractor::Extractor::new(file_name, high_accuracy, resolve_tailcalls)?;
     logger(&format!("loading rules..."));
     let rules = rules::RuleSet::new(rule_path)?;
     logger(&format!("loaded {} rules", rules.rules.len()));

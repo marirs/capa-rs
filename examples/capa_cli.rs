@@ -16,10 +16,11 @@ fn main() {
     match capa::from_file(
         &filename,
         "rules",
+        true,
+        true,
         &|_s| {
             //                                           println!("{}", s);
-        },
-        true,
+        }
     ) {
         Err(e) => println!("{:?}", e),
         Ok(s) => {

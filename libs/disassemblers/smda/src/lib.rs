@@ -629,7 +629,7 @@ impl Disassembler {
         }
     }
 
-    pub fn disassemble_file(file_name: &str, high_accuracy: bool) -> Result<DisassemblyReport> {
+    pub fn disassemble_file(file_name: &str, high_accuracy: bool, resolve_tailcalls: bool) -> Result<DisassemblyReport> {
         let mut disassembler = Disassembler::new()?;
         let file_content = Disassembler::load_file(file_name)?;
         let mut binary_info = BinaryInfo::new();
@@ -674,7 +674,7 @@ impl Disassembler {
             }
             _ => return Err(Error::UnsupportedFormatError),
         }
-        disassembler.analyse_buffer(binary_info, high_accuracy)?;
+        disassembler.analyse_buffer(binary_info, high_accuracy, resolve_tailcalls)?;
         let report = DisassemblyReport::new(&mut disassembler.disassembly)?;
         Ok(report)
     }
@@ -696,6 +696,7 @@ impl Disassembler {
         &mut self,
         bin: BinaryInfo,
         high_accuracy: bool,
+        resolve_tailcalls: bool,
     ) -> Result<&DisassemblyResult> {
         //LOGGER.debug("Analyzing buffer with %d bytes @0x%08x",
         // binary_info.binary_size, binary_info.base_addr)
@@ -717,8 +718,9 @@ impl Disassembler {
             }
         }
         //LOGGER.debug("Finished heuristical analysis, functions: %d", len(self.disassembly.functions))
+
         //# second pass, analyze remaining gaps for additional
-        // candidates in an iterative way
+        //# candidates in an iterative way
         let mut next_gap = 0;
         while let Ok(gap_candidate) = self
             .fc_manager
@@ -746,8 +748,9 @@ impl Disassembler {
             next_gap = self.fc_manager.get_next_gap(true, &self.disassembly)?;
         }
         //LOGGER.debug("Finished gap analysis, functions: %d", len(self.disassembly.functions))
-        //third pass, fix potential tailcall functions that were identified during analysis
-        if let Ok(_) = std::env::var("CAPARS_RESOLVE_TAILCALLS") {
+
+        //# third pass, fix potential tailcall functions that were identified during analysis
+        if resolve_tailcalls {
             let tailcalled_functions =
                 TailCallAnalyser::resolve_tailcalls(self, &mut state.unwrap(), high_accuracy)?;
             for addr in tailcalled_functions {
@@ -757,10 +760,11 @@ impl Disassembler {
             //LOGGER.debug("Finished tailcall analysis, functions.")
         }
         self.disassembly.failed_analysis_addr = self.fc_manager.get_aborted_candidates()?;
+
         //# package up and finish
         for (addr, candidate) in &mut self.fc_manager.candidates {
-            if self.disassembly.functions.contains_key(&addr) {
-                let function_blocks = self.disassembly.get_blocks_as_dict(&addr)?;
+            if self.disassembly.functions.contains_key(addr) {
+                let function_blocks = self.disassembly.get_blocks_as_dict(addr)?;
                 let function_tfidf = self.tfidf.get_tfidf_from_blocks(&function_blocks)?;
                 candidate.set_tfidf(function_tfidf)?;
                 candidate.init_confidence()?;
@@ -833,7 +837,7 @@ impl Disassembler {
             if !provider.is_api_provider()? {
                 continue;
             }
-            return Ok(provider.get_api(to_address, api_address)?);
+            return provider.get_api(to_address, api_address);
         }
         Ok((None, None))
     }
@@ -851,7 +855,7 @@ impl Disassembler {
             Some(op_str) => {
                 // case = "FALLTHROUGH"
                 let call_destination = self.get_referenced_addr(op_str)?;
-                if op_str != "" && i_op_str.as_ref().unwrap().contains(":") {
+                if !op_str.is_empty() && i_op_str.as_ref().unwrap().contains(':') {
                     // case = "LONG-CALL"
                 }
                 if op_str.starts_with("dword ptr [") {
@@ -898,13 +902,10 @@ impl Disassembler {
         let i_address = i.address();
         let i_size = i.bytes().len();
         let _i_mnemonic = i.mnemonic();
-        let i_op_str = match i.op_str() {
-            Some(op_str) => op_str,
-            None => "",
-        };
+        let i_op_str = i.op_str().unwrap_or("");
 
         //case = "FALLTHROUGH"
-        if i_op_str.contains(":") {
+        if i_op_str.contains(':') {
             //case = "LONG-JMP"
         } else if i_op_str.starts_with("dword ptr [0x") {
             //case = "DWORD-PTR"
@@ -976,10 +977,7 @@ impl Disassembler {
         let i_address = i.address();
         let i_size = i.bytes().len();
         let _i_mnemonic = i.mnemonic();
-        let i_op_str = match i.op_str() {
-            Some(op_str) => op_str,
-            None => "",
-        };
+        let i_op_str = i.op_str().unwrap_or("");
         if let Ok(_jump_destination) = self.get_referenced_addr(i_op_str) {
             state.add_code_ref(i_address, u64::from_str_radix(&i_op_str[2..], 16)?, true)?;
         }
@@ -998,10 +996,7 @@ impl Disassembler {
         let i_address = i.address();
         let i_size = i.bytes().len();
         let _i_mnemonic = i.mnemonic();
-        let i_op_str = match i.op_str() {
-            Some(op_str) => op_str,
-            None => "",
-        };
+        let i_op_str = i.op_str().unwrap_or("");
         state.add_block_to_queue(i_address + i_size as u64)?;
         if let Ok(jump_destination) = self.get_referenced_addr(i_op_str) {
             //# case = "FALLTHROUGH"

@@ -19,9 +19,9 @@ pub struct Extractor {
 }
 
 impl Extractor {
-    pub fn new(path: &str, high_accuracy: bool) -> Result<Extractor> {
+    pub fn new(path: &str, high_accuracy: bool, resolve_tailcalls: bool) -> Result<Extractor> {
         Ok(Extractor {
-            report: Disassembler::disassemble_file(path, high_accuracy)?,
+            report: Disassembler::disassemble_file(path, high_accuracy, resolve_tailcalls)?,
             buf: Disassembler::load_file(path)?,
             path: path.to_string(),
         })
