@@ -178,10 +178,7 @@ impl Extractor {
         for (n, b, _e) in &self.report.sections {
             res.push((
                 crate::rules::features::Feature::Section(
-                    crate::rules::features::SectionFeature::new(
-                        n.trim_matches(char::from(0)),
-                        "",
-                    )?,
+                    crate::rules::features::SectionFeature::new(n.trim_matches(char::from(0)), "")?,
                 ),
                 *b as u64,
             ));

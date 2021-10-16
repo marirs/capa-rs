@@ -359,7 +359,9 @@ pub fn find_file_capabilities<'a>(
                 }
             }
         } else {
-            file_features.entry(feature).or_insert_with(std::vec::Vec::new);
+            file_features
+                .entry(feature)
+                .or_insert_with(std::vec::Vec::new);
         }
     }
 
@@ -474,7 +476,8 @@ impl FileCapabilities {
                                     self.attacks.insert(
                                         parts[0].to_string(),
                                         vec![parts[1..].join("::").to_string()]
-                                            .iter().cloned()
+                                            .iter()
+                                            .cloned()
                                             .collect(),
                                     );
                                 }
@@ -505,7 +508,8 @@ impl FileCapabilities {
                                     self.mbc.insert(
                                         parts[0].to_string(),
                                         vec![parts[1..].join("::").to_string()]
-                                            .iter().cloned()
+                                            .iter()
+                                            .cloned()
                                             .collect(),
                                     );
                                 }

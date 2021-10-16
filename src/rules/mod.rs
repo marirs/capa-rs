@@ -759,7 +759,7 @@ pub fn get_rules_for_scope<'a>(
         scope_rules.append(&mut get_rules_and_dependencies(rules, &rule.name)?);
     }
     let trules = topologically_order_rules(scope_rules)?;
-    
+
     get_rules_with_scope(trules, scope)
 }
 
