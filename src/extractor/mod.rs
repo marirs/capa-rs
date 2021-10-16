@@ -440,14 +440,9 @@ impl Extractor {
         if let Some(o) = &insn.operands {
             let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
             for operand in operands {
-                if operand.contains("fs:") && operand.contains("0x30") {
-                    res.push((
-                        crate::rules::features::Feature::Characteristic(
-                            crate::rules::features::CharacteristicFeature::new("peb access", "")?,
-                        ),
-                        insn.offset,
-                    ));
-                } else if operand.contains("gs:") && operand.contains("0x60") {
+                if (operand.contains("fs:") && operand.contains("0x30"))
+                    || (operand.contains("gs:") && operand.contains("0x60"))
+                {
                     res.push((
                         crate::rules::features::Feature::Characteristic(
                             crate::rules::features::CharacteristicFeature::new("peb access", "")?,

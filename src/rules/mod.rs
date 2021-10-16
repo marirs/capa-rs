@@ -713,7 +713,7 @@ impl RuleSet {
         })
     }
 
-    pub fn get_basic_block_rules<'a>(&self) -> Result<&Vec<crate::rules::Rule>> {
+    pub fn get_basic_block_rules(&self) -> Result<&Vec<crate::rules::Rule>> {
         Ok(&self.basic_block_rules)
     }
 
@@ -726,20 +726,20 @@ impl RuleSet {
     }
 }
 
-pub fn get_basic_block_rules(rules: &Vec<crate::rules::Rule>) -> Result<Vec<&crate::rules::Rule>> {
+pub fn get_basic_block_rules(rules: &[crate::rules::Rule]) -> Result<Vec<&crate::rules::Rule>> {
     get_rules_for_scope(rules, &Scope::BasicBlock)
 }
 
-pub fn get_function_rules(rules: &Vec<crate::rules::Rule>) -> Result<Vec<&crate::rules::Rule>> {
+pub fn get_function_rules(rules: &[crate::rules::Rule]) -> Result<Vec<&crate::rules::Rule>> {
     get_rules_for_scope(rules, &Scope::Function)
 }
 
-pub fn get_file_rules(rules: &Vec<crate::rules::Rule>) -> Result<Vec<&crate::rules::Rule>> {
+pub fn get_file_rules(rules: &[crate::rules::Rule]) -> Result<Vec<&crate::rules::Rule>> {
     get_rules_for_scope(rules, &Scope::File)
 }
 
 pub fn get_rules_for_scope<'a>(
-    rules: &'a Vec<crate::rules::Rule>,
+    rules: &'a [crate::rules::Rule],
     scope: &Scope,
 ) -> Result<Vec<&'a crate::rules::Rule>> {
     let mut scope_rules = vec![];
@@ -764,12 +764,11 @@ pub fn get_rules_for_scope<'a>(
 }
 
 pub fn get_rules_and_dependencies<'a>(
-    rules: &'a Vec<crate::rules::Rule>,
+    rules: &'a [crate::rules::Rule],
     rule_name: &str,
 ) -> Result<Vec<&'a crate::rules::Rule>> {
     let mut res = vec![];
     //# we evaluate `rules` multiple times, so if its a generator, realize it into a list.
-    //rules = list(rules)
     let namespaces = index_rules_by_namespace(rules)?;
     let mut rules_by_name = std::collections::HashMap::new();
     for rule in rules {
@@ -818,7 +817,7 @@ pub fn get_rules_with_scope<'a>(
 }
 
 pub fn index_rules_by_namespace(
-    rules: &Vec<crate::rules::Rule>,
+    rules: &[crate::rules::Rule],
 ) -> Result<std::collections::HashMap<String, Vec<&crate::rules::Rule>>> {
     let mut namespaces: std::collections::HashMap<String, Vec<&crate::rules::Rule>> =
         std::collections::HashMap::new();
@@ -862,7 +861,7 @@ pub fn index_rules_by_namespace(
 }
 
 pub fn index_rules_by_namespace2<'a>(
-    rules: &Vec<&'a crate::rules::Rule>,
+    rules: &[&'a crate::rules::Rule],
 ) -> Result<std::collections::HashMap<String, Vec<&'a crate::rules::Rule>>> {
     let mut namespaces: std::collections::HashMap<String, Vec<&crate::rules::Rule>> =
         std::collections::HashMap::new();
@@ -940,7 +939,7 @@ pub fn topologically_order_rules(
         seen.insert(rule.name.clone());
         Ok(rett)
     }
-    for (_, rule) in &rules_by_name {
+    for rule in rules_by_name.values() {
         ret.append(&mut rec(rule, &mut seen, &rules_by_name, &namespaces)?);
     }
     Ok(ret)

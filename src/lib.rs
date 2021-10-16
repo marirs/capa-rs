@@ -1,3 +1,4 @@
+#![allow(clippy::type_complexity)]
 mod extractor;
 pub mod rules;
 
@@ -453,7 +454,7 @@ impl FileCapabilities {
         capabilities: &HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
         #[cfg(feature = "verbose")] counts: &HashMap<u64, usize>,
     ) -> Result<()> {
-        for (rule, _) in capabilities {
+        for rule in capabilities.keys() {
             if rule
                 .meta
                 .contains_key(&yaml_rust::Yaml::String("att&ck".to_string()))
@@ -464,7 +465,7 @@ impl FileCapabilities {
                     for p in s {
                         let parts: Vec<&str> = p
                             .as_str()
-                            .ok_or(Error::InvalidRule(line!(), file!().to_string()))?
+                            .ok_or_else(|| Error::InvalidRule(line!(), file!().to_string()))?
                             .split("::")
                             .collect();
                         if parts.len() > 1 {
@@ -496,7 +497,7 @@ impl FileCapabilities {
                     for p in s {
                         let parts: Vec<&str> = p
                             .as_str()
-                            .ok_or(Error::InvalidRule(line!(), file!().to_string()))?
+                            .ok_or_else(|| Error::InvalidRule(line!(), file!().to_string()))?
                             .split("::")
                             .collect();
                         if parts.len() > 1 {
@@ -582,7 +583,7 @@ impl FileCapabilities {
 }
 
 pub fn match_fn<'a>(
-    rules: &'a Vec<crate::rules::Rule>,
+    rules: &'a [crate::rules::Rule],
     features: &HashMap<crate::rules::features::Feature, Vec<u64>>,
     va: &u64,
     logger: &dyn Fn(&str),
