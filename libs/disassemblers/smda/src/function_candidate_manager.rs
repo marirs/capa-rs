@@ -7,7 +7,7 @@ use itertools::Itertools;
 use regex::bytes::Regex;
 use std::{collections::HashMap, convert::TryInto};
 
-const DEFAULT_PROLOGUES: &[&'static str; 4] = &[
+const DEFAULT_PROLOGUES: &[&str; 4] = &[
     r"(?-u)\x8B\xFF\x55\x8B\xEC",
     r"(?-u)\x89\xFF\x55\x8B\xEC",
     r"(?-u)\x55\x8B\xEC",
@@ -191,7 +191,7 @@ impl FunctionCandidateManager {
                 .syntax(arch::x86::ArchSyntax::Intel)
                 .detail(true)
                 .build()
-                .map_err(|e| Error::CapstoneError(e))?,
+                .map_err(Error::CapstoneError)?,
         );
         self.identified_alignment = 0;
         self.code_areas = disassembly.binary_info.code_areas.clone();
@@ -238,19 +238,19 @@ impl FunctionCandidateManager {
         let mut identified_alignment = 0;
         //        if self.config.USE_ALIGNMENT:
         let mut num_candidates = 0;
-        for (_addr, candidate) in &self.candidates {
+        for candidate in self.candidates.values() {
             if candidate.call_ref_sources.len() > 1 {
                 num_candidates += 1;
             }
         }
         let mut num_aligned_16_candidates = 0;
-        for (_addr, candidate) in &self.candidates {
+        for candidate in self.candidates.values() {
             if candidate.call_ref_sources.len() > 1 && candidate.alignment == 16 {
                 num_aligned_16_candidates += 1;
             }
         }
         let mut num_aligned_4_candidates = 0;
-        for (_addr, candidate) in &self.candidates {
+        for candidate in self.candidates.values() {
             if candidate.call_ref_sources.len() > 1 && candidate.alignment == 4 {
                 num_aligned_4_candidates += 1;
             }
@@ -475,12 +475,12 @@ impl FunctionCandidateManager {
             }
             return Ok(disassembly.binary_info.base_addr + function_pointer);
         }
-        return Err(Error::LogicError(file!(), line!()));
+        Err(Error::LogicError(file!(), line!()))
     }
 
     fn get_bitmask(&self) -> u64 {
         //        if self.bitness == 64{
-        return 0xFFFFFFFFFFFFFFFF;
+        0xFFFFFFFFFFFFFFFF
         //        }
         //        0xFFFFFFFF
     }
@@ -493,19 +493,16 @@ impl FunctionCandidateManager {
                         return Ok(true);
                     }
                 }
-                return Ok(false);
+                Ok(false)
             }
             _ => Ok(false),
         }
     }
 
     fn ensure_candidate(&mut self, addr: u64, disassembly: &DisassemblyResult) -> Result<bool> {
-        if !self.candidates.contains_key(&addr) {
-            self.candidates.insert(
-                addr,
-                FunctionCandidate::new(&disassembly.binary_info, addr)?,
-            );
-            return Ok(true);
+        if let std::collections::hash_map::Entry::Vacant(e) = self.candidates.entry(addr) {
+            e.insert(FunctionCandidate::new(&disassembly.binary_info, addr)?);
+            return Ok(true)
         }
         Ok(true)
     }
@@ -571,7 +568,7 @@ impl FunctionCandidateManager {
 
     pub fn get_queue(&self) -> Result<Vec<u64>> {
         let mut res = vec![];
-        for (addr, _candidate) in &self.candidates {
+        for addr in self.candidates.keys() {
             res.push(*addr);
         }
         Ok(res)
@@ -706,13 +703,13 @@ impl FunctionCandidateManager {
                     .cs
                     .as_ref()
                     .unwrap()
-                    .disasm_all(&disassembly.get_raw_bytes(gap_offset, 15)?, gap_offset)
-                    .map_err(|e| Error::CapstoneError(e))?;
+                    .disasm_all(disassembly.get_raw_bytes(gap_offset, 15)?, gap_offset)
+                    .map_err(Error::CapstoneError)?;
                 for ins in ins_bb.as_ref() {
                     ins_buf.push(ins);
                     break;
                 }
-                if ins_buf.len() > 0 {
+                if !ins_buf.is_empty() {
                     //                i_address, i_size, i_mnemonic, i_op_str = ins.mnemonic()
                     if ins_buf[0].mnemonic() == Some("nop") {
                         //let nop_instruction = i_mnemonic + " " + i_op_str

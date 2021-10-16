@@ -19,9 +19,9 @@ impl Instruction {
         ins: &(u64, String, String, Option<String>),
     ) -> Result<Instruction> {
         Ok(Instruction {
-            arch: arch.clone(),
-            bitness: bitness.clone(),
-            offset: ins.0.clone(),
+            arch: arch,
+            bitness: *bitness,
+            offset: ins.0,
             bytes: ins.1.clone(),
             mnemonic: ins.2.clone(),
             operands: ins.3.clone(),
@@ -40,14 +40,14 @@ impl Instruction {
             .syntax(capstone::arch::x86::ArchSyntax::Intel)
             .detail(true)
             .build()
-            .map_err(|e| Error::CapstoneError(e))?;
+            .map_err(Error::CapstoneError)?;
         let insns = capstone
             .disasm_all(&hex::decode(&self.bytes)?, self.offset)
-            .map_err(|e| Error::CapstoneError(e))?;
+            .map_err(Error::CapstoneError)?;
         for insn in insns.as_ref() {
             let ll = capstone
                 .insn_detail(insn)
-                .map_err(|e| Error::CapstoneError(e))?;
+                .map_err(Error::CapstoneError)?;
             let instr = ll.arch_detail();
             if instr.operands().len() != 2 {
                 return Ok(0);
@@ -102,14 +102,14 @@ impl Instruction {
                 .syntax(capstone::arch::x86::ArchSyntax::Intel)
                 .detail(true)
                 .build()
-                .map_err(|e| Error::CapstoneError(e))?;
+                .map_err(Error::CapstoneError)?;
             let insns = capstone
                 .disasm_all(&hex::decode(&self.bytes)?, self.offset)
-                .map_err(|e| Error::CapstoneError(e))?;
+                .map_err(Error::CapstoneError)?;
             for insn in insns.as_ref() {
                 let ll = capstone
                     .insn_detail(insn)
-                    .map_err(|e| Error::CapstoneError(e))?;
+                    .map_err(Error::CapstoneError)?;
                 let instr = ll.arch_detail();
                 for operand in instr.operands() {
                     if let capstone::arch::ArchOperand::X86Operand(op) = operand {
@@ -162,34 +162,34 @@ pub struct Function {
 impl Function {
     pub fn new(disassembly: &DisassemblyResult, function_offset: &u64) -> Result<Function> {
         let f = Function {
-            arch: disassembly.binary_info.file_architecture.clone(),
-            bitness: disassembly.binary_info.bitness.clone(),
-            offset: function_offset.clone(),
+            arch: disassembly.binary_info.file_architecture,
+            bitness: disassembly.binary_info.bitness,
+            offset: *function_offset,
             blocks: Function::parse_blocks(
                 disassembly,
-                &disassembly.get_blocks_as_dict(&function_offset)?,
+                &disassembly.get_blocks_as_dict(function_offset)?,
             )?,
-            apirefs: disassembly.get_api_refs(&function_offset)?,
-            blockrefs: disassembly.get_block_refs(&function_offset)?,
-            inrefs: disassembly.get_in_refs(&function_offset)?,
-            outrefs: disassembly.get_out_refs(&function_offset)?,
+            apirefs: disassembly.get_api_refs(function_offset)?,
+            blockrefs: disassembly.get_block_refs(function_offset)?,
+            inrefs: disassembly.get_in_refs(function_offset)?,
+            outrefs: disassembly.get_out_refs(function_offset)?,
             binweight: 0,
-            characteristics: if disassembly.candidates.contains_key(&function_offset) {
-                disassembly.candidates[&function_offset].get_characteristics()?
+            characteristics: if disassembly.candidates.contains_key(function_offset) {
+                disassembly.candidates[function_offset].get_characteristics()?
             } else {
                 "-----------".to_string()
             },
-            confidence: if disassembly.candidates.contains_key(&function_offset) {
-                disassembly.candidates[&function_offset].get_confidence()?
+            confidence: if disassembly.candidates.contains_key(function_offset) {
+                disassembly.candidates[function_offset].get_confidence()?
             } else {
                 0.0
             },
-            function_name: match disassembly.function_symbols.get(&function_offset) {
+            function_name: match disassembly.function_symbols.get(function_offset) {
                 Some(s) => s.clone(),
                 _ => "".to_string(),
             },
-            tfidf: if disassembly.candidates.contains_key(&function_offset) {
-                disassembly.candidates[&function_offset].get_tfidf()?
+            tfidf: if disassembly.candidates.contains_key(function_offset) {
+                disassembly.candidates[function_offset].get_tfidf()?
             } else {
                 0.0
             },
@@ -218,7 +218,7 @@ impl Function {
                 )?);
                 _binweight += ins.2.len() / 2;
             }
-            blocks.insert(offset.clone(), instructions);
+            blocks.insert(*offset, instructions);
         }
         Ok(blocks)
     }
@@ -229,7 +229,7 @@ impl Function {
 
     pub fn get_instructions(&self) -> Result<Vec<&Instruction>> {
         let mut res = vec![];
-        for (_, b) in &self.blocks {
+        for b in self.blocks.values() {
             for i in b {
                 res.push(i);
             }
@@ -239,7 +239,7 @@ impl Function {
 
     pub fn get_num_instructions(&self) -> Result<usize> {
         let mut count = 0;
-        for (_, b) in &self.blocks {
+        for b in self.blocks.values() {
             count += b.len();
         }
         Ok(count)
@@ -247,7 +247,7 @@ impl Function {
 
     pub fn get_num_outrefs(&self) -> Result<usize> {
         let mut count = 0;
-        for (_, dsts) in &self.outrefs {
+        for dsts in self.outrefs.values() {
             count += dsts.len();
         }
         Ok(count)
@@ -261,7 +261,7 @@ impl Function {
         if !vec!["jmp", "call"].contains(&&first_ins.mnemonic[..]) {
             return Ok(false);
         }
-        if self.apirefs.len() == 0 {
+        if self.apirefs.is_empty() {
             return Ok(false);
         }
         Ok(true)

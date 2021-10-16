@@ -136,7 +136,7 @@ impl FunctionAnalysisState {
     }
 
     pub fn is_first_instruction(&self) -> Result<bool> {
-        Ok(self.instructions.len() == 0)
+        Ok(self.instructions.is_empty())
     }
 
     pub fn add_block_to_queue(&mut self, block_start: u64) -> Result<()> {
@@ -183,7 +183,7 @@ impl FunctionAnalysisState {
     }
 
     pub fn end_block(&mut self) -> Result<()> {
-        if self.current_block.len() > 0 {
+        if !self.current_block.is_empty() {
             self.num_blocks_analyzed += 1;
             //# self.blocks.append(self.current_block)
         }
@@ -237,7 +237,7 @@ impl FunctionAnalysisState {
             //# sane case, stub found that just jumps to a referenced function
             else if self.num_blocks_analyzed == 1
                 && vec![String::from("jmp"), String::from("call")].contains(
-                    &self.instructions[self.instructions.len() - 1]
+                    self.instructions[self.instructions.len() - 1]
                         .2
                         .as_ref()
                         .unwrap(),
@@ -270,14 +270,14 @@ impl FunctionAnalysisState {
         }
         let mut potential_starts = self.jump_targets.clone();
         potential_starts.push(self.start_addr);
-        potential_starts.sort();
+        potential_starts.sort_unstable();
         let mut blocks = vec![];
         for start in &potential_starts {
-            if !ins.contains_key(&start) {
+            if !ins.contains_key(start) {
                 continue;
             }
             let mut block = vec![];
-            for i in ins[&start]..self.instructions.len() {
+            for i in ins[start]..self.instructions.len() {
                 let current = self.instructions[i].clone();
                 block.push(current.clone());
 
@@ -305,7 +305,7 @@ impl FunctionAnalysisState {
                     break;
                 }
             }
-            if block.len() > 0 {
+            if !block.is_empty() {
                 blocks.push(block);
             }
         }
@@ -375,9 +375,9 @@ impl FunctionAnalysisState {
         let non_instruction_start_bytes: HashSet<u64> = self
             .processed_bytes
             .difference(&self.instruction_start_bytes)
-            .map(|e| *e)
+            .copied()
             .collect();
-        let all_refs_set: HashSet<u64> = all_refs.keys().map(|e| *e).collect();
+        let all_refs_set: HashSet<u64> = all_refs.keys().copied().collect();
         let conflict_addrs = all_refs_set.intersection(&non_instruction_start_bytes);
         for candidate_source_ref in conflict_addrs {
             let candidate = all_refs[candidate_source_ref];

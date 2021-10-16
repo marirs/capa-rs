@@ -42,8 +42,8 @@ mod error;
 pub use error::Error;
 pub type Result<T> = std::result::Result<T, Error>;
 
-static CALL_INS: &'static [Option<&str>] = &[Some("call"), Some("ncall")];
-static CJMP_INS: &'static [Option<&str>] = &[
+static CALL_INS: &[Option<&str>] = &[Some("call"), Some("ncall")];
+static CJMP_INS: &[Option<&str>] = &[
     Some("je"),
     Some("jne"),
     Some("js"),
@@ -64,10 +64,10 @@ static CJMP_INS: &'static [Option<&str>] = &[
     Some("jecxz"),
     Some("jrcxz"),
 ];
-static LOOP_INS: &'static [Option<&str>] = &[Some("loop"), Some("loopne"), Some("loope")];
-static JMP_INS: &'static [Option<&str>] = &[Some("jmp"), Some("ljmp")];
-static RET_INS: &'static [Option<&str>] = &[Some("ret"), Some("retn"), Some("retf"), Some("iret")];
-static END_INS: &'static [Option<&str>] = &[
+static LOOP_INS: &[Option<&str>] = &[Some("loop"), Some("loopne"), Some("loope")];
+static JMP_INS: &[Option<&str>] = &[Some("jmp"), Some("ljmp")];
+static RET_INS: &[Option<&str>] = &[Some("ret"), Some("retn"), Some("retf"), Some("iret")];
+static END_INS: &[Option<&str>] = &[
     Some("ret"),
     Some("retn"),
     Some("retf"),
@@ -75,8 +75,8 @@ static END_INS: &'static [Option<&str>] = &[
     Some("int3"),
     Some("hlt"),
 ];
-static REGS_32BIT: &'static [&str] = &["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"];
-static REGS_64BIT: &'static [&str] = &[
+static REGS_32BIT: &[&str] = &["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"];
+static REGS_64BIT: &[&str] = &[
     "rax", "rbx", "rcx", "rdx", "rsp", "rbp", "rsi", "rdi", "rip", "r8", "r9", "r10", "r11", "r12",
     "r13", "r14", "r15",
 ];

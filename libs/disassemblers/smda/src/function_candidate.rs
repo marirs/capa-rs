@@ -234,9 +234,9 @@ impl FunctionCandidate {
     }
 
     pub fn has_common_function_start(&self) -> Result<bool> {
-        for (length, _) in &self.cp.cp {
+        for length in self.cp.cp.keys() {
             let byte_sequence = &self.bytes[..*length as usize];
-            if self.cp.cp[&length][&self.bitness].contains_key(byte_sequence) {
+            if self.cp.cp[length][&self.bitness].contains_key(byte_sequence) {
                 return Ok(true);
             }
         }
@@ -260,7 +260,7 @@ impl FunctionCandidate {
             if self.is_symbol { "s" } else { "-" },
             if self.is_stub { "u" } else { "-" },
             if self.alignment != 0 { "a" } else { "-" },
-            if let Some(_) = self.lang_spec {
+            if self.lang_spec.is_some() {
                 "l"
             } else {
                 "-"
@@ -270,7 +270,7 @@ impl FunctionCandidate {
             } else {
                 "-"
             },
-            if self.call_ref_sources.len() > 0 {
+            if !self.call_ref_sources.is_empty() {
                 "r"
             } else {
                 "-"
