@@ -214,7 +214,7 @@ impl RangeStatement {
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
         if let StatementElement::Feature(f) = &self.child {
-            let count = match features.get(&f) {
+            let count = match features.get(f) {
                 Some(ss) => ss.len(),
                 _ => 0,
             };

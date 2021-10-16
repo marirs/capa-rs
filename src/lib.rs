@@ -110,7 +110,7 @@ pub fn from_file(
     logger: &dyn Fn(&str),
 ) -> Result<FileCapabilities> {
     let extractor = extractor::Extractor::new(file_name, high_accuracy, resolve_tailcalls)?;
-    logger(&format!("loading rules..."));
+    logger(&"loading rules...".to_string());
     let rules = rules::RuleSet::new(rule_path)?;
     logger(&format!("loaded {} rules", rules.rules.len()));
     let mut file_capabilities;
@@ -243,7 +243,7 @@ pub fn find_function_capabilities<'a>(
                 }
             }
             for (va, _) in res {
-                index_rule_matches(&mut function_features, &rule, vec![va.clone()])?;
+                index_rule_matches(&mut function_features, rule, vec![*va])?;
             }
         }
     }
@@ -272,7 +272,7 @@ pub fn find_capabilities(
     let mut meta = HashMap::new();
     let functions = extractor.get_functions()?;
     let _n_funcs = functions.len();
-    logger(&format!("functions capabilities started"));
+    logger(&"functions capabilities started".to_string());
     for (index, (function_address, f)) in functions.iter().enumerate() {
         logger(&format!(
             "function 0x{:02x} {} from {} started",
@@ -284,7 +284,7 @@ pub fn find_capabilities(
         //}
         let (function_matches, bb_matches, feature_count) =
             find_function_capabilities(ruleset, extractor, f, logger)?;
-        meta.insert(function_address.clone(), feature_count);
+        meta.insert(*function_address, feature_count);
         for (rule, res) in &function_matches {
             match all_function_matches.get_mut(rule) {
                 Some(s) => {
@@ -310,7 +310,7 @@ pub fn find_capabilities(
             function_address, index, _n_funcs
         ));
     }
-    logger(&format!("functions capabilities finish"));
+    logger(&"functions capabilities finish".to_string());
     //# collection of features that captures the rule matches within function and BB scopes.
     //# mapping from feature (matched rule) to set of addresses at which it matched.
     let mut function_and_lower_features = HashMap::new();
@@ -359,9 +359,7 @@ pub fn find_file_capabilities<'a>(
                 }
             }
         } else {
-            if !file_features.contains_key(&feature) {
-                file_features.insert(feature, vec![]);
-            }
+            file_features.entry(feature).or_insert_with(std::vec::Vec::new);
         }
     }
 
@@ -430,7 +428,7 @@ impl FileCapabilities {
     pub fn new(
         #[cfg(feature = "meta")] extractor: &extractor::Extractor,
     ) -> Result<FileCapabilities> {
-        return Ok(FileCapabilities {
+        Ok(FileCapabilities {
             #[cfg(feature = "meta")]
             meta: Meta {
                 format: FileCapabilities::get_format(extractor)?,
@@ -445,7 +443,7 @@ impl FileCapabilities {
             features: 0,
             #[cfg(feature = "verbose")]
             functions_capabilities: BTreeMap::new(),
-        });
+        })
     }
 
     pub fn update_capabilities(
@@ -476,8 +474,7 @@ impl FileCapabilities {
                                     self.attacks.insert(
                                         parts[0].to_string(),
                                         vec![parts[1..].join("::").to_string()]
-                                            .iter()
-                                            .map(|s| s.clone())
+                                            .iter().cloned()
                                             .collect(),
                                     );
                                 }
@@ -508,8 +505,7 @@ impl FileCapabilities {
                                     self.mbc.insert(
                                         parts[0].to_string(),
                                         vec![parts[1..].join("::").to_string()]
-                                            .iter()
-                                            .map(|s| s.clone())
+                                            .iter().cloned()
                                             .collect(),
                                     );
                                 }
@@ -560,7 +556,7 @@ impl FileCapabilities {
     }
 
     pub fn get_format(extractor: &extractor::Extractor) -> Result<FileFormat> {
-        Ok(extractor.report.format.clone())
+        Ok(extractor.report.format)
     }
 
     pub fn get_arch(extractor: &extractor::Extractor) -> Result<FileArchitecture> {
@@ -574,9 +570,9 @@ impl FileCapabilities {
 
     pub fn get_os(extractor: &extractor::Extractor) -> Result<Os> {
         if let FileFormat::PE = extractor.report.format {
-            return Ok(Os::WINDOWS);
+            Ok(Os::WINDOWS)
         } else {
-            return Ok(Os::LINUX);
+            Ok(Os::LINUX)
         }
     }
 }
@@ -602,13 +598,13 @@ pub fn match_fn<'a>(
             if res.0 {
                 match results.get_mut(rule) {
                     Some(s) => {
-                        s.push((va.clone(), res));
+                        s.push((*va, res));
                     }
                     _ => {
-                        results.insert(rule, vec![(va.clone(), res)]);
+                        results.insert(rule, vec![(*va, res)]);
                     }
                 }
-                index_rule_matches(&mut features, rule, vec![va.clone()])?;
+                index_rule_matches(&mut features, rule, vec![*va])?;
             }
         }
     }
@@ -625,14 +621,14 @@ pub fn index_rule_matches(
             crate::rules::features::MatchedRuleFeature::new(&rule.name, "")?,
         )) {
             Some(s) => {
-                s.push(location.clone());
+                s.push(*location);
             }
             None => {
                 features.insert(
                     crate::rules::features::Feature::MatchedRule(
                         crate::rules::features::MatchedRuleFeature::new(&rule.name, "")?,
                     ),
-                    vec![location.clone()],
+                    vec![*location],
                 );
             }
         }
@@ -651,7 +647,7 @@ pub fn index_rule_matches(
                         crate::rules::features::MatchedRuleFeature::new(&namespace, "")?,
                     )) {
                         Some(s) => {
-                            s.push(location.clone());
+                            s.push(*location);
                         }
                         None => {
                             features.insert(
@@ -660,12 +656,12 @@ pub fn index_rule_matches(
                                         &namespace, "",
                                     )?,
                                 ),
-                                vec![location.clone()],
+                                vec![*location],
                             );
                         }
                     }
                 }
-                let parts: Vec<&str> = namespace.split("/").collect();
+                let parts: Vec<&str> = namespace.split('/').collect();
                 if parts.len() == 1 {
                     ns = None;
                 } else {

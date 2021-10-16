@@ -42,7 +42,7 @@ impl Value {
 
     pub fn get_int(&self) -> Result<i128> {
         match self {
-            Value::Int(s) => Ok(s.clone()),
+            Value::Int(s) => Ok(*s),
             _ => Err(Error::InvalidRule(
                 line!(),
                 format!("{:?} need to be int", self),
@@ -123,10 +123,10 @@ impl Rule {
     }
 
     fn parse_range(s: &str) -> Result<(i128, i128)> {
-        if !s.starts_with("(") {
+        if !s.starts_with('(') {
             return Err(Error::InvalidRule(line!(), s.to_string()));
         }
-        if !s.ends_with(")") {
+        if !s.ends_with(')') {
             return Err(Error::InvalidRule(line!(), s.to_string()));
         }
         let s = &s["(".len()..s.len() - ")".len()];
@@ -206,7 +206,7 @@ impl Rule {
                        //other features can have inline descriptions, like `number: 10 = CONST_FOO`.
                        //in this case, the RHS will be like `10 = CONST_FOO` or some other string
                 if s.contains(" = ") {
-                    if let Some(_) = description {
+                    if description.is_some() {
                         // there is already a description passed in as a sub node, like:
                         //
                         //    - number: 10 = CONST_FOO
@@ -216,7 +216,7 @@ impl Rule {
                     let parts: Vec<&str> = s.split(" = ").collect();
                     v = parts[0].trim();
                     let ddd = parts[1];
-                    if ddd == "" {
+                    if ddd.is_empty() {
                         //# sanity check:
                         //# there is an empty description, like `number: 10 =`
                         return Err(Error::InvalidRule(line!(), s.to_string()));
@@ -254,7 +254,7 @@ impl Rule {
 
     pub fn from_yaml(s: &str) -> Result<Rule> {
         let doc = YamlLoader::load_from_str(s)?;
-        if doc.len() == 0 {
+        if doc.is_empty() {
             return Err(Error::InvalidRule(line!(), s.to_string()));
         }
         Rule::from_dict(&doc[0], s)
@@ -505,7 +505,7 @@ impl Rule {
                         return Ok(StatementElement::Statement(Box::new(Statement::Some(
                             SomeStatement::new(count, params, &description)?,
                         ))));
-                    } else if kkey.starts_with("count(") && kkey.ends_with(")") {
+                    } else if kkey.starts_with("count(") && kkey.ends_with(')') {
                         // e.g.:
                         //count(basic block)
                         //count(mnemonic(mov))
@@ -514,11 +514,11 @@ impl Rule {
                         //when looking for the existence of such a feature, our rule might look like:
                         //- mnemonic: mov
                         //but here we deal with the form: `mnemonic(mov)`.
-                        let parts: Vec<&str> = term.split("(").collect();
+                        let parts: Vec<&str> = term.split('(').collect();
                         let term = parts[0];
                         let arg = if parts.len() > 1 { parts[1] } else { "" };
                         let feature_type = Rule::parse_feature_type(term)?;
-                        let arg = if arg != "" {
+                        let arg = if !arg.is_empty() {
                             &arg[..arg.len() - ")".len()]
                         } else {
                             ""
@@ -558,7 +558,7 @@ impl Rule {
                                         &val[..val.len() - " or more".len()],
                                         10,
                                     )?;
-                                    let max = 0xFFFFFFFF as u32;
+                                    let max = 0xFFFFFFFF_u32;
                                     return Ok(StatementElement::Statement(Box::new(
                                         Statement::Range(RangeStatement::new(
                                             StatementElement::Feature(Box::new(feature)),
@@ -568,7 +568,7 @@ impl Rule {
                                         )?),
                                     )));
                                 } else if val.ends_with(" or fewer") {
-                                    let min = 0 as u32;
+                                    let min = 0_u32;
                                     let max = i64::from_str_radix(
                                         &val[..val.len() - " or fewer".len()],
                                         10,
@@ -581,7 +581,7 @@ impl Rule {
                                             "",
                                         )?),
                                     )));
-                                } else if val.starts_with("(") {
+                                } else if val.starts_with('(') {
                                     let (min, max) = Rule::parse_range(val)?;
                                     return Ok(StatementElement::Statement(Box::new(
                                         Statement::Range(RangeStatement::new(
@@ -608,7 +608,7 @@ impl Rule {
                         let feature_type = Rule::parse_feature_type(kkey)?;
                         let val = match &d[key] {
                             Yaml::String(s) => s.clone(),
-                            Yaml::Integer(i) => i.to_string().clone(),
+                            Yaml::Integer(i) => i.to_string(),
                             _ => return Err(Error::InvalidRule(line!(), format!("{:?}", d[key]))),
                         };
                         let description = match &d.get(&Yaml::String("description".to_string())) {
@@ -759,8 +759,8 @@ pub fn get_rules_for_scope<'a>(
         scope_rules.append(&mut get_rules_and_dependencies(rules, &rule.name)?);
     }
     let trules = topologically_order_rules(scope_rules)?;
-    let res = get_rules_with_scope(trules, scope);
-    res
+    
+    get_rules_with_scope(trules, scope)
 }
 
 pub fn get_rules_and_dependencies<'a>(
@@ -839,7 +839,7 @@ pub fn index_rules_by_namespace(
                                 namespaces.insert(nss.clone(), vec![rule]);
                             }
                         }
-                        let parts: Vec<&str> = nss.split("/").collect();
+                        let parts: Vec<&str> = nss.split('/').collect();
                         if parts.len() == 1 {
                             ns = None;
                         } else {
@@ -883,7 +883,7 @@ pub fn index_rules_by_namespace2<'a>(
                                 namespaces.insert(nss.clone(), vec![rule]);
                             }
                         }
-                        let parts: Vec<&str> = nss.split("/").collect();
+                        let parts: Vec<&str> = nss.split('/').collect();
                         if parts.len() == 1 {
                             ns = None;
                         } else {

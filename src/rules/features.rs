@@ -54,7 +54,7 @@ impl Feature {
             )?)),
             RuleFeatureType::StringFactory => {
                 let vv = value.get_str()?;
-                if vv.starts_with("/") && (vv.ends_with("/") || vv.ends_with("/i")) {
+                if vv.starts_with('/') && (vv.ends_with('/') || vv.ends_with("/i")) {
                     Ok(Feature::Regex(RegexFeature::new(
                         &value.get_str()?,
                         description,
@@ -397,7 +397,7 @@ impl OffsetFeature {
     pub fn new(bitness: u32, value: &i128, description: &str) -> Result<OffsetFeature> {
         Ok(OffsetFeature {
             bitness,
-            value: value.clone(),
+            value: *value,
             description: description.to_string(),
         })
     }
@@ -445,7 +445,7 @@ impl NumberFeature {
     pub fn new(bitness: u32, value: &i128, description: &str) -> Result<NumberFeature> {
         Ok(NumberFeature {
             bitness,
-            value: value.clone(),
+            value: *value,
             description: description.to_string(),
         })
     }
@@ -680,7 +680,7 @@ impl SubstringFeature {
                 }
             }
         }
-        if matches.len() > 0 {
+        if !matches.is_empty() {
             //finalize: defaultdict -> dict
             //which makes json serialization easier
 
@@ -694,9 +694,9 @@ impl SubstringFeature {
             //# unlike other features, we cannot return put a reference to `self` directly in a `Result`.
             //# this is because `self` may match on many strings, so we can't stuff the matched value into it.
             //# instead, return a new instance that has a reference to both the substring and the matched values.
-            return Ok((true, locations.iter().map(|a| *a).collect()));
+            return Ok((true, locations.iter().copied().collect()));
         } else {
-            return Ok((false, vec![]));
+            Ok((false, vec![]))
         }
     }
 }
@@ -747,12 +747,12 @@ impl RegexFeature {
         let mut ll = vec![];
         for (feature, locations) in features {
             if let Feature::String(s) = feature {
-                if let Some(_) = self.re.find(&s.value.as_bytes()) {
+                if let Some(_) = self.re.find(s.value.as_bytes()) {
                     ll.extend(locations);
                 }
             }
         }
-        if ll.len() > 0 {
+        if !ll.is_empty() {
             return Ok((true, ll));
         }
         Ok((false, vec![]))

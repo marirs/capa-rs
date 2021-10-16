@@ -49,7 +49,7 @@ impl Extractor {
     }
 
     pub fn extract_arch(&self) -> Result<crate::FileArchitecture> {
-        Ok(self.report.architecture.clone())
+        Ok(self.report.architecture)
     }
 
     pub fn extract_global_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
@@ -82,7 +82,7 @@ impl Extractor {
                 crate::rules::features::Feature::Characteristic(
                     crate::rules::features::CharacteristicFeature::new("calls to", "")?,
                 ),
-                inref.clone(),
+                *inref,
             ));
         }
         //parse if a function has a loop
@@ -95,12 +95,12 @@ impl Extractor {
                 edges.push((*bb_from, *bb_to))
             }
         }
-        if edges.len() > 0 && self.has_loop(&vertices_names, &edges)? {
+        if !edges.is_empty() && self.has_loop(&vertices_names, &edges)? {
             res.push((
                 crate::rules::features::Feature::Characteristic(
                     crate::rules::features::CharacteristicFeature::new("loop", "")?,
                 ),
-                f.offset.clone(),
+                f.offset,
             ));
         }
         Ok(res)
@@ -114,7 +114,7 @@ impl Extractor {
         let mut vertices = std::collections::HashMap::new();
         let mut graph = petgraph::graph::Graph::<u64, ()>::new(); // directed and unlabeled
         for n in vertices_names {
-            vertices.insert(n, graph.add_node(n.clone()));
+            vertices.insert(n, graph.add_node(*n));
         }
         graph.extend_with_edges(
             edges
@@ -179,11 +179,11 @@ impl Extractor {
             res.push((
                 crate::rules::features::Feature::Section(
                     crate::rules::features::SectionFeature::new(
-                        &n.trim_matches(char::from(0)),
+                        n.trim_matches(char::from(0)),
                         "",
                     )?,
                 ),
-                b.clone() as u64,
+                *b as u64,
             ));
         }
         Ok(res)
@@ -194,9 +194,9 @@ impl Extractor {
         for (e, o) in &self.report.exports {
             res.push((
                 crate::rules::features::Feature::Export(
-                    crate::rules::features::ExportFeature::new(&e, "")?,
+                    crate::rules::features::ExportFeature::new(e, "")?,
                 ),
-                o.clone() as u64,
+                *o as u64,
             ));
         }
         Ok(res)
@@ -210,7 +210,7 @@ impl Extractor {
                     crate::rules::features::Feature::Import(
                         crate::rules::features::ImportFeature::new(&n, "")?,
                     ),
-                    o.clone() as u64,
+                    *o as u64,
                 ));
             }
         }
@@ -226,19 +226,19 @@ impl Extractor {
             crate::rules::features::Feature::BasicBlock(
                 crate::rules::features::BasicBlockFeature::new()?,
             ),
-            bb.0.clone(),
+            *bb.0,
         ));
-        if f.blockrefs.contains_key(&bb.0) && f.blockrefs[&bb.0].contains(&bb.0) {
+        if f.blockrefs.contains_key(bb.0) && f.blockrefs[bb.0].contains(bb.0) {
             res.push((
                 crate::rules::features::Feature::Characteristic(
                     crate::rules::features::CharacteristicFeature::new("tight loop", "")?,
                 ),
-                bb.0.clone(),
+                *bb.0,
             ));
         }
         let mut count = 0;
         for instr in bb.1 {
-            if is_mov_imm_to_stack(&instr)? {
+            if is_mov_imm_to_stack(instr)? {
                 count += instr.get_printable_len()?;
             }
             if count > 8 {
@@ -247,7 +247,7 @@ impl Extractor {
                     crate::rules::features::Feature::Characteristic(
                         crate::rules::features::CharacteristicFeature::new("stack string", "")?,
                     ),
-                    bb.0.clone(),
+                    *bb.0,
                 ));
             }
         }
@@ -326,7 +326,7 @@ impl Extractor {
                     crate::rules::features::Feature::Characteristic(
                         crate::rules::features::CharacteristicFeature::new("calls from", "")?,
                     ),
-                    outref.clone(),
+                    *outref,
                 ));
                 if outref == &f.offset {
                     //if we found a jump target and it's the function address
@@ -338,7 +338,7 @@ impl Extractor {
                                 "",
                             )?,
                         ),
-                        outref.clone(),
+                        *outref,
                     ));
                 }
             }
@@ -361,7 +361,7 @@ impl Extractor {
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         if let Some(o) = &insn.operands {
-            let operands: Vec<String> = o.split(",").map(|s| s.trim().to_string()).collect();
+            let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
             for operand in operands {
                 if operand.contains("fs:") {
                     res.push((
@@ -398,7 +398,7 @@ impl Extractor {
 
             if f.outrefs.contains_key(&insn.offset) {
                 for target in &f.outrefs[&insn.offset] {
-                    if self.report.get_section(&insn.offset)? != self.report.get_section(&target)? {
+                    if self.report.get_section(&insn.offset)? != self.report.get_section(target)? {
                         res.push((
                             crate::rules::features::Feature::Characteristic(
                                 crate::rules::features::CharacteristicFeature::new(
@@ -441,7 +441,7 @@ impl Extractor {
             return Ok(res);
         }
         if let Some(o) = &insn.operands {
-            let operands: Vec<String> = o.split(",").map(|s| s.trim().to_string()).collect();
+            let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
             for operand in operands {
                 if operand.contains("fs:") && operand.contains("0x30") {
                     res.push((
@@ -490,7 +490,7 @@ impl Extractor {
             return Ok(res);
         }
         if let Some(o) = &insn.operands {
-            let operands: Vec<String> = o.split(",").map(|s| s.trim().to_string()).collect();
+            let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
             if operands[0] == operands[1] {
                 return Ok(res);
             }
@@ -520,7 +520,7 @@ impl Extractor {
         //#     mov eax, [esi + 4]
         //#     mov eax, [esi + ecx + 16384]
         if let Some(o) = &insn.operands {
-            let operands: Vec<String> = o.split(",").map(|s| s.trim().to_string()).collect();
+            let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
             for operand in operands {
                 if !operand.contains("ptr") {
                     continue;
@@ -540,12 +540,12 @@ impl Extractor {
                 if let Some(n) = number_hex {
                     number = i128::from_str_radix(&n["num"][2..], 16)?;
                     if &n["num"] == "-" {
-                        number = -1 * number;
+                        number *= -1;
                     }
                 } else if let Some(n) = number_int {
                     number = i128::from_str_radix(&n["num"], 10)?;
                     if &n["num"] == "-" {
-                        number = -1 * number;
+                        number *= -1;
                     }
                 }
                 res.push((
@@ -575,7 +575,7 @@ impl Extractor {
                 res.push((
                     crate::rules::features::Feature::String(
                         crate::rules::features::StringFeature::new(
-                            string_read.trim_end_matches("\x00"),
+                            string_read.trim_end_matches('\x00'),
                             "",
                         )?,
                     ),
@@ -621,7 +621,7 @@ impl Extractor {
         //#
         //#     push    3136B0h         ; dwControlCode
         if let Some(o) = &insn.operands {
-            let operands: Vec<String> = o.split(",").map(|s| s.trim().to_string()).collect();
+            let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
             if insn.mnemonic == "add"
                 && ["esp".to_string(), "rsp".to_string()].contains(&operands[0])
             {
@@ -641,7 +641,7 @@ impl Extractor {
                             insn.offset,
                         ));
                     }
-                } else if operand.ends_with("h") {
+                } else if operand.ends_with('h') {
                     if let Ok(s) = i128::from_str_radix(&operand[..operand.len() - 1], 16) {
                         res.push((
                             crate::rules::features::Feature::Number(
@@ -650,15 +650,13 @@ impl Extractor {
                             insn.offset,
                         ));
                     }
-                } else {
-                    if let Ok(s) = i128::from_str_radix(&operand, 16) {
-                        res.push((
-                            crate::rules::features::Feature::Number(
-                                crate::rules::features::NumberFeature::new(f.bitness, &s, "")?,
-                            ),
-                            insn.offset,
-                        ));
-                    }
+                } else if let Ok(s) = i128::from_str_radix(operand, 16) {
+                    res.push((
+                        crate::rules::features::Feature::Number(
+                            crate::rules::features::NumberFeature::new(f.bitness, &s, "")?,
+                        ),
+                        insn.offset,
+                    ));
                 }
             }
         }
@@ -674,12 +672,12 @@ impl Extractor {
         let mut res = vec![];
         if f.apirefs.contains_key(&insn.offset) {
             let (dll, api) = &f.apirefs[&insn.offset];
-            for name in generate_symbols(&dll, &api)? {
+            for name in generate_symbols(dll, api)? {
                 res.push((
                     crate::rules::features::Feature::Api(crate::rules::features::ApiFeature::new(
                         &name, "",
                     )?),
-                    insn.offset.clone(),
+                    insn.offset,
                 ));
             }
         } else if f.outrefs.contains_key(&insn.offset) {
@@ -694,12 +692,12 @@ impl Extractor {
                         if referenced_function.is_api_thunk()? {
                             if referenced_function.apirefs.contains_key(&target) {
                                 let (dll, api) = &referenced_function.apirefs[&target];
-                                for name in generate_symbols(&dll, &api)? {
+                                for name in generate_symbols(dll, api)? {
                                     res.push((
                                         crate::rules::features::Feature::Api(
                                             crate::rules::features::ApiFeature::new(&name, "")?,
                                         ),
-                                        insn.offset.clone(),
+                                        insn.offset,
                                     ));
                                 }
                             }
@@ -707,7 +705,7 @@ impl Extractor {
                             && referenced_function.get_num_outrefs()? == 1
                         {
                             current_function = referenced_function;
-                            current_instruction = &referenced_function.get_instructions()?[0];
+                            current_instruction = referenced_function.get_instructions()?[0];
                         }
                     } else {
                         return Ok(res);
@@ -747,7 +745,7 @@ impl Extractor {
             }
         }
         let mut res = vec![];
-        while todo.len() > 0 {
+        while !todo.is_empty() {
             // println!("{}", todo.len());
             let (off, mzx, pex, key) = todo.pop().unwrap();
             //The MZ header has one field we will check
@@ -800,7 +798,7 @@ pub fn is_mov_imm_to_stack(ins: &Instruction) -> Result<bool> {
     }
 
     if let Ok((dst, src)) = get_operands(ins) {
-        if let Ok(_) = u64::from_str_radix(&src[2..], 16) {
+        if u64::from_str_radix(&src[2..], 16).is_ok() {
             for regname in ["ebp", "rbp", "esp", "rsp"] {
                 if dst.contains(regname) {
                     return Ok(false);
@@ -814,7 +812,7 @@ pub fn is_mov_imm_to_stack(ins: &Instruction) -> Result<bool> {
 
 pub fn get_operands(ins: &Instruction) -> Result<(String, String)> {
     if let Some(s) = &ins.operands {
-        let parts: Vec<&str> = s.split(",").collect();
+        let parts: Vec<&str> = s.split(',').collect();
         if parts.len() > 1 {
             return Ok((parts[0].to_string(), parts[1].to_string()));
         } else {
@@ -842,7 +840,7 @@ pub fn generate_symbols(dll: &Option<String>, symbol: &Option<String>) -> Result
     }
 
     //TODO
-    if symbol_name.ends_with("A") || symbol_name.ends_with("W") {
+    if symbol_name.ends_with('A') || symbol_name.ends_with('W') {
         res.push(format!(
             "{}.{}",
             dll_name,
@@ -863,7 +861,7 @@ pub fn derefs(report: &DisassemblyReport, p: &u64) -> Result<Vec<u64>> {
         if !report.is_addr_within_memory_image(&pp)? {
             break;
         }
-        res.push(pp.clone());
+        res.push(pp);
 
         let bytes_: [u8; 4] = read_bytes(report, &pp, 4)?.try_into()?;
         let val = u32::from_le_bytes(bytes_) as u64;
@@ -889,9 +887,9 @@ pub fn read_bytes<'a>(
     let rva = va - report.base_addr;
     let buffer_end = report.buffer.len();
     if rva + num_bytes as u64 > buffer_end as u64 {
-        return Ok(&report.buffer[rva as usize..]);
+        Ok(&report.buffer[rva as usize..])
     } else {
-        return Ok(&report.buffer[rva as usize..rva as usize + num_bytes]);
+        Ok(&report.buffer[rva as usize..rva as usize + num_bytes])
     }
 }
 
@@ -903,7 +901,7 @@ pub fn read_string(report: &DisassemblyReport, offset: &u64) -> Result<String> {
     let ulen = detect_unicode_len(report, offset)?;
     if ulen > 2 {
         let bb: &[u16] = &to_u16(read_bytes(report, offset, ulen)?)?;
-        return Ok(std::string::String::from_utf16(bb)?.to_string());
+        return Ok(std::string::String::from_utf16(bb)?);
     }
     Ok("".to_string())
 }
@@ -955,7 +953,7 @@ pub fn is_security_cookie(
 ) -> Result<bool> {
     //# security cookie check should use SP or BP
     if let Some(o) = &insn.operands {
-        let operands: Vec<String> = o.split(",").map(|s| s.trim().to_string()).collect();
+        let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
         if !["esp", "ebp", "rsp", "rbp"].contains(&&operands[1][..]) {
             return Ok(false);
         }
