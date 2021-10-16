@@ -12,7 +12,7 @@ For example, it might suggest that the file is a backdoor, is capable of install
 
 ### Running the example cli
 ```bash
-capa_cli Demo64.dll
+./capa_cli Demo64.dll
 +--------------+-------------+
 |      File Properties       |
 +==============+=============+
