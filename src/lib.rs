@@ -8,7 +8,7 @@ use goblin::Object;
 use itertools::Itertools;
 use serde::Serialize;
 use smda::{function::Function, FileArchitecture, FileFormat};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Debug, Clone, Serialize)]
 pub enum Os {
@@ -133,7 +133,7 @@ pub fn from_file(
         file_capabilities.update_capabilities(&capabilities, &counts)?;
     }
 
-    file_capabilities.attacks.keys().sorted();
+    // file_capabilities.attacks.keys().sorted();
 
     Ok(file_capabilities)
 }
@@ -416,13 +416,13 @@ where
 pub struct FileCapabilities {
     #[cfg(feature = "meta")]
     meta: Meta,
-    attacks: HashMap<String, HashSet<String>>,
-    mbc: HashMap<String, HashSet<String>>,
-    capability_namespaces: HashMap<String, String>,
+    attacks: BTreeMap<String, BTreeSet<String>>,
+    mbc: BTreeMap<String, BTreeSet<String>>,
+    capability_namespaces: BTreeMap<String, String>,
     #[cfg(feature = "verbose")]
     features: usize,
     #[cfg(feature = "verbose")]
-    functions_capabilities: HashMap<u64, FunctionCapabilities>,
+    functions_capabilities: BTreeMap<u64, FunctionCapabilities>,
 }
 
 impl FileCapabilities {
@@ -437,13 +437,13 @@ impl FileCapabilities {
                 os: FileCapabilities::get_os(extractor)?,
                 base_address: extractor.get_base_address()? as usize,
             },
-            attacks: HashMap::new(),
-            mbc: HashMap::new(),
-            capability_namespaces: HashMap::new(),
+            attacks: BTreeMap::new(),
+            mbc: BTreeMap::new(),
+            capability_namespaces: BTreeMap::new(),
             #[cfg(feature = "verbose")]
             features: 0,
             #[cfg(feature = "verbose")]
-            functions_capabilities: HashMap::new(),
+            functions_capabilities: BTreeMap::new(),
         });
     }
 
