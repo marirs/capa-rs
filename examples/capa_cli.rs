@@ -13,15 +13,9 @@ fn main() {
         }
     };
 
-    match capa::from_file(
-        &filename,
-        "rules",
-        true,
-        true,
-        &|_s| {
-            //                                           println!("{}", s);
-        }
-    ) {
+    match capa::from_file(&filename, "rules", true, true, &|_s| {
+        //                                           println!("{}", s);
+    }) {
         Err(e) => println!("{:?}", e),
         Ok(s) => {
             match to_value(&s) {
