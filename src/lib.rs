@@ -3,7 +3,6 @@ mod extractor;
 pub mod rules;
 
 use goblin::Object;
-// use itertools::Itertools;
 use serde::Serialize;
 use smda::{function::Function, FileArchitecture, FileFormat};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -134,8 +133,6 @@ pub fn from_file(
         let (capabilities, counts) = find_capabilities(&rules, &extractor, logger)?;
         file_capabilities.update_capabilities(&capabilities, &counts)?;
     }
-
-    // file_capabilities.attacks.keys().sorted();
 
     Ok(file_capabilities)
 }
