@@ -488,13 +488,14 @@ impl Rule {
                         format!("{:?} must be string", key),
                     ))?;
                     if kkey.ends_with(" or more") {
-                        let count =
-                            u32::from_str_radix(&kkey[..kkey.len() - " or more".len()], 10)?;
+                        // let count =
+                        //     u32::from_str_radix(&kkey[..kkey.len() - " or more".len()], 10)?;
+                        let count = (&kkey[..kkey.len() - " or more".len()]).parse::<u32>()?;
                         let mut params = vec![];
                         let mut description = "".to_string();
                         let val = vval
                             .as_vec()
-                            .ok_or(Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+                            .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                         for vv in val {
                             let p = Rule::build_statements(vv, scope)?;
                             match p {
@@ -554,10 +555,11 @@ impl Rule {
                             }
                             Yaml::String(val) => {
                                 if val.ends_with(" or more") {
-                                    let min = i64::from_str_radix(
-                                        &val[..val.len() - " or more".len()],
-                                        10,
-                                    )?;
+                                    // let min = i64::from_str_radix(
+                                    //     &val[..val.len() - " or more".len()],
+                                    //     10,
+                                    // )?;
+                                    let min = (&val[..val.len() - " or more".len()]).parse::<i64>()?;
                                     let max = 0xFFFFFFFF_u32;
                                     return Ok(StatementElement::Statement(Box::new(
                                         Statement::Range(RangeStatement::new(
@@ -569,10 +571,11 @@ impl Rule {
                                     )));
                                 } else if val.ends_with(" or fewer") {
                                     let min = 0_u32;
-                                    let max = i64::from_str_radix(
-                                        &val[..val.len() - " or fewer".len()],
-                                        10,
-                                    )?;
+                                    let max = (&val[..val.len() - " or fewer".len()]).parse::<i64>()?;
+                                    // let max = i64::from_str_radix(
+                                    //     &val[..val.len() - " or fewer".len()],
+                                    //     10,
+                                    // )?;
                                     return Ok(StatementElement::Statement(Box::new(
                                         Statement::Range(RangeStatement::new(
                                             StatementElement::Feature(Box::new(feature)),
@@ -663,7 +666,7 @@ pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
         let fname = entry
             .path()
             .to_str()
-            .ok_or(Error::InvalidRule(
+            .ok_or_else(|| Error::InvalidRule(
                 line!(),
                 format!("file error {:?}", entry),
             ))?
