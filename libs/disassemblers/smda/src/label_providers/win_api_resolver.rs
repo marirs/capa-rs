@@ -148,7 +148,7 @@ impl WinApiResolver {
                             .ok_or(Error::JsonFormatError(file!(), line!()))?
                     );
                 }
-                let dll_name: Vec<&str> = name.split("_").collect();
+                let dll_name: Vec<&str> = name.split('_').collect();
                 let dll_name = format!("{}_{}", dll_name[2], dll_name[3]);
                 let bitness = dll_entry["bitness"]
                     .as_u64()

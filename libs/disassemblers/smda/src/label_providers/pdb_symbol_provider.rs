@@ -13,14 +13,11 @@ impl PdbSymbolProvider {
     }
 
     pub fn update(&mut self, binary_info: &BinaryInfo) -> Result<()> {
-        match goblin::Object::parse(&binary_info.raw_data)? {
-            goblin::Object::PE(pe) => {
-                self.func_symbols.insert(
-                    binary_info.base_addr + pe.entry as u64,
-                    "original_entry_point".to_string(),
-                );
-            }
-            _ => {}
+        if let goblin::Object::PE(pe) = goblin::Object::parse(&binary_info.raw_data)? {
+            self.func_symbols.insert(
+                binary_info.base_addr + pe.entry as u64,
+                "original_entry_point".to_string(),
+            );
         }
         Ok(())
     }

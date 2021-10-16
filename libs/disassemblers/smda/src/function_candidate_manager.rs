@@ -830,7 +830,7 @@ impl FunctionCandidateManager {
             //LOGGER.debug("initGapSearch()")
             self.gap_pointer = self.get_bitmask();
             self.update_function_gaps(disassembly)?;
-            if self.function_gaps.len() > 0 {
+            if !self.function_gaps.is_empty() {
                 self.gap_pointer = self.function_gaps[0].0;
             }
         }
@@ -863,7 +863,7 @@ impl FunctionCandidateManager {
         let mut prev_ins = 0;
         let mut min_code = self.get_bitmask();
         let mut max_code = 0;
-        for (f, _) in &disassembly.code_map {
+        for f in disassembly.code_map.keys() {
             if min_code > *f {
                 min_code = *f;
             }

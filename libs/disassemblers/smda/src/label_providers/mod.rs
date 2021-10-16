@@ -6,18 +6,11 @@ pub mod win_api_resolver;
 pub mod pdb_symbol_provider;
 
 pub fn init() -> Result<Vec<LabelProvider>> {
-    let mut res = vec![];
-    res.push(LabelProvider::WinApi(
-        win_api_resolver::WinApiResolver::new()?,
-    ));
-    res.push(LabelProvider::ElfApi(
-        elf_api_resolver::ElfApiResolver::new()?,
-    ));
-    //        self.label_providers.append(ElfSymbolProvider(self.config))
-    res.push(LabelProvider::PdbSymbol(
-        pdb_symbol_provider::PdbSymbolProvider::new()?,
-    ));
-    Ok(res)
+    Ok(vec![
+        LabelProvider::WinApi(win_api_resolver::WinApiResolver::new()?),
+        LabelProvider::ElfApi(elf_api_resolver::ElfApiResolver::new()?),
+        LabelProvider::PdbSymbol(pdb_symbol_provider::PdbSymbolProvider::new()?),
+    ])
 }
 
 #[derive(Debug, Clone)]

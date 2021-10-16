@@ -41,7 +41,7 @@ impl IndirectCallAnalyser {
                     start_block.push(ins);
                 }
             }
-            if start_block.len() > 0 {
+            if !start_block.is_empty() {
                 let mut s: String = start_block[start_block.len() - 1]
                     .3
                     .as_ref()
@@ -93,7 +93,7 @@ impl IndirectCallAnalyser {
         api_e: &mut Vec<(u64, ApiEntry)>,
         cand_e: &mut Vec<(u64, u64)>,
     ) -> Result<bool> {
-        if block.len() == 0 {
+        if block.is_empty() {
             return Ok(false);
         }
         if processed.contains(&block) {
@@ -155,7 +155,7 @@ impl IndirectCallAnalyser {
                     r"(?P<reg>[a-z]{3}), qword ptr \[rip \+ (?P<addr>0x[0-9a-f]{1,8})\]$",
                 )
                 .unwrap();
-                for match4 in re.captures_iter(&ins.3.as_ref().unwrap()) {
+                for match4 in re.captures_iter(ins.3.as_ref().unwrap()) {
                     let rip = ins.0 + ins.1 as u64;
                     if let Ok(dword) = self.get_dword(
                         rip + u64::from_str_radix(&match4["addr"][2..], 16)?,
@@ -239,7 +239,7 @@ impl IndirectCallAnalyser {
             let mut refs_in = vec![];
             for (fr, to) in &analysis_state.code_refs {
                 for block in processed.iter() {
-                    if to == &block[0].0 && !l.contains(&fr) {
+                    if to == &block[0].0 && !l.contains(fr) {
                         refs_in.push(fr);
                     }
                 }
@@ -276,6 +276,6 @@ impl IndirectCallAnalyser {
             return Err(Error::LogicError(file!(), line!()));
         }
         let extracted_dword: &[u8; 4] = &disassembler.disassembly.get_bytes(addr, 4)?.try_into()?;
-        return Ok(u32::from_le_bytes(*extracted_dword) as u64);
+        Ok(u32::from_le_bytes(*extracted_dword) as u64)
     }
 }

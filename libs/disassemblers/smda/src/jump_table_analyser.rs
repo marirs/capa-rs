@@ -43,10 +43,7 @@ impl JumpTableAnalyser {
         state: &mut FunctionAnalysisState,
     ) -> Result<Vec<u64>> {
         let jump_instruction_address = jump_instruction.address();
-        let jump_instruction_op_str = match jump_instruction.op_str() {
-            Some(s) => s,
-            None => "",
-        };
+        let jump_instruction_op_str = jump_instruction.op_str().unwrap_or("");
         let mut table_offsets = vec![];
         let backtracked = state.backtrack_instructions(jump_instruction_address, 50)?;
         let backtracked_sequence = ""; //"-".join([ins[2] for ins in backtracked[::-1]][:3])
@@ -100,17 +97,8 @@ impl JumpTableAnalyser {
                         disassembler,
                     )?;
                 }
-            } else if backtracked_sequence.starts_with("lea") {
-                jumptable_size = self.find_jump_table_size(&backtracked)?;
-                let off_jumptable = self.x64_handler(disassembler, state, &backtracked, None)?;
-                table_offsets = self.extract_relative_table_offsets(
-                    Some(jumptable_size),
-                    off_jumptable,
-                    None,
-                    0,
-                    disassembler,
-                )?;
-            } else if backtracked_sequence.starts_with("add-add")
+            } else if backtracked_sequence.starts_with("lea")
+                || backtracked_sequence.starts_with("add-add")
                 || backtracked_sequence.starts_with("add-shr")
             {
                 jumptable_size = self.find_jump_table_size(&backtracked)?;
@@ -140,10 +128,10 @@ impl JumpTableAnalyser {
 
     pub fn find_jump_table_size(
         &self,
-        backtracked: &Vec<(u64, u32, Option<String>, Option<String>, Vec<u8>)>,
+        backtracked: &[(u64, u32, Option<String>, Option<String>, Vec<u8>)],
     ) -> Result<usize> {
         let mut jumptable_size = 0;
-        if backtracked.len() == 0 {
+        if backtracked.is_empty() {
             return Ok(jumptable_size);
         }
         for instr in &backtracked[..backtracked.len() - 1] {
@@ -175,10 +163,7 @@ impl JumpTableAnalyser {
         jumptable_address: u64,
         jumptable_size: Option<usize>,
     ) -> Result<Vec<u64>> {
-        let jumptable_size = match jumptable_size {
-            Some(s) => s,
-            None => 0xFF,
-        };
+        let jumptable_size = jumptable_size.unwrap_or(0xFF);
         let mut jumptable_addresses = vec![];
         let bitness = disassembly.binary_info.bitness;
         let entry_size = match bitness {
@@ -218,7 +203,7 @@ impl JumpTableAnalyser {
         jump_instruction_op_str: &str,
         disassembler: &Disassembler,
         state: &mut FunctionAnalysisState,
-        backtracked: &Vec<(u64, u32, Option<String>, Option<String>, Vec<u8>)>,
+        backtracked: &[(u64, u32, Option<String>, Option<String>, Vec<u8>)],
     ) -> Result<u64> {
         let register = jump_instruction_op_str.to_lowercase();
         let mut off_jumptable = None;
@@ -280,7 +265,7 @@ impl JumpTableAnalyser {
                 }
             }
         }
-        jump_targets.sort();
+        jump_targets.sort_unstable();
         Ok(jump_targets)
     }
 
@@ -288,7 +273,7 @@ impl JumpTableAnalyser {
         &self,
         disassembler: &Disassembler,
         state: &mut FunctionAnalysisState,
-        backtracked: &Vec<(u64, u32, Option<String>, Option<String>, Vec<u8>)>,
+        backtracked: &[(u64, u32, Option<String>, Option<String>, Vec<u8>)],
         target_register: Option<String>,
     ) -> Result<u64> {
         let mut off_jumptable = None;
@@ -305,13 +290,13 @@ impl JumpTableAnalyser {
                     let data_ref_instruction_addr = instr.0;
                     let mut offset =
                         disassembler.get_referenced_addr(instr.3.as_ref().unwrap())? as i64;
-                    let rip_sign = if instr.3.as_ref().unwrap().contains("+") {
+                    let rip_sign = if instr.3.as_ref().unwrap().contains('+') {
                         "+"
                     } else {
                         "-"
                     };
                     if rip_sign == "-" {
-                        offset = offset * -1;
+                        offset *= -1;
                     }
                     off_jumptable = Some(instr.0 as i64 + instr.1 as i64 + offset);
                     state.add_data_ref(
@@ -337,10 +322,7 @@ impl JumpTableAnalyser {
         bonus_offset: u64,
         disassembler: &Disassembler,
     ) -> Result<Vec<u64>> {
-        let jumptable_size = match jumptable_size {
-            Some(s) => s,
-            None => 0xFF,
-        };
+        let jumptable_size = jumptable_size.unwrap_or(0xFF);
         let mut jump_targets = vec![];
         let jump_base = match alternative_base {
             Some(s) => s,
@@ -378,7 +360,7 @@ impl JumpTableAnalyser {
                     let target = (jump_base + entry) & disassembler.get_bitmask();
                     jump_targets.push(target);
                     //# state.addDataRef(off_jumptable, rebased + index * 4, size=4)
-                } else if let None = alternative_base {
+                } else if alternative_base.is_none() {
                     break;
                 }
             }
@@ -390,7 +372,7 @@ impl JumpTableAnalyser {
     pub fn get_x64_bonus_offset(
         &self,
         disassembler: &Disassembler,
-        backtracked: &Vec<(u64, u32, Option<String>, Option<String>, Vec<u8>)>,
+        backtracked: &[(u64, u32, Option<String>, Option<String>, Vec<u8>)],
     ) -> Result<u64> {
         let mut bonus_offset = 0;
         let mut i = 0;
