@@ -142,17 +142,15 @@ impl IndirectCallAnalyser {
                         if &match3["reg"].to_string() == register_name {
                             abs_value_found = true;
                         }
-                    } else {
-                        if let Ok(dword) = self.get_dword(addr, disassembler) {
-                            registers.insert(match3["reg"].to_string(), dword);
-                            //LOGGER.debug("**moved value 0x%08x to register %s", dword, match3.group("reg"))
-                            if &match3["reg"].to_string() == register_name {
-                                abs_value_found = true;
-                            }
+                    } else if let Ok(dword) = self.get_dword(addr, disassembler) {
+                        registers.insert(match3["reg"].to_string(), dword);
+                        //LOGGER.debug("**moved value 0x%08x to register %s", dword, match3.group("reg"))
+                        if &match3["reg"].to_string() == register_name {
+                            abs_value_found = true;
                         }
                     }
                 }
-                //#mov <reg>, qword ptr [reg + <addr>]
+                //# mov <reg>, qword ptr [reg + <addr>]
                 let re = regex::Regex::new(
                     r"(?P<reg>[a-z]{3}), qword ptr \[rip \+ (?P<addr>0x[0-9a-f]{1,8})\]$",
                 )
@@ -171,7 +169,7 @@ impl IndirectCallAnalyser {
                     }
                 }
             } else if ins.2.as_ref().unwrap() == "lea" {
-                //#lea <reg>, dword ptr [<addr>]
+                //# lea <reg>, dword ptr [<addr>]
                 let re = regex::Regex::new(
                     r"(?P<reg>[a-z]{3}), dword ptr \[(?P<addr>0x[0-9a-f]{1,8})\]$",
                 )
@@ -194,7 +192,7 @@ impl IndirectCallAnalyser {
             //# for now we ignore them
             else {
             }
-            //#if the absolute value was found for the call <reg> instruction, detect API
+            //# if the absolute value was found for the call <reg> instruction, detect API
             if abs_value_found {
                 analysis_state.set_leaf(false)?;
                 if registers.contains_key(register_name) {
@@ -230,7 +228,7 @@ impl IndirectCallAnalyser {
                 return Ok(true);
             }
         }
-        //#process previous blocks
+        //# process previous blocks
         if depth >= 0 {
             let mut l = HashSet::new();
             for block in processed.iter() {

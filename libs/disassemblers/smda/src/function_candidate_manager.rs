@@ -394,14 +394,14 @@ impl FunctionCandidateManager {
                     + call_match.start() as i64
                     + 5)
                     & self.get_bitmask() as i64) as u64;
-                if disassembly.is_addr_within_memory_image(call_destination)? {
-                    if self.add_reference_candidate(
+                if disassembly.is_addr_within_memory_image(call_destination)?
+                    && self.add_reference_candidate(
                         call_destination as u64,
                         disassembly.binary_info.base_addr + call_match.start() as u64,
                         disassembly,
-                    )? {
-                        self.set_initial_candidate(call_destination as u64)?;
-                    }
+                    )?
+                {
+                    self.set_initial_candidate(call_destination as u64)?;
                 }
             }
         }
@@ -418,14 +418,14 @@ impl FunctionCandidateManager {
                     continue;
                 }
                 let function_addr = function_addr.unwrap();
-                if disassembly.is_addr_within_memory_image(function_addr)? {
-                    if self.add_reference_candidate(
+                if disassembly.is_addr_within_memory_image(function_addr)?
+                    && self.add_reference_candidate(
                         function_addr,
                         disassembly.binary_info.base_addr + call_match.start() as u64,
                         disassembly,
-                    )? {
-                        self.set_initial_candidate(function_addr)?;
-                    }
+                    )?
+                {
+                    self.set_initial_candidate(function_addr)?;
                 }
             }
             let re = Regex::new(r"(?-u)\xFF\x15").unwrap();
@@ -439,14 +439,14 @@ impl FunctionCandidateManager {
                     continue;
                 }
                 let function_addr = function_addr.unwrap();
-                if disassembly.is_addr_within_memory_image(function_addr)? {
-                    if self.add_reference_candidate(
+                if disassembly.is_addr_within_memory_image(function_addr)?
+                    && self.add_reference_candidate(
                         function_addr,
                         disassembly.binary_info.base_addr + call_match.start() as u64,
                         disassembly,
-                    )? {
-                        self.set_initial_candidate(function_addr)?;
-                    }
+                    )?
+                {
+                    self.set_initial_candidate(function_addr)?;
                 }
             }
         }
@@ -788,14 +788,12 @@ impl FunctionCandidateManager {
         }
         //LOGGER.debug("getNextGap(%s) for 0x%08x based on gap_map: 0x%08x", dont_skip, self.gap_pointer, next_gap)
         //# we potentially just disassembled a function and want to continue directly behind it in case we would otherwise miss more
-        if dont_skip {
-            if disassembly.code_map.contains_key(&self.gap_pointer) {
-                let function = disassembly.ins2fn[&self.gap_pointer];
-                if next_gap > disassembly.function_borders[&function].1 {
-                    next_gap = disassembly.function_borders[&function].1;
-                }
-                //LOGGER.debug("getNextGap(%s) without skip => after checking versus code map: 0x%08x", dont_skip, next_gap)
+        if dont_skip && disassembly.code_map.contains_key(&self.gap_pointer) {
+            let function = disassembly.ins2fn[&self.gap_pointer];
+            if next_gap > disassembly.function_borders[&function].1 {
+                next_gap = disassembly.function_borders[&function].1;
             }
+            //LOGGER.debug("getNextGap(%s) without skip => after checking versus code map: 0x%08x", dont_skip, next_gap)
         }
         //LOGGER.debug("getNextGap(%s) final gap_ptr: 0x%08x", dont_skip, next_gap)
         Ok(next_gap)
@@ -882,10 +880,8 @@ impl FunctionCandidateManager {
             }
         }
         for (ins, _) in disassembly.code_map.iter().sorted() {
-            if prev_ins != 0 {
-                if ins - prev_ins > 1 {
-                    gaps.push((prev_ins + 1, *ins, ins - prev_ins))
-                }
+            if prev_ins != 0 && ins - prev_ins > 1 {
+                gaps.push((prev_ins + 1, *ins, ins - prev_ins))
             }
             prev_ins = *ins
         }
