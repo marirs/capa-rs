@@ -908,7 +908,6 @@ impl PartialEq for ArchFeature {
 
 impl Eq for ArchFeature {}
 
-
 #[derive(Debug, Clone)]
 pub struct OsFeature {
     value: String,
@@ -954,7 +953,6 @@ impl PartialEq for OsFeature {
 }
 
 impl Eq for OsFeature {}
-
 
 #[derive(Debug, Clone)]
 pub struct FormatFeature {

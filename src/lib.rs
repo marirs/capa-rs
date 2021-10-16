@@ -5,10 +5,10 @@ use result::Result;
 mod extractor;
 pub mod rules;
 use goblin::Object;
+use itertools::Itertools;
 use serde::Serialize;
 use smda::{function::Function, FileArchitecture, FileFormat};
 use std::collections::{HashMap, HashSet};
-use itertools::Itertools;
 
 #[derive(Debug, Clone, Serialize)]
 pub enum Os {
