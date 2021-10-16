@@ -494,10 +494,10 @@ impl DisassemblyResult {
         for (src, dst) in &out_refs {
             match res.get_mut(src) {
                 Some(s) => {
-                    s.push(*dst.clone());
+                    s.push(**dst);
                 }
                 _ => {
-                    res.insert(src.clone(), vec![**dst]);
+                    res.insert(*src, vec![**dst]);
                 }
             }
         }
@@ -519,7 +519,7 @@ pub struct Disassembler {
 
 impl Disassembler {
     pub fn get_bitmask(&self) -> u64 {
-        return 0xFFFFFFFFFFFFFFFF;
+        0xFFFFFFFFFFFFFFFF
     }
 
     pub fn new() -> Result<Disassembler> {
@@ -560,7 +560,7 @@ impl Disassembler {
         let mut file = std::fs::File::open(file_name)?;
         let mut data = Vec::new();
         file.read_to_end(&mut data)?;
-        return Ok(data);
+        Ok(data)
     }
 
     fn determine_bitness(&mut self) -> Result<u32> {
@@ -575,7 +575,7 @@ impl Disassembler {
         .iter()
         .cloned()
         .collect();
-        for bitness in vec![32, 64] {
+        for bitness in [32, 64] {
             let re = Regex::new(r"(?-u)\xE8").unwrap();
             for call_match in re.find_iter(binary) {
                 if binary.len() - call_match.start() > 5 {
@@ -602,8 +602,8 @@ impl Disassembler {
         }
         let mut score: std::collections::HashMap<u32, f32> =
             [(32, 0.0), (64, 0.0)].iter().cloned().collect();
-        for bitness in vec![32, 64] {
-            for (candidate_sequence, _) in &candidate_first_bytes[&(bitness as u32)] {
+        for bitness in [32, 64] {
+            for candidate_sequence in candidate_first_bytes[&(bitness as u32)].keys() {
                 for (common_sequence, sequence_score) in &self.common_start_bytes[&(bitness as u32)]
                 {
                     if candidate_sequence == common_sequence {

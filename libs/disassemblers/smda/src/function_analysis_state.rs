@@ -292,15 +292,14 @@ impl FunctionAnalysisState {
                         }
                     }
                 }
+
                 if i != self.instructions.len() - 1
                     && self.code_refs_to.contains_key(&self.instructions[i + 1].0)
-                {
-                    if self.code_refs_to[&self.instructions[i + 1].0].len() > 1
-                        || potential_starts.contains(&self.instructions[i + 1].0)
-                    {
+                    && (self.code_refs_to[&self.instructions[i + 1].0].len() > 1
+                    || potential_starts.contains(&self.instructions[i + 1].0)) {
                         break;
-                    }
                 }
+                
                 if END_INS.contains(&Some(current.2.as_ref().unwrap().as_str())) {
                     break;
                 }

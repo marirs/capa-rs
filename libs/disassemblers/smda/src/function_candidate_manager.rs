@@ -7,7 +7,7 @@ use itertools::Itertools;
 use regex::bytes::Regex;
 use std::{collections::HashMap, convert::TryInto};
 
-const DEFAULT_PROLOGUES: &'static [&'static str; 4] = &[
+const DEFAULT_PROLOGUES: &[&'static str; 4] = &[
     r"(?-u)\x8B\xFF\x55\x8B\xEC",
     r"(?-u)\x89\xFF\x55\x8B\xEC",
     r"(?-u)\x55\x8B\xEC",
