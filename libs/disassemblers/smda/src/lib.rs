@@ -497,7 +497,7 @@ impl DisassemblyResult {
                     s.push(*dst.clone());
                 }
                 _ => {
-                    res.insert(src.clone(), vec![*dst.clone()]);
+                    res.insert(src.clone(), vec![**dst]);
                 }
             }
         }
@@ -1062,7 +1062,7 @@ impl Disassembler {
             .syntax(arch::x86::ArchSyntax::Intel)
             //            .detail(true)
             .build()
-            .map_err(|e| Error::CapstoneError(e))?;
+            .map_err(Error::CapstoneError)?;
         while state.has_unprocessed_blocks() {
             state.choose_next_block()?;
             let mut cache_pos = 0;
@@ -1072,7 +1072,7 @@ impl Disassembler {
                     &self.get_disasm_window_buffer(state.block_start),
                     start_block,
                 )
-                .map_err(|e| Error::CapstoneError(e))?;
+                .map_err(Error::CapstoneError)?;
             let mut previous_address: Option<u64> = None;
             let mut previous_mnemonic: Option<String> = None;
             let mut previous_op_str: Option<String> = None;
@@ -1114,7 +1114,7 @@ impl Disassembler {
                         for j in jumps {
                             self.tailcall_analyzer.add_jump(j.0, j.1)?;
                         }
-                    } else if i_mnemonic.as_ref().unwrap().starts_with("j") {
+                    } else if i_mnemonic.as_ref().unwrap().starts_with('j') {
                         //LOGGER.error("unsupported jump @0x%08x (0x%08x): %s %s", i_address, start_addr, i_mnemonic, i_op_str)
                     } else if RET_INS.contains(&i_mnemonic) {
                         self.analyze_end_instruction(&mut state)?;
@@ -1141,7 +1141,7 @@ impl Disassembler {
                     {
                         let instruction_sequence = capstone
                             .disasm_all(&self.get_disasm_window_buffer(i_address), i_address)
-                            .map_err(|e| Error::CapstoneError(e))?;
+                            .map_err(Error::CapstoneError)?;
                         if self
                             .fc_manager
                             .is_alignment_sequence(&instruction_sequence)?
@@ -1177,16 +1177,8 @@ impl Disassembler {
                         state.add_instruction(
                             i_address,
                             i_size,
-                            if let Some(m) = i_mnemonic {
-                                Some(m.to_string())
-                            } else {
-                                None
-                            },
-                            if let Some(m) = i_op_str {
-                                Some(m.to_string())
-                            } else {
-                                None
-                            },
+                            i_mnemonic.map(|m| m.to_string()),
+                            i_op_str.map(|m| m.to_string()),
                             i_bytes.to_vec(),
                         )?;
                     } else if self.disassembly.code_map.contains_key(&i_address) {
@@ -1207,7 +1199,7 @@ impl Disassembler {
                             &self.get_disasm_window_buffer(state.block_start + cache_pos as u64),
                             state.block_start + cache_pos as u64,
                         )
-                        .map_err(|e| Error::CapstoneError(e))?;
+                        .map_err( Error::CapstoneError)?;
                     if cache.len() == 0 {
                         break;
                     }

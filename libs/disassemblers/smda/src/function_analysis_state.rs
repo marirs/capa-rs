@@ -280,15 +280,15 @@ impl FunctionAnalysisState {
             for i in ins[&start]..self.instructions.len() {
                 let current = self.instructions[i].clone();
                 block.push(current.clone());
-                //# if one code reference is to another address than the next
-                if self.code_refs_from.contains_key(&current.0) {
-                    if !CALL_INS.contains(&Some(current.2.as_ref().unwrap().as_str()))
-                        && i != self.instructions.len() - 1
-                    {
-                        for r in &self.code_refs_from[&current.0] {
-                            if *r != self.instructions[i + 1].0 {
-                                break;
-                            }
+
+                // if one code reference is to another address than the next
+                if self.code_refs_from.contains_key(&current.0)
+                    && !CALL_INS.contains(&Some(current.2.as_ref().unwrap().as_str()))
+                    && i != self.instructions.len() - 1
+                {
+                    for r in &self.code_refs_from[&current.0] {
+                        if *r != self.instructions[i + 1].0 {
+                            break;
                         }
                     }
                 }
