@@ -35,15 +35,15 @@ pub struct DisassemblyReport {
 impl DisassemblyReport {
     pub fn new(disassembly: &mut DisassemblyResult) -> Result<DisassemblyReport> {
         let mut res = DisassemblyReport {
-            format: disassembly.binary_info.file_format.clone(),
-            architecture: disassembly.binary_info.file_architecture.clone(),
+            format: disassembly.binary_info.file_format,
+            architecture: disassembly.binary_info.file_architecture,
             base_addr: disassembly.binary_info.base_addr,
             binary_size: disassembly.binary_info.binary_size,
             binweight: 0,
             bitness: disassembly.binary_info.bitness,
             buffer: disassembly.binary_info.binary.clone(),
             code_areas: disassembly.binary_info.code_areas.clone(),
-            code_sections: disassembly.binary_info.get_sections()?.clone(),
+            code_sections: disassembly.binary_info.get_sections()?,
             empty_section: ("".to_string(), 0, 0),
             component: disassembly.binary_info.component.clone(),
             confidence_threshold: disassembly.get_confidence_threshold()?,
@@ -60,17 +60,17 @@ impl DisassemblyReport {
             imports: disassembly.binary_info.imports.clone(),
             exports: disassembly.binary_info.exports.clone(),
         };
-        for (function_offset, _) in &disassembly.functions {
+        for function_offset in disassembly.functions.keys() {
             if res.confidence_threshold > 0.0
-                && disassembly.candidates.contains_key(&function_offset)
-                && disassembly.candidates[&function_offset].get_confidence()?
+                && disassembly.candidates.contains_key(function_offset)
+                && disassembly.candidates[function_offset].get_confidence()?
                     < res.confidence_threshold
             {
                 continue;
             }
             let function = Function::new(disassembly, function_offset)?;
             res.binweight += function.binweight;
-            res.functions.insert(function_offset.clone(), function);
+            res.functions.insert(*function_offset, function);
         }
         Ok(res)
     }
@@ -93,7 +93,7 @@ impl DisassemblyReport {
     pub fn get_section(&self, offset: &u64) -> Result<&(String, u64, u64)> {
         for section in &self.code_sections {
             if section.1 <= *offset && *offset < section.2 {
-                return Ok(&section);
+                return Ok(section);
             }
         }
         Ok(&self.empty_section)

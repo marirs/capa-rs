@@ -128,10 +128,10 @@ impl TailCallAnalyser {
             }
         }
         //# for each function generate the intervals that contain the instructions
-        for (_, function) in &self.functions {
+        for function in self.functions.values() {
             //# check if there are any jumps from outside the function to inside the function
-            let function_intervals = self.get_function_intervals(&function);
-            if let Err(_) = function_intervals {
+            let function_intervals = self.get_function_intervals(function);
+            if function_intervals.is_err() {
                 //# empty function?
                 continue;
             }
@@ -153,7 +153,7 @@ impl TailCallAnalyser {
                 let mut flag1 = false;
                 let mut flag2 = true;
                 for (first, last) in function_intervals {
-                    if first <= destination && destination <= &last {
+                    if first <= destination && destination <= last {
                         flag1 |= true;
                     }
                     if !(source < first || source > last) {
@@ -180,7 +180,7 @@ impl TailCallAnalyser {
     }
 
     fn get_function_by_start_addr(&self, start_addr: u64) -> Result<u64> {
-        for (_, function) in &self.functions {
+        for function in self.functions.values() {
             if function.start_addr == start_addr {
                 return Ok(function.start_addr);
             }

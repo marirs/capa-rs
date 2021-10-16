@@ -40,7 +40,7 @@ pub fn get_pe_offset(binary: &[u8]) -> Result<u64> {
         let pe_offset = u16::from_le_bytes(bb) as u64;
         return Ok(pe_offset);
     }
-    return Ok(0);
+    Ok(0)
 }
 
 pub fn get_code_areas(binary: &[u8], pe: &goblin::pe::PE) -> Result<Vec<(u64, u64)>> {
@@ -97,7 +97,7 @@ pub fn map_binary(binary: &[u8]) -> Result<Vec<u8>> {
         }
         let mut max_virt_section_offset = 0;
         let mut min_raw_section_offset = 0xFFFFFFFF;
-        if section_infos.len() > 0 {
+        if !section_infos.is_empty() {
             for section_info in &section_infos {
                 max_virt_section_offset = if max_virt_section_offset
                     > section_info["virt_size"] + section_info["virt_offset"]
@@ -125,7 +125,7 @@ pub fn map_binary(binary: &[u8]) -> Result<Vec<u8>> {
         }
         //support up to 100MB for now.
         if max_virt_section_offset > 0 && max_virt_section_offset < 100 * 1024 * 1024 {
-            mapped_binary.resize(max_virt_section_offset as usize, 0 as u8);
+            mapped_binary.resize(max_virt_section_offset as usize, 0_u8);
             if min_raw_section_offset < binary.len() as u32 {
                 mapped_binary[0..min_raw_section_offset as usize]
                     .clone_from_slice(&binary[0..min_raw_section_offset as usize]);

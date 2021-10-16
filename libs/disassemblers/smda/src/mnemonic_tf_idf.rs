@@ -43,10 +43,10 @@ impl MnemonicTfIdf {
         blocks: &HashMap<u64, Vec<(u64, String, String, Option<String>)>>,
     ) -> Result<f32> {
         let mut term_counts = HashMap::new();
-        for (_, block) in blocks {
+        for block in blocks.values() {
             for ins in block {
                 match term_counts.get_mut(&ins.2) {
-                    Some(s) => *s = *s + 1,
+                    Some(s) => *s += 1,
                     None => {
                         term_counts.insert(ins.2.clone(), 1);
                     }
@@ -60,7 +60,7 @@ impl MnemonicTfIdf {
         let mut score = 0.0;
         let mut sum_term_counts = 0;
         let mut max_count = 0;
-        for (_, t) in term_counts {
+        for t in term_counts.values() {
             sum_term_counts += t;
             if max_count < *t {
                 max_count = *t;
@@ -90,15 +90,15 @@ impl MnemonicTfIdf {
         // if we don't have that word in our collection, use the least
         // observed frequency
         if self.idf.contains_key(term) {
-            return Ok(self.idf[term]);
+            Ok(self.idf[term])
         } else {
             let mut max_idf = 0.0;
-            for (_, idf) in &self.idf {
+            for idf in self.idf.values() {
                 if max_idf < *idf {
                     max_idf = *idf;
                 }
             }
-            return Ok(max_idf);
+            Ok(max_idf)
         }
     }
 

@@ -1,3 +1,4 @@
+#![allow(clippy::type_complexity)]
 #[macro_use]
 extern crate maplit;
 
@@ -123,13 +124,13 @@ pub struct BinaryInfo {
     exports: Vec<(String, usize)>,
 }
 
-impl BinaryInfo {
-    fn sha256_digest(content: &[u8]) -> Result<String> {
-        let mut context = Context::new(&SHA256);
-        context.update(&content[..]);
-        Ok(HEXUPPER.encode(context.finish().as_ref()))
+impl Default for BinaryInfo {
+    fn default() -> Self {
+        Self::new()
     }
+}
 
+impl BinaryInfo {
     pub fn new() -> BinaryInfo {
         BinaryInfo {
             file_format: FileFormat::ELF,
@@ -159,6 +160,12 @@ impl BinaryInfo {
         self.binary_size = content.len() as u64;
         self.sha256 = BinaryInfo::sha256_digest(content)?;
         Ok(())
+    }
+
+    fn sha256_digest(content: &[u8]) -> Result<String> {
+        let mut context = Context::new(&SHA256);
+        context.update(content);
+        Ok(HEXUPPER.encode(context.finish().as_ref()))
     }
 
     pub fn get_sections(&self) -> Result<Vec<(String, u64, u64)>> {
@@ -217,7 +224,51 @@ pub struct DisassemblyResult {
     code_areas: Vec<u8>,
 }
 
+impl Default for DisassemblyResult {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DisassemblyResult {
+    pub fn new() -> DisassemblyResult {
+        DisassemblyResult {
+            analysis_start_ts: SystemTime::now(),
+            analysis_end_ts: SystemTime::now(),
+            analysis_timeout: false,
+            binary_info: BinaryInfo::new(),
+            identified_alignment: 0,
+            code_map: HashMap::new(),
+            data_map: HashSet::new(),
+            functions: HashMap::new(),
+            recursive_functions: HashSet::new(),
+            leaf_functions: HashSet::new(),
+            thunk_functions: HashSet::new(),
+            failed_analysis_addr: vec![],
+            function_borders: HashMap::new(),
+            instructions: HashMap::new(),
+            ins2fn: HashMap::new(),
+            language: HashMap::new(),
+            data_refs_from: HashMap::new(),
+            data_refs_to: HashMap::new(),
+            code_refs_from: HashMap::new(),
+            code_refs_to: HashMap::new(),
+            apis: HashMap::new(),
+            addr_to_api: HashMap::new(),
+            function_symbols: HashMap::new(),
+            candidates: HashMap::new(),
+            confidence_threshold: 0.0,
+            code_areas: vec![],
+        }
+    }
+
+    pub fn init(&mut self, bi: BinaryInfo) -> Result<()> {
+        self.analysis_start_ts = SystemTime::now();
+        self.analysis_end_ts = SystemTime::now();
+        self.binary_info = bi;
+        Ok(())
+    }
+
     pub fn get_all_api_refs(&mut self) -> Result<HashMap<u64, (Option<String>, Option<String>)>> {
         if self.addr_to_api.is_empty() {
             self.init_api_refs()?;
@@ -313,44 +364,6 @@ impl DisassemblyResult {
             return Ok(u64::from_le_bytes(*extracted_dword));
         }
         Err(Error::DereferenceError(addr))
-    }
-
-    pub fn new() -> DisassemblyResult {
-        DisassemblyResult {
-            analysis_start_ts: SystemTime::now(),
-            analysis_end_ts: SystemTime::now(),
-            analysis_timeout: false,
-            binary_info: BinaryInfo::new(),
-            identified_alignment: 0,
-            code_map: HashMap::new(),
-            data_map: HashSet::new(),
-            functions: HashMap::new(),
-            recursive_functions: HashSet::new(),
-            leaf_functions: HashSet::new(),
-            thunk_functions: HashSet::new(),
-            failed_analysis_addr: vec![],
-            function_borders: HashMap::new(),
-            instructions: HashMap::new(),
-            ins2fn: HashMap::new(),
-            language: HashMap::new(),
-            data_refs_from: HashMap::new(),
-            data_refs_to: HashMap::new(),
-            code_refs_from: HashMap::new(),
-            code_refs_to: HashMap::new(),
-            apis: HashMap::new(),
-            addr_to_api: HashMap::new(),
-            function_symbols: HashMap::new(),
-            candidates: HashMap::new(),
-            confidence_threshold: 0.0,
-            code_areas: vec![],
-        }
-    }
-
-    pub fn init(&mut self, bi: BinaryInfo) -> Result<()> {
-        self.analysis_start_ts = SystemTime::now();
-        self.analysis_end_ts = SystemTime::now();
-        self.binary_info = bi;
-        Ok(())
     }
 
     pub fn add_code_refs(&mut self, addr_from: u64, addr_to: u64) -> Result<()> {

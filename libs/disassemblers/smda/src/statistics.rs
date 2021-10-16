@@ -28,7 +28,7 @@ impl DisassemblyStatistics {
 
     fn count_blocks(disassembly_result: &DisassemblyResult) -> Result<usize> {
         let mut num_blocks = 0;
-        for (_, blocks) in &disassembly_result.functions {
+        for blocks in disassembly_result.functions.values() {
             num_blocks += blocks.len();
         }
         Ok(num_blocks)
@@ -40,8 +40,8 @@ impl DisassemblyStatistics {
 
     fn count_instructions(disassembly_result: &DisassemblyResult) -> Result<usize> {
         let mut num_ins = 0;
-        for (function_offset, _) in &disassembly_result.functions {
-            for block in &disassembly_result.functions[&function_offset] {
+        for function_offset in disassembly_result.functions.keys() {
+            for block in &disassembly_result.functions[function_offset] {
                 num_ins += block.len();
             }
         }
@@ -50,12 +50,9 @@ impl DisassemblyStatistics {
 
     fn count_function_calls(disassembly_result: &DisassemblyResult) -> Result<usize> {
         let mut num_calls = 0;
-        for (function_start, _) in &disassembly_result.functions {
-            if disassembly_result
-                .code_refs_to
-                .contains_key(&function_start)
-            {
-                num_calls += disassembly_result.code_refs_to[&function_start].len();
+        for function_start in disassembly_result.functions.keys() {
+            if disassembly_result.code_refs_to.contains_key(function_start) {
+                num_calls += disassembly_result.code_refs_to[function_start].len();
             }
         }
         Ok(num_calls)
