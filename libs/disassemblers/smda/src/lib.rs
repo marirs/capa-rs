@@ -29,7 +29,12 @@ use regex::bytes::Regex;
 use report::DisassemblyReport;
 use ring::digest::{Context, SHA256};
 use serde::Serialize;
-use std::{convert::TryInto, io::Read, time::SystemTime};
+use std::{
+    collections::{HashMap, HashSet},
+    convert::TryInto,
+    io::Read,
+    time::SystemTime,
+};
 use tail_call_analyser::TailCallAnalyser;
 
 mod error;
@@ -119,7 +124,7 @@ pub struct BinaryInfo {
 }
 
 impl BinaryInfo {
-    fn sha256_digest(content: &Vec<u8>) -> Result<String> {
+    fn sha256_digest(content: &[u8]) -> Result<String> {
         let mut context = Context::new(&SHA256);
         context.update(&content[..]);
         Ok(HEXUPPER.encode(context.finish().as_ref()))
@@ -148,7 +153,7 @@ impl BinaryInfo {
         }
     }
 
-    pub fn init(&mut self, content: &Vec<u8>) -> Result<()> {
+    pub fn init(&mut self, content: &[u8]) -> Result<()> {
         //        self.binary = content.to_vec();
         self.raw_data = content.to_vec();
         self.binary_size = content.len() as u64;
@@ -167,7 +172,7 @@ impl BinaryInfo {
                         (sect.pointer_to_raw_data + sect.size_of_raw_data) as u64,
                     ));
                 }
-                return Ok(res);
+                Ok(res)
             }
             _ => Ok(vec![]),
         }
@@ -175,9 +180,7 @@ impl BinaryInfo {
 
     pub fn get_oep(&self) -> Result<u64> {
         match Object::parse(&self.raw_data)? {
-            Object::PE(pe) => {
-                return Ok(pe.entry as u64);
-            }
+            Object::PE(pe) => Ok(pe.entry as u64),
             _ => Ok(0),
         }
     }
@@ -190,42 +193,37 @@ pub struct DisassemblyResult {
     analysis_timeout: bool,
     binary_info: BinaryInfo,
     identified_alignment: usize,
-    code_map: std::collections::HashMap<u64, u64>,
-    data_map: std::collections::HashSet<u64>,
+    code_map: HashMap<u64, u64>,
+    data_map: HashSet<u64>,
     //    errors:
-    functions: std::collections::HashMap<
-        u64,
-        Vec<Vec<(u64, u32, Option<String>, Option<String>, Vec<u8>)>>,
-    >,
-    recursive_functions: std::collections::HashSet<u64>,
-    leaf_functions: std::collections::HashSet<u64>,
-    thunk_functions: std::collections::HashSet<u64>,
+    functions: HashMap<u64, Vec<Vec<(u64, u32, Option<String>, Option<String>, Vec<u8>)>>>,
+    recursive_functions: HashSet<u64>,
+    leaf_functions: HashSet<u64>,
+    thunk_functions: HashSet<u64>,
     failed_analysis_addr: Vec<u64>,
-    function_borders: std::collections::HashMap<u64, (u64, u64)>,
-    instructions: std::collections::HashMap<u64, (String, u32)>,
-    ins2fn: std::collections::HashMap<u64, u64>,
-    language: std::collections::HashMap<i32, Vec<u8>>,
-    data_refs_from: std::collections::HashMap<u64, Vec<u64>>,
-    data_refs_to: std::collections::HashMap<u64, Vec<u64>>,
-    code_refs_from: std::collections::HashMap<u64, Vec<u64>>,
-    code_refs_to: std::collections::HashMap<u64, Vec<u64>>,
-    apis: std::collections::HashMap<u64, label_providers::ApiEntry>,
-    addr_to_api: std::collections::HashMap<u64, (Option<String>, Option<String>)>,
-    function_symbols: std::collections::HashMap<u64, String>,
-    candidates: std::collections::HashMap<u64, FunctionCandidate>,
+    function_borders: HashMap<u64, (u64, u64)>,
+    instructions: HashMap<u64, (String, u32)>,
+    ins2fn: HashMap<u64, u64>,
+    language: HashMap<i32, Vec<u8>>,
+    data_refs_from: HashMap<u64, Vec<u64>>,
+    data_refs_to: HashMap<u64, Vec<u64>>,
+    code_refs_from: HashMap<u64, Vec<u64>>,
+    code_refs_to: HashMap<u64, Vec<u64>>,
+    apis: HashMap<u64, label_providers::ApiEntry>,
+    addr_to_api: HashMap<u64, (Option<String>, Option<String>)>,
+    function_symbols: HashMap<u64, String>,
+    candidates: HashMap<u64, FunctionCandidate>,
     confidence_threshold: f32,
     code_areas: Vec<u8>,
 }
 
 impl DisassemblyResult {
-    pub fn get_all_api_refs(
-        &mut self,
-    ) -> Result<std::collections::HashMap<u64, (Option<String>, Option<String>)>> {
-        if self.addr_to_api.len() == 0 {
+    pub fn get_all_api_refs(&mut self) -> Result<HashMap<u64, (Option<String>, Option<String>)>> {
+        if self.addr_to_api.is_empty() {
             self.init_api_refs()?;
         }
-        let mut all_api_refs = std::collections::HashMap::new();
-        for (function_addr, _) in &self.functions {
+        let mut all_api_refs = HashMap::new();
+        for function_addr in self.functions.keys() {
             for (k, v) in self.get_api_refs(function_addr)? {
                 all_api_refs.insert(k, v);
             }
@@ -236,9 +234,9 @@ impl DisassemblyResult {
     pub fn get_api_refs(
         &self,
         func_addr: &u64,
-    ) -> Result<std::collections::HashMap<u64, (Option<String>, Option<String>)>> {
-        let mut api_refs = std::collections::HashMap::new();
-        for block in &self.functions[&func_addr] {
+    ) -> Result<HashMap<u64, (Option<String>, Option<String>)>> {
+        let mut api_refs = HashMap::new();
+        for block in &self.functions[func_addr] {
             for ins in block {
                 if self.addr_to_api.contains_key(&ins.0) {
                     api_refs.insert(ins.0, self.addr_to_api[&ins.0].clone());
@@ -249,8 +247,8 @@ impl DisassemblyResult {
     }
 
     fn init_api_refs(&mut self) -> Result<()> {
-        for (api_offset, _) in &self.apis {
-            let api = self.apis[&api_offset].clone();
+        for api_offset in self.apis.keys() {
+            let api = self.apis[api_offset].clone();
             for reference in api.referencing_addr {
                 self.addr_to_api
                     .insert(reference, (api.dll_name.clone(), api.api_name.clone()));
@@ -324,25 +322,25 @@ impl DisassemblyResult {
             analysis_timeout: false,
             binary_info: BinaryInfo::new(),
             identified_alignment: 0,
-            code_map: std::collections::HashMap::new(),
-            data_map: std::collections::HashSet::new(),
-            functions: std::collections::HashMap::new(),
-            recursive_functions: std::collections::HashSet::new(),
-            leaf_functions: std::collections::HashSet::new(),
-            thunk_functions: std::collections::HashSet::new(),
+            code_map: HashMap::new(),
+            data_map: HashSet::new(),
+            functions: HashMap::new(),
+            recursive_functions: HashSet::new(),
+            leaf_functions: HashSet::new(),
+            thunk_functions: HashSet::new(),
             failed_analysis_addr: vec![],
-            function_borders: std::collections::HashMap::new(),
-            instructions: std::collections::HashMap::new(),
-            ins2fn: std::collections::HashMap::new(),
-            language: std::collections::HashMap::new(),
-            data_refs_from: std::collections::HashMap::new(),
-            data_refs_to: std::collections::HashMap::new(),
-            code_refs_from: std::collections::HashMap::new(),
-            code_refs_to: std::collections::HashMap::new(),
-            apis: std::collections::HashMap::new(),
-            addr_to_api: std::collections::HashMap::new(),
-            function_symbols: std::collections::HashMap::new(),
-            candidates: std::collections::HashMap::new(),
+            function_borders: HashMap::new(),
+            instructions: HashMap::new(),
+            ins2fn: HashMap::new(),
+            language: HashMap::new(),
+            data_refs_from: HashMap::new(),
+            data_refs_to: HashMap::new(),
+            code_refs_from: HashMap::new(),
+            code_refs_to: HashMap::new(),
+            apis: HashMap::new(),
+            addr_to_api: HashMap::new(),
+            function_symbols: HashMap::new(),
+            candidates: HashMap::new(),
             confidence_threshold: 0.0,
             code_areas: vec![],
         }
@@ -390,12 +388,12 @@ impl DisassemblyResult {
     pub fn get_blocks_as_dict(
         &self,
         function_addr: &u64,
-    ) -> Result<std::collections::HashMap<u64, Vec<(u64, String, String, Option<String>)>>> {
-        let mut blocks = std::collections::HashMap::new();
+    ) -> Result<HashMap<u64, Vec<(u64, String, String, Option<String>)>>> {
+        let mut blocks = HashMap::new();
         for block in &self.functions[function_addr] {
             let mut instructions = vec![];
             for ins in block {
-                instructions.push(self.transform_instruction(&ins)?);
+                instructions.push(self.transform_instruction(ins)?);
                 blocks.insert(instructions[0].0, instructions.clone());
             }
         }
@@ -415,34 +413,31 @@ impl DisassemblyResult {
         ))
     }
 
-    pub fn get_block_refs(
-        &self,
-        func_addr: &u64,
-    ) -> Result<std::collections::HashMap<u64, Vec<u64>>> {
-        let mut block_refs = std::collections::HashMap::new();
-        let mut ins_addrs = std::collections::HashSet::new();
+    pub fn get_block_refs(&self, func_addr: &u64) -> Result<HashMap<u64, Vec<u64>>> {
+        let mut block_refs = HashMap::new();
+        let mut ins_addrs = HashSet::new();
         for block in &self.functions[func_addr] {
             for ins in block {
-                ins_addrs.insert(ins.0.clone());
+                ins_addrs.insert(ins.0);
             }
         }
         for block in &self.functions[func_addr] {
             let last_ins_addr = block[block.len() - 1].0;
             if self.code_refs_from.contains_key(&last_ins_addr) {
-                let mut code_refs_from_a = std::collections::HashSet::new();
+                let mut code_refs_from_a = HashSet::new();
                 for dd in &self.code_refs_from[&last_ins_addr] {
-                    code_refs_from_a.insert(dd.clone());
+                    code_refs_from_a.insert(*dd);
                 }
                 let mut verified_refs = vec![];
                 for dd in ins_addrs.intersection(&code_refs_from_a) {
-                    verified_refs.push(dd.clone());
+                    verified_refs.push(*dd);
                 }
-                if verified_refs.len() > 0 {
-                    block_refs.insert(block[0].0, verified_refs.clone());
+                if !verified_refs.is_empty() {
+                    block_refs.insert(block[0].0, verified_refs);
                 }
             }
         }
-        return Ok(block_refs);
+        Ok(block_refs)
     }
 
     pub fn get_in_refs(&self, func_addr: &u64) -> Result<Vec<u64>> {
@@ -452,17 +447,14 @@ impl DisassemblyResult {
         Ok(vec![])
     }
 
-    pub fn get_out_refs(
-        &self,
-        func_addr: &u64,
-    ) -> Result<std::collections::HashMap<u64, Vec<u64>>> {
-        let mut ins_addrs = std::collections::HashSet::new();
+    pub fn get_out_refs(&self, func_addr: &u64) -> Result<HashMap<u64, Vec<u64>>> {
+        let mut ins_addrs = HashSet::new();
         let mut code_refs = vec![];
-        let mut out_refs = std::collections::HashMap::new();
+        let mut out_refs = HashMap::new();
         for block in &self.functions[func_addr] {
             for ins in block {
-                let ins_addr = ins.0.clone();
-                ins_addrs.insert(ins_addr.clone());
+                let ins_addr = ins.0;
+                ins_addrs.insert(ins_addr);
                 if self.code_refs_from.contains_key(&ins_addr) {
                     for to_addr in &self.code_refs_from[&ins_addr] {
                         code_refs.push((ins_addr, to_addr))
@@ -479,18 +471,16 @@ impl DisassemblyResult {
         let mut image_refs = vec![];
         for reff in code_refs {
             if &self.binary_info.base_addr <= reff.1 && reff.1 <= &max_addr {
-                image_refs.push(reff.clone());
+                image_refs.push(reff);
             }
         }
         for reff in image_refs {
-            if ins_addrs.contains(&reff.1) {
+            if ins_addrs.contains(reff.1) {
                 continue;
             }
-            if !out_refs.contains_key(&reff.0) {
-                out_refs.insert(reff.0, reff.1);
-            }
+            out_refs.entry(reff.0).or_insert(reff.1);
         }
-        let mut res: std::collections::HashMap<u64, Vec<u64>> = std::collections::HashMap::new();
+        let mut res: HashMap<u64, Vec<u64>> = HashMap::new();
         for (src, dst) in &out_refs {
             match res.get_mut(src) {
                 Some(s) => {
@@ -507,7 +497,7 @@ impl DisassemblyResult {
 
 #[derive(Debug)]
 pub struct Disassembler {
-    common_start_bytes: std::collections::HashMap<u32, std::collections::HashMap<u8, u32>>,
+    common_start_bytes: HashMap<u32, HashMap<u8, u32>>,
     tailcall_analyzer: TailCallAnalyser,
     indirect_call_analyser: IndirectCallAnalyser,
     jumptable_analyzer: JumpTableAnalyser,
@@ -524,7 +514,7 @@ impl Disassembler {
 
     pub fn new() -> Result<Disassembler> {
         let mut res = Disassembler {
-            common_start_bytes: std::collections::HashMap::new(),
+            common_start_bytes: HashMap::new(),
             tailcall_analyzer: TailCallAnalyser::new(),
             indirect_call_analyser: IndirectCallAnalyser::new(),
             jumptable_analyzer: JumpTableAnalyser::new(),
@@ -565,16 +555,11 @@ impl Disassembler {
 
     fn determine_bitness(&mut self) -> Result<u32> {
         let binary = &self.disassembly.binary_info.binary;
-        let mut candidate_first_bytes: std::collections::HashMap<
-            u32,
-            std::collections::HashMap<u8, u32>,
-        > = [
-            (32, std::collections::HashMap::new()),
-            (64, std::collections::HashMap::new()),
-        ]
-        .iter()
-        .cloned()
-        .collect();
+        let mut candidate_first_bytes: HashMap<u32, HashMap<u8, u32>> =
+            [(32, HashMap::new()), (64, HashMap::new())]
+                .iter()
+                .cloned()
+                .collect();
         for bitness in [32, 64] {
             let re = Regex::new(r"(?-u)\xE8").unwrap();
             for call_match in re.find_iter(binary) {
@@ -600,8 +585,7 @@ impl Disassembler {
                 }
             }
         }
-        let mut score: std::collections::HashMap<u32, f32> =
-            [(32, 0.0), (64, 0.0)].iter().cloned().collect();
+        let mut score: HashMap<u32, f32> = [(32, 0.0), (64, 0.0)].iter().cloned().collect();
         for bitness in [32, 64] {
             for candidate_sequence in candidate_first_bytes[&(bitness as u32)].keys() {
                 for (common_sequence, sequence_score) in &self.common_start_bytes[&(bitness as u32)]
@@ -684,7 +668,7 @@ impl Disassembler {
     }
 
     fn get_symbol_candidates(&self) -> Result<Vec<u64>> {
-        let mut symbol_offsets: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        let mut symbol_offsets: HashSet<u64> = HashSet::new();
         for provider in &self.label_providers {
             if !provider.is_symbol_provider()? {
                 continue;
@@ -827,11 +811,16 @@ impl Disassembler {
 
     fn get_referenced_addr(&self, op_str: &str) -> Result<u64> {
         let re = Regex::new(r"(?-u)0x[a-fA-F0-9]+").unwrap();
-        for referenced_addr in re.find_iter(op_str.as_bytes()) {
-            let z =
-                u64::from_str_radix(std::str::from_utf8(&referenced_addr.as_bytes()[2..])?, 16)?;
+        let referenced_addr = re.find_iter(op_str.as_bytes()).next();
+        if let Some(ref_addr) = referenced_addr {
+            let z = u64::from_str_radix(std::str::from_utf8(&ref_addr.as_bytes()[2..])?, 16)?;
             return Ok(z);
         }
+        // for referenced_addr in re.find_iter(op_str.as_bytes()) {
+        //     let z =
+        //         u64::from_str_radix(std::str::from_utf8(&referenced_addr.as_bytes()[2..])?, 16)?;
+        //     return Ok(z);
+        // }
         Ok(0)
     }
 
@@ -1251,7 +1240,7 @@ impl Disassembler {
         api: &Option<String>,
     ) -> Result<()> {
         let mut api_entry = label_providers::ApiEntry {
-            referencing_addr: std::collections::HashSet::new(),
+            referencing_addr: HashSet::new(),
             dll_name: dll.clone(),
             api_name: api.clone(),
         };

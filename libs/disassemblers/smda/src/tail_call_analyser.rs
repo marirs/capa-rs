@@ -194,7 +194,7 @@ impl TailCallAnalyser {
     ) -> Result<Vec<(u64, u64)>> {
         let mut intervals = vec![];
         let instructions = &function_state.instructions;
-        if instructions.len() == 0 {
+        if instructions.is_empty() {
             return Err(Error::LogicError(file!(), line!()));
         }
         let mut first_instruction = &instructions[0];
