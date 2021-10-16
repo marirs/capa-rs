@@ -1,6 +1,4 @@
-use crate::error::Error;
-use crate::result::Result;
-use crate::rules::Value;
+use crate::{rules::Value, Error, Result};
 
 #[derive(Debug)]
 pub enum RuleFeatureType {

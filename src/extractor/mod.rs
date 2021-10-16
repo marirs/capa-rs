@@ -1,9 +1,8 @@
-use crate::error::Error;
-use crate::result::Result;
-use std::{collections::HashMap, convert::TryInto};
-
 pub mod elf;
 pub mod pe;
+
+use crate::{error::Error, Result};
+use std::{collections::HashMap, convert::TryInto};
 
 use smda::{
     function::{Function, Instruction},

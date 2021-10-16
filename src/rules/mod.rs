@@ -1,14 +1,13 @@
-use crate::error::Error;
-use crate::result::Result;
+pub mod features;
+mod statement;
+
+use crate::{Error, Result};
 use features::{Feature, RuleFeatureType};
 use statement::{
     AndStatement, Description, NotStatement, OrStatement, RangeStatement, SomeStatement, Statement,
     StatementElement, SubscopeStatement,
 };
 use yaml_rust::{yaml::Hash, Yaml, YamlLoader};
-
-pub mod features;
-mod statement;
 
 const MAX_BYTES_FEATURE_SIZE: usize = 0x100;
 

@@ -1,14 +1,15 @@
-mod error;
-use error::Error;
-mod result;
-use result::Result;
 mod extractor;
 pub mod rules;
+
 use goblin::Object;
-use itertools::Itertools;
+// use itertools::Itertools;
 use serde::Serialize;
 use smda::{function::Function, FileArchitecture, FileFormat};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+mod error;
+pub use crate::error::Error;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Clone, Serialize)]
 pub enum Os {
@@ -80,7 +81,7 @@ impl CapabilityExtractor {
     pub fn new(
         file_name: &str,
         // _settings: Option<CapabilityExtractorSettings>,
-    ) -> result::Result<CapabilityExtractor> {
+    ) -> Result<CapabilityExtractor> {
         let path = std::path::Path::new(file_name);
         let buffer = std::fs::read(path)?;
         match Object::parse(&buffer)? {
@@ -107,7 +108,7 @@ pub fn from_file(
     high_accuracy: bool,
     resolve_tailcalls: bool,
     logger: &dyn Fn(&str),
-) -> result::Result<FileCapabilities> {
+) -> Result<FileCapabilities> {
     let extractor = extractor::Extractor::new(file_name, high_accuracy, resolve_tailcalls)?;
     logger(&format!("loading rules..."));
     let rules = rules::RuleSet::new(rule_path)?;

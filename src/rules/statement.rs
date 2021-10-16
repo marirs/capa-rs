@@ -1,6 +1,4 @@
-use crate::error::Error;
-use crate::result::Result;
-use crate::rules::features::Feature;
+use crate::{rules::features::Feature, Error, Result};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum StatementElement {
