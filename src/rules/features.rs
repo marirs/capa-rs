@@ -401,7 +401,6 @@ impl PartialEq for MnemonicFeature {
 
 impl Eq for MnemonicFeature {}
 
-
 #[derive(Debug, Clone)]
 pub struct OffsetFeature {
     bitness: u32,
