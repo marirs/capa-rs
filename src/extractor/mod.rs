@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::{error::Error, Result};
 use smda::{
     function::{Function, Instruction},
@@ -711,7 +712,7 @@ impl Extractor {
         Ok(res)
     }
 
-    pub fn carve_pe(pbytes: &[u8], offset: u64) -> Result<Vec<(u64, u64)>> {
+    fn carve_pe(pbytes: &[u8], offset: u64) -> Result<Vec<(u64, u64)>> {
         let mut mz_xor = vec![];
         for key in 0..255 {
             mz_xor.push((
