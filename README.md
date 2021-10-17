@@ -3,12 +3,13 @@
 capa detects capabilities in executable files. You run it against a PE, ELF, or shellcode file and it tells you what it thinks the program can do. 
 For example, it might suggest that the file is a backdoor, is capable of installing services, or relies on HTTP to communicate.
 
+It is a port from https://github.com/mandiant/capa without IDA plugins, etc. Its just a capa library that gives out capability information. 
+The Library itself can be used in other applications. 
+
+The example contains a `CLI` to output the extracted capabilities to `stdout`.
+
 ### Requirements
 - Rust 1.50+ (edition 2018)
-
-### Features
-- meta (gets the meta information of the file)
-- verbose (gets the verbose information such as: function, address, features, etc...)
 
 ### Running the example cli
 ```bash
@@ -49,5 +50,33 @@ For example, it might suggest that the file is a backdoor, is capable of install
 | terminate process via fastfail                | host-interaction/process/terminate |
 +-----------------------------------------------+------------------------------------+
 ```
+
+### Features
+- meta (gets the meta information of the file)
+- verbose (gets the verbose information such as: function, address, features, etc...)
+
+### Compiling with or without features
+
+- with Meta
+```bash
+cargo b --features=meta
+```
+
+- verbose mode
+```bash
+carbo b --features=verbose
+```
+
+- verbose & meta
+```bash
+cargo b --features=verbose,meta
+```
+
+- without any features (default)
+```bash
+cargo b
+```
+
+without the features flag, it will be compiled ot only show the ATT&CK, MBC & Capability/Namespace details only.
 
 ---
