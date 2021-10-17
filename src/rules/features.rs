@@ -830,9 +830,9 @@ pub struct BytesFeature {
 }
 
 impl BytesFeature {
-    pub fn new(value: &Vec<u8>, description: &str) -> Result<BytesFeature> {
+    pub fn new(value: &[u8], description: &str) -> Result<BytesFeature> {
         Ok(BytesFeature {
-            value: value.clone(),
+            value: value.to_owned(),
             description: description.to_string(),
         })
     }
