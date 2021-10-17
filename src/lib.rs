@@ -668,9 +668,9 @@ pub fn index_rule_matches(
                     ns = None;
                 } else {
                     let mut nss = "".to_string();
-                    for i in 0..parts.len() - 1 {
+                    for item in parts.iter().take(parts.len() - 1) {
                         nss += "/";
-                        nss += parts[i];
+                        nss += item;
                     }
                     ns = Some(nss[1..].to_string());
                 }

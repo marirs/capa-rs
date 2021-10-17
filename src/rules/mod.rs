@@ -328,10 +328,9 @@ impl Rule {
     }
 
     pub fn build_statements(dd: &Yaml, scope: &Scope) -> Result<StatementElement> {
-        let d = dd.as_hash().ok_or_else(|| Error::InvalidRule(
-            line!(),
-            "statement need to be hash".to_string(),
-        ))?;
+        let d = dd
+            .as_hash()
+            .ok_or_else(|| Error::InvalidRule(line!(), "statement need to be hash".to_string()))?;
         // if d.len > 2{
         //     return Err(Error::InvalidRule(line!(), "too many statements".to_string()));
         // }
@@ -483,14 +482,13 @@ impl Rule {
                     ));
                 }
                 _ => {
-                    let kkey = key.as_str().ok_or_else(|| Error::InvalidRule(
-                        line!(),
-                        format!("{:?} must be string", key),
-                    ))?;
+                    let kkey = key.as_str().ok_or_else(|| {
+                        Error::InvalidRule(line!(), format!("{:?} must be string", key))
+                    })?;
                     // if kkey.ends_with(" or more") {
-                        // let count =
-                        //     u32::from_str_radix(&kkey[..kkey.len() - " or more".len()], 10)?;
-                        // let count = (&kkey[..kkey.len() - " or more".len()]).parse::<u32>()?;
+                    // let count =
+                    //     u32::from_str_radix(&kkey[..kkey.len() - " or more".len()], 10)?;
+                    // let count = (&kkey[..kkey.len() - " or more".len()]).parse::<u32>()?;
                     if let Some(x) = kkey.strip_suffix(" or more") {
                         let count = x.parse::<u32>()?;
                         let mut params = vec![];
@@ -847,9 +845,9 @@ pub fn index_rules_by_namespace(
                             ns = None;
                         } else {
                             let mut nsss = "".to_string();
-                            for i in 0..parts.len() - 1 {
+                            for item in parts.iter().take(parts.len() - 1) {
                                 nsss += "/";
-                                nsss += parts[i];
+                                nsss += item;
                             }
                             ns = Some(nsss[1..].to_string());
                         }
@@ -891,9 +889,9 @@ pub fn index_rules_by_namespace2<'a>(
                             ns = None;
                         } else {
                             let mut nsss = "".to_string();
-                            for i in 0..parts.len() - 1 {
+                            for item in parts.iter().take(parts.len() - 1) {
                                 nsss += "/";
-                                nsss += parts[i];
+                                nsss += item;
                             }
                             ns = Some(nsss[1..].to_string());
                         }
