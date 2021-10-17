@@ -2,7 +2,6 @@
 mod extractor;
 pub mod rules;
 
-use goblin::Object;
 use serde::Serialize;
 use smda::{function::Function, FileArchitecture, FileFormat};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -69,38 +68,38 @@ pub enum Endian {
 // #[derive(Debug)]
 // pub struct CapabilityExtractorSettings {}
 
-#[derive(Debug)]
-pub struct CapabilityExtractor {
-    format: FileFormat,
-    arch: FileArchitecture,
-    endian: Endian,
-    os: Os,
-}
-
-impl CapabilityExtractor {
-    pub fn new(
-        file_name: &str,
-        // _settings: Option<CapabilityExtractorSettings>,
-    ) -> Result<CapabilityExtractor> {
-        let path = std::path::Path::new(file_name);
-        let buffer = std::fs::read(path)?;
-        match Object::parse(&buffer)? {
-            Object::Elf(elf) => Ok(CapabilityExtractor {
-                format: FileFormat::ELF,
-                arch: extractor::elf::get_arch(&elf)?,
-                endian: extractor::elf::get_endian(&elf)?,
-                os: extractor::elf::get_os(&elf)?,
-            }),
-            Object::PE(pe) => Ok(CapabilityExtractor {
-                format: FileFormat::PE,
-                arch: extractor::pe::get_arch(&pe)?,
-                endian: extractor::pe::get_endian(&pe)?,
-                os: extractor::pe::get_os(&pe)?,
-            }),
-            _ => Err(error::Error::UnsupportedFormatError),
-        }
-    }
-}
+// #[derive(Debug)]
+// pub struct CapabilityExtractor {
+//     format: FileFormat,
+//     arch: FileArchitecture,
+//     endian: Endian,
+//     os: Os,
+// }
+//
+// impl CapabilityExtractor {
+//     pub fn new(
+//         file_name: &str,
+//         // _settings: Option<CapabilityExtractorSettings>,
+//     ) -> Result<CapabilityExtractor> {
+//         let path = std::path::Path::new(file_name);
+//         let buffer = std::fs::read(path)?;
+//         match Object::parse(&buffer)? {
+//             Object::Elf(elf) => Ok(CapabilityExtractor {
+//                 format: FileFormat::ELF,
+//                 arch: extractor::elf::get_arch(&elf)?,
+//                 endian: extractor::elf::get_endian(&elf)?,
+//                 os: extractor::elf::get_os(&elf)?,
+//             }),
+//             Object::PE(pe) => Ok(CapabilityExtractor {
+//                 format: FileFormat::PE,
+//                 arch: extractor::pe::get_arch(&pe)?,
+//                 endian: extractor::pe::get_endian(&pe)?,
+//                 os: extractor::pe::get_os(&pe)?,
+//             }),
+//             _ => Err(error::Error::UnsupportedFormatError),
+//         }
+//     }
+// }
 
 pub fn from_file(
     file_name: &str,

@@ -1,14 +1,10 @@
-pub mod elf;
-pub mod pe;
-
 use crate::{error::Error, Result};
-use std::{collections::HashMap, convert::TryInto};
-
 use smda::{
     function::{Function, Instruction},
     report::DisassemblyReport,
     Disassembler,
 };
+use std::{collections::HashMap, convert::TryInto};
 
 #[derive(Debug)]
 pub struct Extractor {

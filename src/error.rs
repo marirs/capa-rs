@@ -3,8 +3,6 @@ pub enum Error {
     #[error("{0}")]
     SMDAError(#[from] smda::Error),
     #[error("{0}")]
-    ParseError(#[from] goblin::error::Error),
-    #[error("{0}")]
     RegexError(#[from] regex::Error),
     #[error("{0}")]
     FromHexError(#[from] hex::FromHexError),
