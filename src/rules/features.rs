@@ -355,7 +355,7 @@ impl BasicBlockFeature {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct MnemonicFeature {
     value: String,
     description: String,
@@ -385,6 +385,22 @@ impl MnemonicFeature {
         Ok((false, vec![]))
     }
 }
+
+impl std::hash::Hash for MnemonicFeature {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        "mnemonic_feature".hash(state);
+        self.value.hash(state);
+    }
+}
+
+impl PartialEq for MnemonicFeature {
+    fn eq(&self, other: &MnemonicFeature) -> bool {
+        self.value == other.value
+    }
+}
+
+impl Eq for MnemonicFeature {}
+
 
 #[derive(Debug, Clone)]
 pub struct OffsetFeature {
