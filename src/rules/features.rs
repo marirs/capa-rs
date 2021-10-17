@@ -762,7 +762,7 @@ impl RegexFeature {
         let mut ll = vec![];
         for (feature, locations) in features {
             if let Feature::String(s) = feature {
-                if let Some(_) = self.re.find(s.value.as_bytes()) {
+                if self.re.find(s.value.as_bytes()).is_some() {
                     ll.extend(locations);
                 }
             }
