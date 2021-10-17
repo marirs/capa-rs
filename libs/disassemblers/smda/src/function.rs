@@ -19,7 +19,7 @@ impl Instruction {
         ins: &(u64, String, String, Option<String>),
     ) -> Result<Instruction> {
         Ok(Instruction {
-            arch: arch,
+            arch,
             bitness: *bitness,
             offset: ins.0,
             bytes: ins.1.clone(),
@@ -45,9 +45,7 @@ impl Instruction {
             .disasm_all(&hex::decode(&self.bytes)?, self.offset)
             .map_err(Error::CapstoneError)?;
         for insn in insns.as_ref() {
-            let ll = capstone
-                .insn_detail(insn)
-                .map_err(Error::CapstoneError)?;
+            let ll = capstone.insn_detail(insn).map_err(Error::CapstoneError)?;
             let instr = ll.arch_detail();
             if instr.operands().len() != 2 {
                 return Ok(0);
@@ -107,9 +105,7 @@ impl Instruction {
                 .disasm_all(&hex::decode(&self.bytes)?, self.offset)
                 .map_err(Error::CapstoneError)?;
             for insn in insns.as_ref() {
-                let ll = capstone
-                    .insn_detail(insn)
-                    .map_err(Error::CapstoneError)?;
+                let ll = capstone.insn_detail(insn).map_err(Error::CapstoneError)?;
                 let instr = ll.arch_detail();
                 for operand in instr.operands() {
                     if let capstone::arch::ArchOperand::X86Operand(op) = operand {

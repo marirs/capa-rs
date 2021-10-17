@@ -502,7 +502,7 @@ impl FunctionCandidateManager {
     fn ensure_candidate(&mut self, addr: u64, disassembly: &DisassemblyResult) -> Result<bool> {
         if let std::collections::hash_map::Entry::Vacant(e) = self.candidates.entry(addr) {
             e.insert(FunctionCandidate::new(&disassembly.binary_info, addr)?);
-            return Ok(true)
+            return Ok(true);
         }
         Ok(true)
     }
@@ -761,12 +761,12 @@ impl FunctionCandidateManager {
             let has_common_prologue = true; //start_byte in
                                             // FunctionCandidate(self.gap_pointer, start_byte,
                                             // self.bitness).common_gap_starts[self.bitness]
-            if self.previously_analyzed_gap == self.gap_pointer {
+            if (self.previously_analyzed_gap == self.gap_pointer) || !has_common_prologue {
                 //LOGGER.debug("--- HRM, nextGapCandidate() gap_ptr at: 0x%08x was previously analyzed", self.gap_pointer)
                 self.gap_pointer = self.get_next_gap(true, disassembly)?;
-            } else if !has_common_prologue {
-                //LOGGER.debug("--- HRM, nextGapCandidate() gap_ptr at: 0x%08x has no common prologue (0x%08x)", self.gap_pointer, ord(start_byte))
-                self.gap_pointer = self.get_next_gap(true, disassembly)?;
+            // } else if !has_common_prologue {
+            //     //LOGGER.debug("--- HRM, nextGapCandidate() gap_ptr at: 0x%08x has no common prologue (0x%08x)", self.gap_pointer, ord(start_byte))
+            //     self.gap_pointer = self.get_next_gap(true, disassembly)?;
             } else {
                 self.previously_analyzed_gap = self.gap_pointer;
                 self.add_gap_candidate(self.gap_pointer, disassembly)?;

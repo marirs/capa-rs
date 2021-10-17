@@ -260,11 +260,7 @@ impl FunctionCandidate {
             if self.is_symbol { "s" } else { "-" },
             if self.is_stub { "u" } else { "-" },
             if self.alignment != 0 { "a" } else { "-" },
-            if self.lang_spec.is_some() {
-                "l"
-            } else {
-                "-"
-            },
+            if self.lang_spec.is_some() { "l" } else { "-" },
             if self.has_common_function_start()? {
                 "p"
             } else {
