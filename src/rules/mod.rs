@@ -3,6 +3,7 @@ mod statement;
 
 use crate::{Error, Result};
 use features::{Feature, RuleFeatureType};
+use walkdir::WalkDir;
 use statement::{
     AndStatement, Description, NotStatement, OrStatement, RangeStatement, SomeStatement, Statement,
     StatementElement, SubscopeStatement,
@@ -663,34 +664,15 @@ impl Rule {
 
 pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
     let mut rules = vec![];
-    for entry_res in std::fs::read_dir(rule_path)? {
-        let entry = entry_res?;
-        let fname = entry
-            .path()
-            .to_str()
-            .ok_or_else(|| Error::InvalidRule(line!(), format!("file error {:?}", entry)))?
-            .to_string();
-        if entry.file_type()?.is_dir() {
-            if fname.contains(".github") {
-                continue;
-            }
-            let subrules = get_rules(&fname)?;
-            rules.extend(subrules);
-        } else {
-            if fname.starts_with(".git")
-                || fname.contains("/.git")
-                || fname.starts_with(".idea")
-                || fname.starts_with(".vscode")
-                || fname.starts_with(".DS_Store")
-                || fname.ends_with(".git")
-                || fname.ends_with(".md")
-                || fname.ends_with(".txt")
-            {
-                continue;
-            }
+    for entry in WalkDir::new(rule_path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        let fname = entry.path().to_str().unwrap().to_string();
+        if fname.ends_with(".yml") {
             let mut rule = Rule::from_yaml_file(&fname)?;
             rule.set_path(fname.clone())?;
-            rules.push(rule);
+            rules.push(rule)
         }
     }
     Ok(rules)

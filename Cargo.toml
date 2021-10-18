@@ -16,6 +16,7 @@ regex = "1.5.4"
 serde = { version = "1.0", features = ["derive"] }
 smda = { path = "libs/disassemblers/smda" }
 thiserror = "1.0.30"
+walkdir = "2.3.2"
 yaml-rust = "0.4.5"
 
 [dev-dependencies]
