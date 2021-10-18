@@ -383,9 +383,7 @@ pub struct FileCapabilities {
 }
 
 impl FileCapabilities {
-    fn new(
-        #[cfg(feature = "meta")] extractor: &extractor::Extractor,
-    ) -> Result<FileCapabilities> {
+    fn new(#[cfg(feature = "meta")] extractor: &extractor::Extractor) -> Result<FileCapabilities> {
         Ok(FileCapabilities {
             #[cfg(feature = "meta")]
             meta: Meta {
