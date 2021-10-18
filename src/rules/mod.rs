@@ -679,6 +679,9 @@ pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
         } else {
             if fname.starts_with(".git")
                 || fname.contains("/.git")
+                || fname.starts_with(".idea")
+                || fname.starts_with(".vscode")
+                || fname.starts_with(".DS_Store")
                 || fname.ends_with(".git")
                 || fname.ends_with(".md")
                 || fname.ends_with(".txt")
