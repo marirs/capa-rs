@@ -1,7 +1,7 @@
 [package]
 name = "smda"
 version = "0.1.5"
-authors = ["Marirs <marirs@gmail.com>"]
+authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>"]
 include = ["assets", "src"]
 edition = "2018"
 

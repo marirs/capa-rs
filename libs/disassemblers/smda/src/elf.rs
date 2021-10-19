@@ -22,7 +22,9 @@ pub fn get_base_address(binary: &[u8]) -> Result<u64> {
             let mut candidates = vec![0xFFFFFFFFFFFFFFFF as u64];
             for section in elf.section_headers{
                 if section.sh_addr > 0{
-                    candidates.push(section.sh_addr - section.sh_offset);
+                    if section.sh_addr > section.sh_offset{
+                        candidates.push(section.sh_addr - section.sh_offset);
+                    }
                 }
             }
             if candidates.len()>1{
@@ -101,6 +103,9 @@ pub fn map_binary(binary: &[u8]) -> Result<Vec<u8>> {
     }
     for section in &elffile.section_headers{
         if section.sh_addr == 0{
+            continue;
+        }
+        if section.sh_addr < base_addr{
             continue;
         }
         let rva = section.sh_addr - base_addr;
