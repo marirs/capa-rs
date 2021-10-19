@@ -1,5 +1,8 @@
 # File Capability Extractor
 
+[![x86_64](https://github.com/marirs/capa-rs/actions/workflows/linux_x86-64.yml/badge.svg?branch=master)](https://github.com/marirs/capa-rs/actions/workflows/linux_x86-64.yml)
+[![Arm7](https://github.com/marirs/capa-rs/actions/workflows/linux_arm7.yml/badge.svg?branch=master)](https://github.com/marirs/capa-rs/actions/workflows/linux_arm7.yml)
+
 capa detects capabilities in executable files. You run it against a PE, ELF, or shellcode file and it tells you what it thinks the program can do. 
 For example, it might suggest that the file is a backdoor, is capable of installing services, or relies on HTTP to communicate.
 
