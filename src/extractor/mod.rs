@@ -1,14 +1,11 @@
-pub mod elf;
-pub mod pe;
-
+#![allow(dead_code)]
 use crate::{error::Error, Result};
-use std::{collections::HashMap, convert::TryInto};
-
 use smda::{
     function::{Function, Instruction},
     report::DisassemblyReport,
     Disassembler,
 };
+use std::{collections::HashMap, convert::TryInto};
 
 #[derive(Debug)]
 pub struct Extractor {
@@ -55,22 +52,22 @@ impl Extractor {
     }
 
     pub fn extract_global_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-        let mut res = vec![];
-        res.push((
-            crate::rules::features::Feature::Os(crate::rules::features::OsFeature::new(
-                &self.extract_os()?.to_string(),
-                "",
-            )?),
-            0,
-        ));
-        res.push((
-            crate::rules::features::Feature::Arch(crate::rules::features::ArchFeature::new(
-                &self.extract_arch()?.to_string(),
-                "",
-            )?),
-            0,
-        ));
-        Ok(res)
+        Ok(vec![
+            (
+                crate::rules::features::Feature::Os(crate::rules::features::OsFeature::new(
+                    &self.extract_os()?.to_string(),
+                    "",
+                )?),
+                0,
+            ),
+            (
+                crate::rules::features::Feature::Arch(crate::rules::features::ArchFeature::new(
+                    &self.extract_arch()?.to_string(),
+                    "",
+                )?),
+                0,
+            ),
+        ])
     }
 
     pub fn extract_function_features(
@@ -111,7 +108,7 @@ impl Extractor {
     pub fn has_loop(
         &self,
         vertices_names: &std::collections::HashSet<u64>,
-        edges: &Vec<(u64, u64)>,
+        edges: &[(u64, u64)],
     ) -> Result<bool> {
         let mut vertices = std::collections::HashMap::new();
         let mut graph = petgraph::graph::Graph::<u64, ()>::new(); // directed and unlabeled
@@ -220,13 +217,12 @@ impl Extractor {
         f: &Function,
         bb: &(&u64, &Vec<Instruction>),
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-        let mut res = vec![];
-        res.push((
+        let mut res = vec![(
             crate::rules::features::Feature::BasicBlock(
                 crate::rules::features::BasicBlockFeature::new()?,
             ),
             *bb.0,
-        ));
+        )];
         if f.blockrefs.contains_key(bb.0) && f.blockrefs[bb.0].contains(bb.0) {
             res.push((
                 crate::rules::features::Feature::Characteristic(
@@ -410,8 +406,10 @@ impl Extractor {
                     }
                 }
             } else if let Some(o) = &insn.operands {
-                if o.starts_with("0x") {
-                    let target = u64::from_str_radix(&o[2..], 16)?;
+                // if o.starts_with("0x") {
+                //     let target = u64::from_str_radix(&o[2..], 16)?;
+                if let Some(x) = o.strip_prefix("0x") {
+                    let target = u64::from_str_radix(x, 16)?;
                     if self.report.get_section(&insn.offset)? != self.report.get_section(&target)? {
                         res.push((
                             crate::rules::features::Feature::Characteristic(
@@ -463,14 +461,12 @@ impl Extractor {
         _bb: &(&u64, &Vec<Instruction>),
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-        let mut res = vec![];
-        res.push((
+        Ok(vec![(
             crate::rules::features::Feature::Mnemonic(
                 crate::rules::features::MnemonicFeature::new(&insn.mnemonic, "")?,
             ),
             insn.offset,
-        ));
-        Ok(res)
+        )])
     }
 
     pub fn extract_insn_nzxor_characteristic_features(
@@ -537,7 +533,7 @@ impl Extractor {
                         number *= -1;
                     }
                 } else if let Some(n) = number_int {
-                    number = i128::from_str_radix(&n["num"], 10)?;
+                    number = (&n["num"]).parse::<i128>()?;
                     if &n["num"] == "-" {
                         number *= -1;
                     }
@@ -626,8 +622,8 @@ impl Extractor {
                 return Ok(vec![]);
             }
             for operand in &operands {
-                if operand.starts_with("0x") {
-                    if let Ok(s) = i128::from_str_radix(&operand[2..], 16) {
+                if let Some(x) = operand.strip_prefix("0x") {
+                    if let Ok(s) = i128::from_str_radix(x, 16) {
                         res.push((
                             crate::rules::features::Feature::Number(
                                 crate::rules::features::NumberFeature::new(f.bitness, &s, "")?,
@@ -718,7 +714,7 @@ impl Extractor {
         Ok(res)
     }
 
-    pub fn carve_pe(pbytes: &[u8], offset: u64) -> Result<Vec<(u64, u64)>> {
+    fn carve_pe(pbytes: &[u8], offset: u64) -> Result<Vec<(u64, u64)>> {
         let mut mz_xor = vec![];
         for key in 0..255 {
             mz_xor.push((
@@ -820,13 +816,13 @@ pub fn generate_symbols(dll: &Option<String>, symbol: &Option<String>) -> Result
     let mut res = vec![];
     let mut dll_name = dll
         .clone()
-        .ok_or(Error::InvalidRule(line!(), file!().to_string()))?;
+        .ok_or_else(|| Error::InvalidRule(line!(), file!().to_string()))?;
     if dll_name.ends_with(".dll") {
         dll_name = dll_name[..dll_name.len() - 4].to_string();
     }
     let symbol_name = symbol
         .clone()
-        .ok_or(Error::InvalidRule(line!(), file!().to_string()))?;
+        .ok_or_else(|| Error::InvalidRule(line!(), file!().to_string()))?;
     res.push(format!("{}.{}", dll_name, symbol_name));
 
     if &symbol_name[..1] != "#" {

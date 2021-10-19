@@ -3,6 +3,7 @@ mod statement;
 
 use crate::{Error, Result};
 use features::{Feature, RuleFeatureType};
+use walkdir::WalkDir;
 use statement::{
     AndStatement, Description, NotStatement, OrStatement, RangeStatement, SomeStatement, Statement,
     StatementElement, SubscopeStatement,
@@ -112,13 +113,13 @@ impl Rule {
     }
 
     fn parse_int(s: &str) -> Result<i128> {
-        if s.starts_with("0x") {
-            Ok(i128::from_str_radix(&s[2..], 0x10)?)
-        } else if s.starts_with("-0x") {
-            let v = i128::from_str_radix(&s[3..], 0x10)?;
+        if let Some(x) = s.strip_prefix("0x") {
+            Ok(i128::from_str_radix(x, 0x10)?)
+        } else if let Some(x) = s.strip_prefix("-0x") {
+            let v = i128::from_str_radix(x, 0x10)?;
             Ok(-v)
         } else {
-            Ok(i128::from_str_radix(s, 10)?)
+            Ok(s.parse::<i128>()?)
         }
     }
 
@@ -264,7 +265,7 @@ impl Rule {
         let meta = &d["rule"]["meta"];
         let name = meta["name"]
             .as_str()
-            .ok_or(Error::InvalidRule(line!(), definition.to_string()))?;
+            .ok_or_else(|| Error::InvalidRule(line!(), definition.to_string()))?;
         //if scope is not specified, default to function scope.
         //this is probably the mode that rule authors will start with.
         let scope = match &meta["scope"] {
@@ -279,7 +280,7 @@ impl Rule {
         };
         let statements = d["rule"]["features"]
             .as_vec()
-            .ok_or(Error::InvalidRule(line!(), definition.to_string()))?;
+            .ok_or_else(|| Error::InvalidRule(line!(), definition.to_string()))?;
         // the rule must start with a single logic node.
         // doing anything else is too implicit and difficult to remove (AND vs OR ???).
         if statements.len() != 1 {
@@ -305,7 +306,7 @@ impl Rule {
             Rule::build_statements(&statements[0], &scope)?,
             &meta
                 .as_hash()
-                .ok_or(Error::InvalidRule(line!(), definition.to_string()))?
+                .ok_or_else(|| Error::InvalidRule(line!(), definition.to_string()))?
                 .clone(),
             definition,
         )
@@ -328,22 +329,21 @@ impl Rule {
     }
 
     pub fn build_statements(dd: &Yaml, scope: &Scope) -> Result<StatementElement> {
-        let d = dd.as_hash().ok_or(Error::InvalidRule(
-            line!(),
-            "statement need to be hash".to_string(),
-        ))?;
+        let d = dd
+            .as_hash()
+            .ok_or_else(|| Error::InvalidRule(line!(), "statement need to be hash".to_string()))?;
         // if d.len > 2{
         //     return Err(Error::InvalidRule(line!(), "too many statements".to_string()));
         // }
         for (key, vval) in d {
             match key
                 .as_str()
-                .ok_or(Error::InvalidRule(line!(), format!("{:?}", key)))?
+                .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", key)))?
             {
                 "description" => {
                     let val = vval
                         .as_str()
-                        .ok_or(Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+                        .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                     return Ok(StatementElement::Description(Box::new(Description::new(
                         val,
                     )?)));
@@ -353,7 +353,7 @@ impl Rule {
                     let mut description = "".to_string();
                     let val = vval
                         .as_vec()
-                        .ok_or(Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+                        .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                     for vv in val {
                         let p = Rule::build_statements(vv, scope)?;
                         match p {
@@ -370,7 +370,7 @@ impl Rule {
                     let mut description = "".to_string();
                     let val = vval
                         .as_vec()
-                        .ok_or(Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+                        .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                     for vv in val {
                         let p = Rule::build_statements(vv, scope)?;
                         match p {
@@ -387,7 +387,7 @@ impl Rule {
                     let mut description = "".to_string();
                     let val = vval
                         .as_vec()
-                        .ok_or(Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+                        .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                     for vv in val {
                         let p = Rule::build_statements(vv, scope)?;
                         match p {
@@ -404,7 +404,7 @@ impl Rule {
                     let mut description = "".to_string();
                     let val = vval
                         .as_vec()
-                        .ok_or(Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+                        .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                     for vv in val {
                         let p = Rule::build_statements(vv, scope)?;
                         match p {
@@ -422,7 +422,7 @@ impl Rule {
                         let mut description = "".to_string();
                         let val = vval
                             .as_vec()
-                            .ok_or(Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+                            .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                         for vv in val {
                             let p = Rule::build_statements(vv, &Scope::Function)?;
                             match p {
@@ -455,7 +455,7 @@ impl Rule {
                         let mut description = "".to_string();
                         let val = vval
                             .as_vec()
-                            .ok_or(Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+                            .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                         for vv in val {
                             let p = Rule::build_statements(vv, scope)?;
                             match p {
@@ -483,14 +483,15 @@ impl Rule {
                     ));
                 }
                 _ => {
-                    let kkey = key.as_str().ok_or(Error::InvalidRule(
-                        line!(),
-                        format!("{:?} must be string", key),
-                    ))?;
-                    if kkey.ends_with(" or more") {
-                        // let count =
-                        //     u32::from_str_radix(&kkey[..kkey.len() - " or more".len()], 10)?;
-                        let count = (&kkey[..kkey.len() - " or more".len()]).parse::<u32>()?;
+                    let kkey = key.as_str().ok_or_else(|| {
+                        Error::InvalidRule(line!(), format!("{:?} must be string", key))
+                    })?;
+                    // if kkey.ends_with(" or more") {
+                    // let count =
+                    //     u32::from_str_radix(&kkey[..kkey.len() - " or more".len()], 10)?;
+                    // let count = (&kkey[..kkey.len() - " or more".len()]).parse::<u32>()?;
+                    if let Some(x) = kkey.strip_suffix(" or more") {
+                        let count = x.parse::<u32>()?;
                         let mut params = vec![];
                         let mut description = "".to_string();
                         let val = vval
@@ -663,31 +664,15 @@ impl Rule {
 
 pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
     let mut rules = vec![];
-    for entry_res in std::fs::read_dir(rule_path)? {
-        let entry = entry_res?;
-        let fname = entry
-            .path()
-            .to_str()
-            .ok_or_else(|| Error::InvalidRule(line!(), format!("file error {:?}", entry)))?
-            .to_string();
-        if entry.file_type()?.is_dir() {
-            if fname.contains(".github") {
-                continue;
-            }
-            let subrules = get_rules(&fname)?;
-            rules.extend(subrules);
-        } else {
-            if fname.starts_with(".git")
-                || fname.contains("/.git")
-                || fname.ends_with(".git")
-                || fname.ends_with(".md")
-                || fname.ends_with(".txt")
-            {
-                continue;
-            }
+    for entry in WalkDir::new(rule_path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        let fname = entry.path().to_str().unwrap().to_string();
+        if fname.ends_with(".yml") {
             let mut rule = Rule::from_yaml_file(&fname)?;
             rule.set_path(fname.clone())?;
-            rules.push(rule);
+            rules.push(rule)
         }
     }
     Ok(rules)
@@ -845,9 +830,9 @@ pub fn index_rules_by_namespace(
                             ns = None;
                         } else {
                             let mut nsss = "".to_string();
-                            for i in 0..parts.len() - 1 {
+                            for item in parts.iter().take(parts.len() - 1) {
                                 nsss += "/";
-                                nsss += parts[i];
+                                nsss += item;
                             }
                             ns = Some(nsss[1..].to_string());
                         }
@@ -889,9 +874,9 @@ pub fn index_rules_by_namespace2<'a>(
                             ns = None;
                         } else {
                             let mut nsss = "".to_string();
-                            for i in 0..parts.len() - 1 {
+                            for item in parts.iter().take(parts.len() - 1) {
                                 nsss += "/";
-                                nsss += parts[i];
+                                nsss += item;
                             }
                             ns = Some(nsss[1..].to_string());
                         }

@@ -365,7 +365,7 @@ impl JumpTableAnalyser {
                 }
             }
         }
-        jump_targets.sort();
+        jump_targets.sort_unstable();
         Ok(jump_targets)
     }
 

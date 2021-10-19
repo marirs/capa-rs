@@ -61,7 +61,8 @@ impl OrdinalHelper {
     }
 }
 
-static API_COLLECTION_FILES: &[&(&str, &str)] = &[&("win_7", "assets/apiscout_win7_prof-n_sp1.json")];
+static API_COLLECTION_FILES: &[&(&str, &str)] =
+    &[&("win_7", "assets/apiscout_win7_prof-n_sp1.json")];
 
 #[derive(Debug)]
 pub struct WinApiResolver {
@@ -184,10 +185,8 @@ impl WinApiResolver {
             }
         }
         //otherwise take import table info from LIEF
-        else {
-            if let Some((dll, api)) = self.api_map["lief"].get(&to_addr) {
-                return Ok((Some(dll.to_string()), Some(api.to_string())));
-            }
+        else if let Some((dll, api)) = self.api_map["lief"].get(&to_addr) {
+            return Ok((Some(dll.to_string()), Some(api.to_string())));
         }
         Ok((None, None))
     }

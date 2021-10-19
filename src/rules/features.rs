@@ -401,7 +401,6 @@ impl PartialEq for MnemonicFeature {
 
 impl Eq for MnemonicFeature {}
 
-
 #[derive(Debug, Clone)]
 pub struct OffsetFeature {
     bitness: u32,
@@ -763,7 +762,7 @@ impl RegexFeature {
         let mut ll = vec![];
         for (feature, locations) in features {
             if let Feature::String(s) = feature {
-                if let Some(_) = self.re.find(s.value.as_bytes()) {
+                if self.re.find(s.value.as_bytes()).is_some() {
                     ll.extend(locations);
                 }
             }
@@ -831,9 +830,9 @@ pub struct BytesFeature {
 }
 
 impl BytesFeature {
-    pub fn new(value: &Vec<u8>, description: &str) -> Result<BytesFeature> {
+    pub fn new(value: &[u8], description: &str) -> Result<BytesFeature> {
         Ok(BytesFeature {
-            value: value.clone(),
+            value: value.to_owned(),
             description: description.to_string(),
         })
     }

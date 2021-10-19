@@ -2,7 +2,6 @@
 mod extractor;
 pub mod rules;
 
-use goblin::Object;
 use serde::Serialize;
 use smda::{function::Function, FileArchitecture, FileFormat};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -73,6 +72,16 @@ pub fn from_file(
     resolve_tailcalls: bool,
     logger: &dyn Fn(&str),
 ) -> Result<FileCapabilities> {
+    //! Loads a binary from a given file for capability analysis
+    //! ## Example
+    //! ```rust
+    //! use capa::from_file;
+    //!
+    //! let rules_path = "./rules";
+    //! let file_to_analyse = "./demo.exe";
+    //! let result = from_file(file_to_analyse, rules_path, true, true, &|_s| {});
+    //! println!("{:?}", result);
+    //! ```
     let extractor = extractor::Extractor::new(file_name, high_accuracy, resolve_tailcalls)?;
     logger(&"loading rules...".to_string());
     let rules = rules::RuleSet::new(rule_path)?;
@@ -101,7 +110,7 @@ pub fn from_file(
     Ok(file_capabilities)
 }
 
-pub fn find_function_capabilities<'a>(
+fn find_function_capabilities<'a>(
     ruleset: &'a crate::rules::RuleSet,
     extractor: &crate::extractor::Extractor,
     f: &Function,
@@ -221,7 +230,7 @@ pub fn find_function_capabilities<'a>(
     Ok((function_matches, bb_matches, function_features.len()))
 }
 
-pub fn find_capabilities(
+fn find_capabilities(
     ruleset: &crate::rules::RuleSet,
     extractor: &crate::extractor::Extractor,
     logger: &dyn Fn(&str),
@@ -297,7 +306,7 @@ pub fn find_capabilities(
     Ok((matches, meta))
 }
 
-pub fn find_file_capabilities<'a>(
+fn find_file_capabilities<'a>(
     ruleset: &'a crate::rules::RuleSet,
     extractor: &crate::extractor::Extractor,
     function_features: &HashMap<crate::rules::features::Feature, Vec<u64>>,
@@ -356,21 +365,6 @@ pub struct Meta {
     base_address: usize,
 }
 
-// #[derive(Debug, Serialize)]
-// pub struct Section {
-//     name: String,
-//     address: u64,
-//     size: usize,
-// }
-//
-// #[derive(Debug, Serialize)]
-// pub struct Import {
-//     lib: String,
-//     symbol: String,
-//     #[serde(serialize_with = "to_hex")]
-//     offset: usize,
-// }
-
 fn to_hex<S>(x: &usize, s: S) -> std::result::Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
@@ -392,9 +386,7 @@ pub struct FileCapabilities {
 }
 
 impl FileCapabilities {
-    pub fn new(
-        #[cfg(feature = "meta")] extractor: &extractor::Extractor,
-    ) -> Result<FileCapabilities> {
+    fn new(#[cfg(feature = "meta")] extractor: &extractor::Extractor) -> Result<FileCapabilities> {
         Ok(FileCapabilities {
             #[cfg(feature = "meta")]
             meta: Meta {
@@ -413,7 +405,7 @@ impl FileCapabilities {
         })
     }
 
-    pub fn update_capabilities(
+    fn update_capabilities(
         &mut self,
         capabilities: &HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
         #[cfg(feature = "verbose")] counts: &HashMap<u64, usize>,
@@ -524,11 +516,11 @@ impl FileCapabilities {
         Ok(())
     }
 
-    pub fn get_format(extractor: &extractor::Extractor) -> Result<FileFormat> {
+    fn get_format(extractor: &extractor::Extractor) -> Result<FileFormat> {
         Ok(extractor.report.format)
     }
 
-    pub fn get_arch(extractor: &extractor::Extractor) -> Result<FileArchitecture> {
+    fn get_arch(extractor: &extractor::Extractor) -> Result<FileArchitecture> {
         if extractor.report.bitness == 32 {
             return Ok(FileArchitecture::I386);
         } else if extractor.report.bitness == 64 {
@@ -537,7 +529,7 @@ impl FileCapabilities {
         Err(Error::UnsupportedArchError)
     }
 
-    pub fn get_os(extractor: &extractor::Extractor) -> Result<Os> {
+    fn get_os(extractor: &extractor::Extractor) -> Result<Os> {
         if let FileFormat::PE = extractor.report.format {
             Ok(Os::WINDOWS)
         } else {
@@ -546,7 +538,7 @@ impl FileCapabilities {
     }
 }
 
-pub fn match_fn<'a>(
+fn match_fn<'a>(
     rules: &'a [crate::rules::Rule],
     features: &HashMap<crate::rules::features::Feature, Vec<u64>>,
     va: &u64,
@@ -580,7 +572,7 @@ pub fn match_fn<'a>(
     Ok((features, results))
 }
 
-pub fn index_rule_matches(
+fn index_rule_matches(
     features: &mut HashMap<crate::rules::features::Feature, Vec<u64>>,
     rule: &crate::rules::Rule,
     locations: Vec<u64>,
@@ -635,9 +627,9 @@ pub fn index_rule_matches(
                     ns = None;
                 } else {
                     let mut nss = "".to_string();
-                    for i in 0..parts.len() - 1 {
+                    for item in parts.iter().take(parts.len() - 1) {
                         nss += "/";
-                        nss += parts[i];
+                        nss += item;
                     }
                     ns = Some(nss[1..].to_string());
                 }
