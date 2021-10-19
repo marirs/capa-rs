@@ -39,13 +39,15 @@ impl Extractor {
     }
 
     pub fn extract_os(&self) -> Result<crate::Os> {
-        if self.buf.starts_with(b"MZ") {
-            return Ok(crate::Os::WINDOWS);
-        } else if self.buf.starts_with(b"\x7fELF") {
-            return Ok(crate::Os::LINUX);
-            //TODO .detect_elf_os(self.buf)?);
+        match goblin::Object::parse(&self.buf)? {
+            goblin::Object::Elf(elf) => {
+                return elf::get_os(&elf);
+            },
+            goblin::Object::PE(_) => {
+                return Ok(crate::Os::WINDOWS);
+            },
+            _ => Err(Error::UnsupportedOsError)
         }
-        Err(Error::UnsupportedOsError)
     }
 
     pub fn extract_arch(&self) -> Result<crate::FileArchitecture> {

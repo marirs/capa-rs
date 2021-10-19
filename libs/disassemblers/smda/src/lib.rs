@@ -12,6 +12,7 @@ mod label_provider;
 mod label_providers;
 mod mnemonic_tf_idf;
 mod pe;
+mod elf;
 pub mod report;
 mod statistics;
 mod tail_call_analyser;
@@ -637,12 +638,34 @@ impl Disassembler {
         binary_info.init(&file_content)?;
         binary_info.file_path = file_name.to_string();
         match Object::parse(&file_content)? {
-            Object::Elf(_elf) => {
-                //                binary_info.base_addr = elf::getBaseAddress();
-                //                binary_info.bitness = elf::getBitness();
-                //                binary_info.code_areas = elf::getCodeAreas();
-                //                binary_info.sections = pe.sections.iter().map(|s| (std::str::from_utf8(&s.name).unwrap().to_string(), s.virtual_address as u64, s.virtual_size as usize)).collect();
-                //                binary_info.imports = pe.imports.iter().map(|s| (s.dll.to_string(), s.name.to_string())).collect();
+            Object::Elf(elf) => {
+                binary_info.file_format = FileFormat::ELF;
+                binary_info.base_addr = elf::get_base_address(&file_content)?;
+                binary_info.bitness = elf::get_bitness(&file_content)?;
+                binary_info.code_areas = elf::get_code_areas(&file_content, &elf)?;
+                binary_info.sections = elf
+                    .section_headers
+                    .iter()
+                    .map(|s| {
+                        (
+                            if let Some(ss) = elf.shdr_strtab.get_at(s.sh_name) {ss.to_string()} else {"..".to_string()},
+                            s.sh_addr as u64,
+                            s.sh_size as usize,
+                        )
+                    })
+                    .collect();
+                // binary_info.imports = elf
+                //     .imports
+                //     .iter()
+                //     .map(|s| (s.dll.to_string(), s.name.to_string(), s.offset))
+                //     .collect();
+                // binary_info.exports = elf
+                //     .exports
+                //     .iter()
+                //     .map(|s| (s.name.unwrap_or("").to_string(), s.offset))
+                //     .collect();
+                binary_info.binary = elf::map_binary(&binary_info.raw_data)?;
+                binary_info.binary_size = binary_info.binary.len() as u64;
             }
             Object::PE(pe) => {
                 binary_info.file_format = FileFormat::PE;
@@ -704,7 +727,9 @@ impl Disassembler {
         // binary_info.binary_size, binary_info.base_addr)
         self.update_label_providers(&bin)?;
         self.disassembly.init(bin)?;
-        self.disassembly.binary_info.bitness = self.determine_bitness()?;
+        if ![32u32, 64u32].contains(&self.disassembly.binary_info.bitness){
+            self.disassembly.binary_info.bitness = self.determine_bitness()?;
+        }
         self.tailcall_analyzer.init()?;
         self.indirect_call_analyser.init()?;
         self.jumptable_analyzer.init(&self.disassembly)?;

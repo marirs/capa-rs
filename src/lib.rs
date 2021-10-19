@@ -66,42 +66,6 @@ pub enum Endian {
     Little,
 }
 
-// #[derive(Debug)]
-// pub struct CapabilityExtractorSettings {}
-
-#[derive(Debug)]
-pub struct CapabilityExtractor {
-    format: FileFormat,
-    arch: FileArchitecture,
-    endian: Endian,
-    os: Os,
-}
-
-impl CapabilityExtractor {
-    pub fn new(
-        file_name: &str,
-        // _settings: Option<CapabilityExtractorSettings>,
-    ) -> Result<CapabilityExtractor> {
-        let path = std::path::Path::new(file_name);
-        let buffer = std::fs::read(path)?;
-        match Object::parse(&buffer)? {
-            Object::Elf(elf) => Ok(CapabilityExtractor {
-                format: FileFormat::ELF,
-                arch: extractor::elf::get_arch(&elf)?,
-                endian: extractor::elf::get_endian(&elf)?,
-                os: extractor::elf::get_os(&elf)?,
-            }),
-            Object::PE(pe) => Ok(CapabilityExtractor {
-                format: FileFormat::PE,
-                arch: extractor::pe::get_arch(&pe)?,
-                endian: extractor::pe::get_endian(&pe)?,
-                os: extractor::pe::get_os(&pe)?,
-            }),
-            _ => Err(error::Error::UnsupportedFormatError),
-        }
-    }
-}
-
 pub fn from_file(
     file_name: &str,
     rule_path: &str,
@@ -147,6 +111,7 @@ pub fn find_function_capabilities<'a>(
     HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     usize,
 )> {
+//    println!("0x{:02x}", f.offset);
     let mut function_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
     let mut bb_matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
 
@@ -198,6 +163,7 @@ pub fn find_function_capabilities<'a>(
         let insns = extractor.get_instructions(f, &bb)?;
         let _n_insns = insns.len();
         for (_insn_index, insn) in insns.iter().enumerate() {
+//            println!("0x{:02x}, {:?}", insn.offset, insn);
             //            logger(&format!("\t\tinstruction {} from {}", insn_index, _n_insns));
             for (feature, va) in extractor.extract_insn_features(f, &bb, insn)? {
                 match bb_features.get_mut(&feature) {
@@ -245,6 +211,7 @@ pub fn find_function_capabilities<'a>(
             }
         }
     }
+//    println!("{:?}", function_features);
     let (_, function_matches) = match_fn(
         &ruleset.function_rules,
         &function_features,

@@ -8,7 +8,7 @@ edition = "2018"
 [dependencies]
 capstone = "0.10.0"
 data-encoding = "2.3.2"
-goblin = "0.4.3"
+goblin = { version = "0.4.3", features = ["alloc"] }
 hex = "0.4.3"
 itertools = "0.10.1"
 maplit = "1.0.2"
