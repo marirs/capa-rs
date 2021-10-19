@@ -22,5 +22,5 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           use-cross: true
-          command: test
+          command: build
           args: --target armv7-unknown-linux-gnueabihf
