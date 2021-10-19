@@ -22,6 +22,9 @@ pub enum Error {
     #[error("utf16 error: {0}")]
     FromUtf16Error(#[from] std::string::FromUtf16Error),
 
+    #[error("goblin error")]
+    ParseError(#[from] goblin::error::Error),
+
     #[error("unsupported format")]
     UnsupportedFormatError,
     #[error("unsupported arch")]
@@ -45,4 +48,6 @@ pub enum Error {
 
     #[error("not implemented")]
     NoiImplementedError,
+
+
 }
