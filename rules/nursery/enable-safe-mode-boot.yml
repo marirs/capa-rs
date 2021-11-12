@@ -12,7 +12,7 @@ rule:
       - or:
         - substring: "bootcfg /raw /a /safeboot:network"
           description: XP-era method for safe mode
-        - string: "bcdedit /set {current} safeboot minimal"
+        - string: "bcdedit /set \{current\} safeboot minimal"
           description: modern-era method for safe mode, no internet
-        - string: "bcdedit /set {current} safeboot network"
+        - string: "bcdedit /set \{current\} safeboot network"
           description: modern-era method for safe mode, with internet
