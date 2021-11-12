@@ -2,7 +2,7 @@
 mod extractor;
 pub mod rules;
 
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use smda::{function::Function, FileArchitecture, FileFormat};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -10,7 +10,7 @@ mod error;
 pub use crate::error::Error;
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Os {
     WINDOWS,
     HPUX,
@@ -347,7 +347,7 @@ fn find_file_capabilities<'a>(
     Ok((matches, file_features.len()))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FunctionCapabilities {
     #[serde(serialize_with = "to_hex")]
     address: usize,
@@ -356,7 +356,7 @@ pub struct FunctionCapabilities {
 }
 
 #[cfg(feature = "meta")]
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Meta {
     format: FileFormat,
     arch: FileArchitecture,
@@ -372,7 +372,7 @@ where
     s.serialize_str(&format!("0x{:08x}", x))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FileCapabilities {
     #[cfg(feature = "meta")]
     meta: Meta,

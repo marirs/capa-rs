@@ -30,7 +30,7 @@ use mnemonic_tf_idf::MnemonicTfIdf;
 use regex::bytes::Regex;
 use report::DisassemblyReport;
 use ring::digest::{Context, SHA256};
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use std::{
     collections::{HashMap, HashSet},
     convert::TryInto,
@@ -82,13 +82,13 @@ static REGS_64BIT: &[&str] = &[
     "r13", "r14", "r15",
 ];
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum FileFormat {
     ELF,
     PE,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum FileArchitecture {
     I386,
     AMD64,
