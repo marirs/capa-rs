@@ -2,7 +2,7 @@
 mod extractor;
 pub mod rules;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use smda::{function::Function, FileArchitecture, FileFormat};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -87,11 +87,11 @@ pub fn from_file(
     let rules = rules::RuleSet::new(rule_path)?;
     logger(&format!("loaded {} rules", rules.rules.len()));
     let mut file_capabilities;
-    #[cfg(not(feature = "meta"))]
+    #[cfg(not(feature = "properties"))]
     {
         file_capabilities = FileCapabilities::new()?;
     }
-    #[cfg(feature = "meta")]
+    #[cfg(feature = "properties")]
     {
         file_capabilities = FileCapabilities::new(&extractor)?;
     }
@@ -120,7 +120,7 @@ fn find_function_capabilities<'a>(
     HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     usize,
 )> {
-//    println!("0x{:02x}", f.offset);
+    //    println!("0x{:02x}", f.offset);
     let mut function_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
     let mut bb_matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
 
@@ -172,7 +172,7 @@ fn find_function_capabilities<'a>(
         let insns = extractor.get_instructions(f, &bb)?;
         let _n_insns = insns.len();
         for (_insn_index, insn) in insns.iter().enumerate() {
-//            println!("0x{:02x}, {:?}", insn.offset, insn);
+            //            println!("0x{:02x}, {:?}", insn.offset, insn);
             //            logger(&format!("\t\tinstruction {} from {}", insn_index, _n_insns));
             for (feature, va) in extractor.extract_insn_features(f, &bb, insn)? {
                 match bb_features.get_mut(&feature) {
@@ -220,7 +220,7 @@ fn find_function_capabilities<'a>(
             }
         }
     }
-//    println!("{:?}", function_features);
+    //    println!("{:?}", function_features);
     let (_, function_matches) = match_fn(
         &ruleset.function_rules,
         &function_features,
@@ -355,9 +355,9 @@ pub struct FunctionCapabilities {
     capabilities: Vec<String>,
 }
 
-#[cfg(feature = "meta")]
+#[cfg(feature = "properties")]
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Meta {
+pub struct Properties {
     format: FileFormat,
     arch: FileArchitecture,
     os: Os,
@@ -374,8 +374,8 @@ where
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FileCapabilities {
-    #[cfg(feature = "meta")]
-    meta: Meta,
+    #[cfg(feature = "properties")]
+    properties: Properties,
     attacks: BTreeMap<String, BTreeSet<String>>,
     mbc: BTreeMap<String, BTreeSet<String>>,
     capability_namespaces: BTreeMap<String, String>,
@@ -386,10 +386,12 @@ pub struct FileCapabilities {
 }
 
 impl FileCapabilities {
-    fn new(#[cfg(feature = "meta")] extractor: &extractor::Extractor) -> Result<FileCapabilities> {
+    fn new(
+        #[cfg(feature = "properties")] extractor: &extractor::Extractor,
+    ) -> Result<FileCapabilities> {
         Ok(FileCapabilities {
-            #[cfg(feature = "meta")]
-            meta: Meta {
+            #[cfg(feature = "properties")]
+            properties: Properties {
                 format: FileCapabilities::get_format(extractor)?,
                 arch: FileCapabilities::get_arch(extractor)?,
                 os: FileCapabilities::get_os(extractor)?,

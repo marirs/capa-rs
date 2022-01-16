@@ -1,0 +1,48 @@
+[package]
+name = "capa"
+version = "0.1.1"
+description = "File capability extractor. Rules from Mandiant CAPA"
+authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>"]
+keywords = ["capa", "fce", "capability", "file"]
+edition = "2018"
+
+[dependencies]
+hex = "0.4.3"
+itertools = "0.10.1"
+pdb = "0.7.0"
+petgraph = "0.6.0"
+regex = "1.5.4"
+serde = { version = "1.0", features = ["derive"] }
+smda = "0.1.6"
+thiserror = "1.0.30"
+walkdir = "2.3.2"
+yaml-rust = "0.4.5"
+goblin = { version = "0.4.3", features = ["alloc"] }
+
+[dev-dependencies]
+serde_json = "1.0.68"
+prettytable-rs = "0.8.0"
+
+[lib]
+name = "capa"
+path = "src/lib.rs"
+
+[features]
+default = ["properties"]
+verbose = []
+properties = []
+
+[[example]]
+name = "capa_cli"
+path = "examples/capa_cli.rs"
+required-features = ["properties"]
+
+[profile.dev]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+debug-assertions = false
+debug = false
+opt-level = 3
+lto = true

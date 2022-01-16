@@ -3,11 +3,11 @@ mod statement;
 
 use crate::{Error, Result};
 use features::{Feature, RuleFeatureType};
-use walkdir::WalkDir;
 use statement::{
     AndStatement, Description, NotStatement, OrStatement, RangeStatement, SomeStatement, Statement,
     StatementElement, SubscopeStatement,
 };
+use walkdir::WalkDir;
 use yaml_rust::{yaml::Hash, Yaml, YamlLoader};
 
 const MAX_BYTES_FEATURE_SIZE: usize = 0x100;
@@ -664,10 +664,7 @@ impl Rule {
 
 pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
     let mut rules = vec![];
-    for entry in WalkDir::new(rule_path)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
+    for entry in WalkDir::new(rule_path).into_iter().filter_map(|e| e.ok()) {
         let fname = entry.path().to_str().unwrap().to_string();
         if fname.ends_with(".yml") {
             let mut rule = Rule::from_yaml_file(&fname)?;

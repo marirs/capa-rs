@@ -48,6 +48,4 @@ pub enum Error {
 
     #[error("not implemented")]
     NoiImplementedError,
-
-
 }

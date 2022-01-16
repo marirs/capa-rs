@@ -15,9 +15,7 @@ fn main() {
     };
 
     let start = Instant::now();
-    match capa::from_file(&filename, "rules", true, true, &|_s| {
-        //                                           println!("{}", s);
-    }) {
+    match capa::from_file(&filename, "rules", true, true, &|_s| {}) {
         Err(e) => println!("{:?}", e),
         Ok(s) => {
             match to_value(&s) {
@@ -27,8 +25,8 @@ fn main() {
                     let features = data.get("features");
 
                     // print the file basic properties
-                    if let Some(meta) = data.get("meta") {
-                        let tbl = get_meta(meta, features);
+                    if let Some(props) = data.get("properties") {
+                        let tbl = get_properties(props, features);
                         tbl.printstd();
                     }
                     println!();
@@ -81,8 +79,8 @@ fn main() {
 }
 
 /// Gets the Meta information and returns as a TABLE for stdout
-fn get_meta(meta: &Value, features: Option<&Value>) -> Table {
-    let meta = meta.as_object().unwrap();
+fn get_properties(props: &Value, features: Option<&Value>) -> Table {
+    let meta = props.as_object().unwrap();
     let mut tbl = Table::new();
     tbl.set_titles(Row::new(vec![Cell::new_align(
         "File Properties",

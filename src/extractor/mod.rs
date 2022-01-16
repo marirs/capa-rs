@@ -61,11 +61,11 @@ impl Extractor {
         match goblin::Object::parse(&self.buf)? {
             goblin::Object::Elf(elf) => {
                 return Extractor::get_elf_os(&elf);
-            },
+            }
             goblin::Object::PE(_) => {
                 return Ok(crate::Os::WINDOWS);
-            },
-            _ => Err(Error::UnsupportedOsError)
+            }
+            _ => Err(Error::UnsupportedOsError),
         }
     }
 
