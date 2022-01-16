@@ -349,7 +349,7 @@ fn find_file_capabilities<'a>(
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FunctionCapabilities {
-    #[serde(serialize_with = "to_hex")]
+    #[serde(serialize_with = "to_hex", deserialize_with = "from_hex")]
     address: usize,
     features: usize,
     capabilities: Vec<String>,
@@ -361,7 +361,7 @@ pub struct Properties {
     format: FileFormat,
     arch: FileArchitecture,
     os: Os,
-    #[serde(serialize_with = "to_hex")]
+    #[serde(serialize_with = "to_hex", deserialize_with = "from_hex")]
     base_address: usize,
 }
 
@@ -371,6 +371,18 @@ where
 {
     s.serialize_str(&format!("0x{:08x}", x))
 }
+
+fn from_hex<'de, D>(d: D) -> std::result::Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let buf = String::deserialize(d)?;
+    if !buf.starts_with("0x"){
+        return Err(serde::de::Error::custom(buf));
+    }
+    usize::from_str_radix(&buf, 16).map_err(serde::de::Error::custom)
+}
+
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileCapabilities {
