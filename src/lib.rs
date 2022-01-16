@@ -356,7 +356,7 @@ pub struct FunctionCapabilities {
 }
 
 #[cfg(feature = "properties")]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Properties {
     format: FileFormat,
     arch: FileArchitecture,
@@ -372,7 +372,7 @@ where
     s.serialize_str(&format!("0x{:08x}", x))
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileCapabilities {
     #[cfg(feature = "properties")]
     properties: Properties,
