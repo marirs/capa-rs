@@ -380,7 +380,7 @@ where
     if !buf.starts_with("0x"){
         return Err(serde::de::Error::custom(buf));
     }
-    usize::from_str_radix(&buf, 16).map_err(serde::de::Error::custom)
+    usize::from_str_radix(&buf[2..], 16).map_err(serde::de::Error::custom)
 }
 
 
