@@ -1,14 +1,17 @@
 #![allow(clippy::type_complexity)]
-mod extractor;
 mod consts;
-mod sede;
+mod extractor;
 pub mod rules;
+mod sede;
 
-use serde::{Deserialize, Serialize};
-use smda::{function::Function, FileArchitecture, FileFormat};
-use std::{collections::{BTreeMap, BTreeSet, HashMap}, thread::spawn};
 use consts::Os;
 use sede::{from_hex, to_hex};
+use serde::{Deserialize, Serialize};
+use smda::{function::Function, FileArchitecture, FileFormat};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    thread::spawn,
+};
 
 mod error;
 pub use crate::error::Error;
@@ -34,31 +37,32 @@ impl FileCapabilities {
         //! ```
         let f = file_name.to_string();
         let r = rule_path.to_string();
-        let extractor_thread_handle = spawn(move || extractor::Extractor::new(&f, high_accuracy, resolve_tailcalls));
-        let rules_thread_handle = spawn(move ||rules::RuleSet::new(&r));
+        let extractor_thread_handle =
+            spawn(move || extractor::Extractor::new(&f, high_accuracy, resolve_tailcalls));
+        let rules_thread_handle = spawn(move || rules::RuleSet::new(&r));
         let rules = rules_thread_handle.join().unwrap()?;
         let extractor = extractor_thread_handle.join().unwrap()?;
 
         let mut file_capabilities;
         #[cfg(not(feature = "properties"))]
-            {
-                file_capabilities = FileCapabilities::new()?;
-            }
+        {
+            file_capabilities = FileCapabilities::new()?;
+        }
         #[cfg(feature = "properties")]
-            {
-                file_capabilities = FileCapabilities::new(&extractor)?;
-            }
+        {
+            file_capabilities = FileCapabilities::new(&extractor)?;
+        }
 
         #[cfg(not(feature = "verbose"))]
-            {
-                let (capabilities, _counts) = find_capabilities(&rules, &extractor, logger)?;
-                file_capabilities.update_capabilities(&capabilities)?;
-            }
+        {
+            let (capabilities, _counts) = find_capabilities(&rules, &extractor, logger)?;
+            file_capabilities.update_capabilities(&capabilities)?;
+        }
         #[cfg(feature = "verbose")]
-            {
-                let (capabilities, counts) = find_capabilities(&rules, &extractor, logger)?;
-                file_capabilities.update_capabilities(&capabilities, &counts)?;
-            }
+        {
+            let (capabilities, counts) = find_capabilities(&rules, &extractor, logger)?;
+            file_capabilities.update_capabilities(&capabilities, &counts)?;
+        }
 
         Ok(file_capabilities)
     }
@@ -95,7 +99,7 @@ impl FileCapabilities {
                 .contains_key(&yaml_rust::Yaml::String("att&ck".to_string()))
             {
                 if let yaml_rust::Yaml::Array(s) =
-                &rule.meta[&yaml_rust::Yaml::String("att&ck".to_string())]
+                    &rule.meta[&yaml_rust::Yaml::String("att&ck".to_string())]
                 {
                     for p in s {
                         let parts: Vec<&str> = p
@@ -127,7 +131,7 @@ impl FileCapabilities {
                 .contains_key(&yaml_rust::Yaml::String("mbc".to_string()))
             {
                 if let yaml_rust::Yaml::Array(s) =
-                &rule.meta[&yaml_rust::Yaml::String("mbc".to_string())]
+                    &rule.meta[&yaml_rust::Yaml::String("mbc".to_string())]
                 {
                     for p in s {
                         let parts: Vec<&str> = p
@@ -159,7 +163,7 @@ impl FileCapabilities {
                 .contains_key(&yaml_rust::Yaml::String("namespace".to_string()))
             {
                 if let yaml_rust::Yaml::String(s) =
-                &rule.meta[&yaml_rust::Yaml::String("namespace".to_string())]
+                    &rule.meta[&yaml_rust::Yaml::String("namespace".to_string())]
                 {
                     self.capability_namespaces
                         .insert(rule.name.clone(), s.clone());
@@ -167,9 +171,9 @@ impl FileCapabilities {
             }
         }
         #[cfg(feature = "verbose")]
-            {
-                self.features = counts[&0];
-            }
+        {
+            self.features = counts[&0];
+        }
 
         #[cfg(feature = "verbose")]
         for (addr, count) in counts {

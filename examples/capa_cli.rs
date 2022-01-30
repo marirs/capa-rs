@@ -1,8 +1,8 @@
+use capa::FileCapabilities;
 use clap::Parser;
 use prettytable::{color, format::Alignment, Attr, Cell, Row, Table};
 use serde_json::{to_value, Map, Value};
 use std::time::Instant;
-use capa::FileCapabilities;
 
 #[derive(Parser)]
 #[clap(
