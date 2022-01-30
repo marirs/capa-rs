@@ -2,6 +2,7 @@ use clap::Parser;
 use prettytable::{color, format::Alignment, Attr, Cell, Row, Table};
 use serde_json::{to_value, Map, Value};
 use std::time::Instant;
+use capa::FileCapabilities;
 
 #[derive(Parser)]
 #[clap(
@@ -29,7 +30,7 @@ fn main() {
     let verbose = cli.verbose;
 
     let start = Instant::now();
-    match capa::from_file(&filename, &rules_path, true, true, &|_s| {}) {
+    match FileCapabilities::from_file(&filename, &rules_path, true, true, &|_s| {}) {
         Err(e) => println!("{:?}", e),
         Ok(s) => {
             match to_value(&s) {

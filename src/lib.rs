@@ -1,113 +1,220 @@
 #![allow(clippy::type_complexity)]
 mod extractor;
+mod consts;
+mod sede;
 pub mod rules;
 
 use serde::{Deserialize, Serialize};
 use smda::{function::Function, FileArchitecture, FileFormat};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::{collections::{BTreeMap, BTreeSet, HashMap}, thread::spawn};
+use consts::Os;
+use sede::{from_hex, to_hex};
 
 mod error;
 pub use crate::error::Error;
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Os {
-    WINDOWS,
-    HPUX,
-    NETBSD,
-    LINUX,
-    HURD,
-    _86OPEN,
-    SOLARIS,
-    AIX,
-    IRIX,
-    FREEBSD,
-    TRU64,
-    MODESTO,
-    OPENBSD,
-    OPENVMS,
-    NSK,
-    AROS,
-    FENIXOS,
-    CLOUD,
-    UNDEFINED,
-}
+impl FileCapabilities {
+    pub fn from_file(
+        file_name: &str,
+        rule_path: &str,
+        high_accuracy: bool,
+        resolve_tailcalls: bool,
+        logger: &dyn Fn(&str),
+    ) -> Result<Self> {
+        //! Loads a binary from a given file for capability analysis
+        //! ## Example
+        //! ```rust
+        //! use capa::from_file;
+        //!
+        //! let rules_path = "./rules";
+        //! let file_to_analyse = "./demo.exe";
+        //! let result = from_file(file_to_analyse, rules_path, true, true, &|_s| {});
+        //! println!("{:?}", result);
+        //! ```
+        let f = file_name.to_string();
+        let r = rule_path.to_string();
+        let extractor_thread_handle = spawn(move || extractor::Extractor::new(&f, high_accuracy, resolve_tailcalls));
+        let rules_thread_handle = spawn(move ||rules::RuleSet::new(&r));
+        let rules = rules_thread_handle.join().unwrap()?;
+        let extractor = extractor_thread_handle.join().unwrap()?;
 
-impl std::fmt::Display for Os {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Os::WINDOWS => write!(f, "Windows"),
-            Os::HPUX => write!(f, "HP Unix"),
-            Os::NETBSD => write!(f, "NetBSD"),
-            Os::LINUX => write!(f, "Linux"),
-            Os::HURD => write!(f, "Hurd"),
-            Os::_86OPEN => write!(f, "86Open"),
-            Os::SOLARIS => write!(f, "Solaris"),
-            Os::AIX => write!(f, "Aix"),
-            Os::IRIX => write!(f, "Irix"),
-            Os::FREEBSD => write!(f, "FreeBSD"),
-            Os::TRU64 => write!(f, "Tru64"),
-            Os::MODESTO => write!(f, "Modesto"),
-            Os::OPENBSD => write!(f, "OpenBSD"),
-            Os::OPENVMS => write!(f, "OpenVMS"),
-            Os::NSK => write!(f, "NSK"),
-            Os::AROS => write!(f, "Aros"),
-            Os::FENIXOS => write!(f, "FenixOS"),
-            Os::CLOUD => write!(f, "Cloud"),
-            Os::UNDEFINED => write!(f, "undefined"),
+        let mut file_capabilities;
+        #[cfg(not(feature = "properties"))]
+            {
+                file_capabilities = FileCapabilities::new()?;
+            }
+        #[cfg(feature = "properties")]
+            {
+                file_capabilities = FileCapabilities::new(&extractor)?;
+            }
+
+        #[cfg(not(feature = "verbose"))]
+            {
+                let (capabilities, _counts) = find_capabilities(&rules, &extractor, logger)?;
+                file_capabilities.update_capabilities(&capabilities)?;
+            }
+        #[cfg(feature = "verbose")]
+            {
+                let (capabilities, counts) = find_capabilities(&rules, &extractor, logger)?;
+                file_capabilities.update_capabilities(&capabilities, &counts)?;
+            }
+
+        Ok(file_capabilities)
+    }
+
+    fn new(
+        #[cfg(feature = "properties")] extractor: &extractor::Extractor,
+    ) -> Result<FileCapabilities> {
+        Ok(FileCapabilities {
+            #[cfg(feature = "properties")]
+            properties: Properties {
+                format: FileCapabilities::get_format(extractor)?,
+                arch: FileCapabilities::get_arch(extractor)?,
+                os: FileCapabilities::get_os(extractor)?,
+                base_address: extractor.get_base_address()? as usize,
+            },
+            attacks: BTreeMap::new(),
+            mbc: BTreeMap::new(),
+            capability_namespaces: BTreeMap::new(),
+            #[cfg(feature = "verbose")]
+            features: 0,
+            #[cfg(feature = "verbose")]
+            functions_capabilities: BTreeMap::new(),
+        })
+    }
+
+    fn update_capabilities(
+        &mut self,
+        capabilities: &HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+        #[cfg(feature = "verbose")] counts: &HashMap<u64, usize>,
+    ) -> Result<()> {
+        for rule in capabilities.keys() {
+            if rule
+                .meta
+                .contains_key(&yaml_rust::Yaml::String("att&ck".to_string()))
+            {
+                if let yaml_rust::Yaml::Array(s) =
+                &rule.meta[&yaml_rust::Yaml::String("att&ck".to_string())]
+                {
+                    for p in s {
+                        let parts: Vec<&str> = p
+                            .as_str()
+                            .ok_or_else(|| Error::InvalidRule(line!(), file!().to_string()))?
+                            .split("::")
+                            .collect();
+                        if parts.len() > 1 {
+                            match self.attacks.get_mut(parts[0]) {
+                                Some(s) => {
+                                    s.insert(parts[1..].join("::"));
+                                }
+                                _ => {
+                                    self.attacks.insert(
+                                        parts[0].to_string(),
+                                        vec![parts[1..].join("::").to_string()]
+                                            .iter()
+                                            .cloned()
+                                            .collect(),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if rule
+                .meta
+                .contains_key(&yaml_rust::Yaml::String("mbc".to_string()))
+            {
+                if let yaml_rust::Yaml::Array(s) =
+                &rule.meta[&yaml_rust::Yaml::String("mbc".to_string())]
+                {
+                    for p in s {
+                        let parts: Vec<&str> = p
+                            .as_str()
+                            .ok_or_else(|| Error::InvalidRule(line!(), file!().to_string()))?
+                            .split("::")
+                            .collect();
+                        if parts.len() > 1 {
+                            match self.mbc.get_mut(parts[0]) {
+                                Some(s) => {
+                                    s.insert(parts[1..].join("::"));
+                                }
+                                _ => {
+                                    self.mbc.insert(
+                                        parts[0].to_string(),
+                                        vec![parts[1..].join("::").to_string()]
+                                            .iter()
+                                            .cloned()
+                                            .collect(),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if rule
+                .meta
+                .contains_key(&yaml_rust::Yaml::String("namespace".to_string()))
+            {
+                if let yaml_rust::Yaml::String(s) =
+                &rule.meta[&yaml_rust::Yaml::String("namespace".to_string())]
+                {
+                    self.capability_namespaces
+                        .insert(rule.name.clone(), s.clone());
+                }
+            }
+        }
+        #[cfg(feature = "verbose")]
+            {
+                self.features = counts[&0];
+            }
+
+        #[cfg(feature = "verbose")]
+        for (addr, count) in counts {
+            if addr == &0 {
+                continue;
+            }
+            let mut fc = FunctionCapabilities {
+                address: *addr as usize,
+                features: *count,
+                capabilities: vec![],
+            };
+            for (rule, caps) in capabilities {
+                for cap in caps {
+                    if &cap.0 == addr {
+                        fc.capabilities.push(rule.name.clone());
+                    }
+                }
+            }
+            if fc.capabilities.len() > 0 {
+                self.functions_capabilities.insert(addr.clone(), fc);
+            }
+        }
+        Ok(())
+    }
+
+    fn get_format(extractor: &extractor::Extractor) -> Result<FileFormat> {
+        Ok(extractor.report.format)
+    }
+
+    fn get_arch(extractor: &extractor::Extractor) -> Result<FileArchitecture> {
+        if extractor.report.bitness == 32 {
+            return Ok(FileArchitecture::I386);
+        } else if extractor.report.bitness == 64 {
+            return Ok(FileArchitecture::AMD64);
+        }
+        Err(Error::UnsupportedArchError)
+    }
+
+    fn get_os(extractor: &extractor::Extractor) -> Result<Os> {
+        if let FileFormat::PE = extractor.report.format {
+            Ok(Os::WINDOWS)
+        } else {
+            Ok(Os::LINUX)
         }
     }
-}
-
-#[derive(Debug)]
-pub enum Endian {
-    Big,
-    Little,
-}
-
-pub fn from_file(
-    file_name: &str,
-    rule_path: &str,
-    high_accuracy: bool,
-    resolve_tailcalls: bool,
-    logger: &dyn Fn(&str),
-) -> Result<FileCapabilities> {
-    //! Loads a binary from a given file for capability analysis
-    //! ## Example
-    //! ```rust
-    //! use capa::from_file;
-    //!
-    //! let rules_path = "./rules";
-    //! let file_to_analyse = "./demo.exe";
-    //! let result = from_file(file_to_analyse, rules_path, true, true, &|_s| {});
-    //! println!("{:?}", result);
-    //! ```
-    let extractor = extractor::Extractor::new(file_name, high_accuracy, resolve_tailcalls)?;
-    logger(&"loading rules...".to_string());
-    let rules = rules::RuleSet::new(rule_path)?;
-    logger(&format!("loaded {} rules", rules.rules.len()));
-    let mut file_capabilities;
-    #[cfg(not(feature = "properties"))]
-    {
-        file_capabilities = FileCapabilities::new()?;
-    }
-    #[cfg(feature = "properties")]
-    {
-        file_capabilities = FileCapabilities::new(&extractor)?;
-    }
-
-    #[cfg(not(feature = "verbose"))]
-    {
-        let (capabilities, _counts) = find_capabilities(&rules, &extractor, logger)?;
-        file_capabilities.update_capabilities(&capabilities)?;
-    }
-    #[cfg(feature = "verbose")]
-    {
-        let (capabilities, counts) = find_capabilities(&rules, &extractor, logger)?;
-        file_capabilities.update_capabilities(&capabilities, &counts)?;
-    }
-
-    Ok(file_capabilities)
 }
 
 fn find_function_capabilities<'a>(
@@ -365,24 +472,6 @@ pub struct Properties {
     base_address: usize,
 }
 
-fn to_hex<S>(x: &usize, s: S) -> std::result::Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    s.serialize_str(&format!("0x{:08x}", x))
-}
-
-fn from_hex<'de, D>(d: D) -> std::result::Result<usize, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let buf = String::deserialize(d)?;
-    if !buf.starts_with("0x") {
-        return Err(serde::de::Error::custom(buf));
-    }
-    usize::from_str_radix(&buf[2..], 16).map_err(serde::de::Error::custom)
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FileCapabilities {
     #[cfg(feature = "properties")]
@@ -394,161 +483,6 @@ pub struct FileCapabilities {
     features: usize,
     #[cfg(feature = "verbose")]
     functions_capabilities: BTreeMap<u64, FunctionCapabilities>,
-}
-
-impl FileCapabilities {
-    fn new(
-        #[cfg(feature = "properties")] extractor: &extractor::Extractor,
-    ) -> Result<FileCapabilities> {
-        Ok(FileCapabilities {
-            #[cfg(feature = "properties")]
-            properties: Properties {
-                format: FileCapabilities::get_format(extractor)?,
-                arch: FileCapabilities::get_arch(extractor)?,
-                os: FileCapabilities::get_os(extractor)?,
-                base_address: extractor.get_base_address()? as usize,
-            },
-            attacks: BTreeMap::new(),
-            mbc: BTreeMap::new(),
-            capability_namespaces: BTreeMap::new(),
-            #[cfg(feature = "verbose")]
-            features: 0,
-            #[cfg(feature = "verbose")]
-            functions_capabilities: BTreeMap::new(),
-        })
-    }
-
-    fn update_capabilities(
-        &mut self,
-        capabilities: &HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
-        #[cfg(feature = "verbose")] counts: &HashMap<u64, usize>,
-    ) -> Result<()> {
-        for rule in capabilities.keys() {
-            if rule
-                .meta
-                .contains_key(&yaml_rust::Yaml::String("att&ck".to_string()))
-            {
-                if let yaml_rust::Yaml::Array(s) =
-                    &rule.meta[&yaml_rust::Yaml::String("att&ck".to_string())]
-                {
-                    for p in s {
-                        let parts: Vec<&str> = p
-                            .as_str()
-                            .ok_or_else(|| Error::InvalidRule(line!(), file!().to_string()))?
-                            .split("::")
-                            .collect();
-                        if parts.len() > 1 {
-                            match self.attacks.get_mut(parts[0]) {
-                                Some(s) => {
-                                    s.insert(parts[1..].join("::"));
-                                }
-                                _ => {
-                                    self.attacks.insert(
-                                        parts[0].to_string(),
-                                        vec![parts[1..].join("::").to_string()]
-                                            .iter()
-                                            .cloned()
-                                            .collect(),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if rule
-                .meta
-                .contains_key(&yaml_rust::Yaml::String("mbc".to_string()))
-            {
-                if let yaml_rust::Yaml::Array(s) =
-                    &rule.meta[&yaml_rust::Yaml::String("mbc".to_string())]
-                {
-                    for p in s {
-                        let parts: Vec<&str> = p
-                            .as_str()
-                            .ok_or_else(|| Error::InvalidRule(line!(), file!().to_string()))?
-                            .split("::")
-                            .collect();
-                        if parts.len() > 1 {
-                            match self.mbc.get_mut(parts[0]) {
-                                Some(s) => {
-                                    s.insert(parts[1..].join("::"));
-                                }
-                                _ => {
-                                    self.mbc.insert(
-                                        parts[0].to_string(),
-                                        vec![parts[1..].join("::").to_string()]
-                                            .iter()
-                                            .cloned()
-                                            .collect(),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if rule
-                .meta
-                .contains_key(&yaml_rust::Yaml::String("namespace".to_string()))
-            {
-                if let yaml_rust::Yaml::String(s) =
-                    &rule.meta[&yaml_rust::Yaml::String("namespace".to_string())]
-                {
-                    self.capability_namespaces
-                        .insert(rule.name.clone(), s.clone());
-                }
-            }
-        }
-        #[cfg(feature = "verbose")]
-        {
-            self.features = counts[&0];
-        }
-
-        #[cfg(feature = "verbose")]
-        for (addr, count) in counts {
-            if addr == &0 {
-                continue;
-            }
-            let mut fc = FunctionCapabilities {
-                address: *addr as usize,
-                features: *count,
-                capabilities: vec![],
-            };
-            for (rule, caps) in capabilities {
-                for cap in caps {
-                    if &cap.0 == addr {
-                        fc.capabilities.push(rule.name.clone());
-                    }
-                }
-            }
-            if fc.capabilities.len() > 0 {
-                self.functions_capabilities.insert(addr.clone(), fc);
-            }
-        }
-        Ok(())
-    }
-
-    fn get_format(extractor: &extractor::Extractor) -> Result<FileFormat> {
-        Ok(extractor.report.format)
-    }
-
-    fn get_arch(extractor: &extractor::Extractor) -> Result<FileArchitecture> {
-        if extractor.report.bitness == 32 {
-            return Ok(FileArchitecture::I386);
-        } else if extractor.report.bitness == 64 {
-            return Ok(FileArchitecture::AMD64);
-        }
-        Err(Error::UnsupportedArchError)
-    }
-
-    fn get_os(extractor: &extractor::Extractor) -> Result<Os> {
-        if let FileFormat::PE = extractor.report.format {
-            Ok(Os::WINDOWS)
-        } else {
-            Ok(Os::LINUX)
-        }
-    }
 }
 
 fn match_fn<'a>(

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 #![allow(clippy::to_string_in_format_args)]
-use crate::{error::Error, Result};
+use crate::{error::Error, Result, consts::Os};
 use smda::{
     function::{Function, Instruction},
     report::DisassemblyReport,
@@ -8,7 +8,7 @@ use smda::{
 };
 use std::{collections::HashMap, convert::TryInto};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Extractor {
     pub report: DisassemblyReport,
     buf: Vec<u8>,
@@ -36,32 +36,32 @@ impl Extractor {
         self.report.get_functions()
     }
 
-    pub fn get_elf_os(elf: &goblin::elf::Elf) -> Result<crate::Os> {
+    pub fn get_elf_os(elf: &goblin::elf::Elf) -> Result<Os> {
         match elf.header.e_ident[7] {
-            0x00 => Ok(crate::Os::UNDEFINED),
-            0x01 => Ok(crate::Os::HPUX),
-            0x02 => Ok(crate::Os::NETBSD),
-            0x03 => Ok(crate::Os::LINUX),
-            0x04 => Ok(crate::Os::HURD),
-            0x06 => Ok(crate::Os::SOLARIS),
-            0x07 => Ok(crate::Os::AIX),
-            0x08 => Ok(crate::Os::IRIX),
-            0x09 => Ok(crate::Os::FREEBSD),
-            0x0A => Ok(crate::Os::TRU64),
-            0x0B => Ok(crate::Os::MODESTO),
-            0x0C => Ok(crate::Os::OPENBSD),
-            0x0D => Ok(crate::Os::OPENVMS),
-            0x0E => Ok(crate::Os::NSK),
-            0x0F => Ok(crate::Os::AROS),
-            0x10 => Ok(crate::Os::FENIXOS),
-            0x11 => Ok(crate::Os::CLOUD),
+            0x00 => Ok(Os::UNDEFINED),
+            0x01 => Ok(Os::HPUX),
+            0x02 => Ok(Os::NETBSD),
+            0x03 => Ok(Os::LINUX),
+            0x04 => Ok(Os::HURD),
+            0x06 => Ok(Os::SOLARIS),
+            0x07 => Ok(Os::AIX),
+            0x08 => Ok(Os::IRIX),
+            0x09 => Ok(Os::FREEBSD),
+            0x0A => Ok(Os::TRU64),
+            0x0B => Ok(Os::MODESTO),
+            0x0C => Ok(Os::OPENBSD),
+            0x0D => Ok(Os::OPENVMS),
+            0x0E => Ok(Os::NSK),
+            0x0F => Ok(Os::AROS),
+            0x10 => Ok(Os::FENIXOS),
+            0x11 => Ok(Os::CLOUD),
             _ => Err(Error::UnsupportedOsError),
         }
     }
-    pub fn extract_os(&self) -> Result<crate::Os> {
+    pub fn extract_os(&self) -> Result<Os> {
         match goblin::Object::parse(&self.buf)? {
             goblin::Object::Elf(elf) => Extractor::get_elf_os(&elf),
-            goblin::Object::PE(_) => Ok(crate::Os::WINDOWS),
+            goblin::Object::PE(_) => Ok(Os::WINDOWS),
             _ => Err(Error::UnsupportedOsError),
         }
     }
