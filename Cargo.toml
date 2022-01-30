@@ -4,7 +4,11 @@ version = "0.3.0"
 description = "File capability extractor."
 authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>"]
 keywords = ["capa", "fce", "capability", "file"]
-include = ["assets", "src"]
+readme = "README.md"
+license-file = "LICENSE"
+repository = "https://github.com/marirs/capa-rs"
+homepage = "https://github.com/marirs/capa-rs"
+exclude = ["examples", "data"]
 edition = "2021"
 
 [dependencies]

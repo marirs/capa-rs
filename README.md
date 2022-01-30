@@ -1,7 +1,9 @@
 # File Capability Extractor
 
-[![x86_64](https://github.com/marirs/capa-rs/actions/workflows/linux_x86-64.yml/badge.svg?branch=master)](https://github.com/marirs/capa-rs/actions/workflows/linux_x86-64.yml)
-[![Arm7](https://github.com/marirs/capa-rs/actions/workflows/linux_arm7.yml/badge.svg?branch=master)](https://github.com/marirs/capa-rs/actions/workflows/linux_arm7.yml)
+[![Linux Arm7](https://github.com/marirs/capa-rs/actions/workflows/linux_arm7.yml/badge.svg)](https://github.com/marirs/capa-rs/actions/workflows/linux_arm7.yml)
+[![Linux x86_64](https://github.com/marirs/capa-rs/actions/workflows/linux_x86-64.yml/badge.svg)](https://github.com/marirs/capa-rs/actions/workflows/linux_x86-64.yml)
+[![macOS](https://github.com/marirs/capa-rs/actions/workflows/macos.yml/badge.svg)](https://github.com/marirs/capa-rs/actions/workflows/macos.yml)
+[![Windows](https://github.com/marirs/capa-rs/actions/workflows/windows.yml/badge.svg)](https://github.com/marirs/capa-rs/actions/workflows/windows.yml)
 
 capa detects capabilities in executable files. You run it against a PE, ELF, or shellcode file and it tells you what it thinks the program can do. 
 For example, it might suggest that the file is a backdoor, is capable of installing services, or relies on HTTP to communicate.
@@ -54,6 +56,11 @@ The example contains a `CLI` to output the extracted capabilities to `stdout`.
 +-----------------------------------------------+------------------------------------+
 ```
 
+- With verbose output use
+```bash
+./capa_cli --rules-path capa-rules --verbose data/Demo64.dll
+```
+
 ### Features
 - properties (gets the meta information/properties of the file)
 - verbose (gets the verbose information such as: function, address, features, etc...)
@@ -75,8 +82,9 @@ carbo b --features=verbose
 cargo b --features=verbose,properties
 ```
 
-- without any features (default - includes the properties feature)
+- with default features (default - includes the properties feature)
 ```bash
 cargo b
 ```
 ---
+LICENSE: Apache

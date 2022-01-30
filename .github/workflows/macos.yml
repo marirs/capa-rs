@@ -23,4 +23,4 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           toolchain: ${{ matrix.rust }}
-          command: test
+          command: build

@@ -28,11 +28,11 @@ impl FileCapabilities {
         //! Loads a binary from a given file for capability analysis
         //! ## Example
         //! ```rust
-        //! use capa::from_file;
+        //! use capa::FileCapabilities;
         //!
         //! let rules_path = "./rules";
         //! let file_to_analyse = "./demo.exe";
-        //! let result = from_file(file_to_analyse, rules_path, true, true, &|_s| {});
+        //! let result = FileCapabilities::from_file(file_to_analyse, rules_path, true, true, &|_s| {});
         //! println!("{:?}", result);
         //! ```
         let f = file_name.to_string();
