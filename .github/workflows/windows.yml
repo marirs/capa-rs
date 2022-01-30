@@ -1,4 +1,4 @@
-name: Linux x86_64
+name: Windows
 on:
   pull_request:
   push:
@@ -10,17 +10,17 @@ on:
       - '**/.gitignore'
 
 jobs:
-  build:
+  test:
     name: Test Rust ${{ matrix.rust }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { rust: stable, os: ubuntu-latest }
+          - { rust: stable, os: windows-latest }
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/cargo@v1
         with:
           toolchain: ${{ matrix.rust }}
-          command: build
+          command: test
