@@ -234,6 +234,7 @@ impl Rule {
                 //we need to convert the value to the expected type.
                 //for example, from `number: 10 = CONST_FOO` we have
                 //the string "10" that needs to become the number 10.
+                #[allow(clippy::if_same_then_else)]
                 if let RuleFeatureType::Bytes = value_type {
                     value = Value::Bytes(Rule::parse_bytes(v)?);
                 } else if let RuleFeatureType::Number(_) = value_type {
@@ -332,10 +333,8 @@ impl Rule {
         let d = dd
             .as_hash()
             .ok_or_else(|| Error::InvalidRule(line!(), "statement need to be hash".to_string()))?;
-        // if d.len > 2{
-        //     return Err(Error::InvalidRule(line!(), "too many statements".to_string()));
-        // }
-        for (key, vval) in d {
+
+        if let Some((key, vval)) = d.into_iter().next() {
             match key
                 .as_str()
                 .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", key)))?

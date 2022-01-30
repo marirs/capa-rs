@@ -1,6 +1,6 @@
 [package]
 name = "capa"
-version = "0.2.1"
+version = "0.2.3"
 description = "File capability extractor."
 authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>"]
 keywords = ["capa", "fce", "capability", "file"]
@@ -14,7 +14,7 @@ pdb = "0.7.0"
 petgraph = "0.6.0"
 regex = "1.5.4"
 serde = { version = "1.0", features = ["derive"] }
-smda = "0.1.6"
+smda = "0.2.2"
 thiserror = "1.0.30"
 walkdir = "2.3.2"
 yaml-rust = "0.4.5"

@@ -16,7 +16,7 @@ The example contains a `CLI` to output the extracted capabilities to `stdout`.
 
 ### Running the example cli
 ```bash
-./capa_cli data/Demo64.dll
+./capa_cli --rules-path capa-rules data/Demo64.dll
 +--------------+-------------+
 |      File Properties       |
 +==============+=============+
@@ -55,14 +55,14 @@ The example contains a `CLI` to output the extracted capabilities to `stdout`.
 ```
 
 ### Features
-- meta (gets the meta information of the file)
+- properties (gets the meta information/properties of the file)
 - verbose (gets the verbose information such as: function, address, features, etc...)
 
 ### Compiling with or without features
 
-- with Meta
+- with properties
 ```bash
-cargo b --features=meta
+cargo b --features=properties
 ```
 
 - verbose mode
@@ -70,16 +70,13 @@ cargo b --features=meta
 carbo b --features=verbose
 ```
 
-- verbose & meta
+- verbose & properties
 ```bash
-cargo b --features=verbose,meta
+cargo b --features=verbose,properties
 ```
 
-- without any features (default)
+- without any features (default - includes the properties feature)
 ```bash
 cargo b
 ```
-
-without the features flag, it will be compiled ot only show the ATT&CK, MBC & Capability/Namespace details only.
-
 ---

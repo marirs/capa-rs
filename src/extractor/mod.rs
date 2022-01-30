@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(clippy::to_string_in_format_args)]
 use crate::{error::Error, Result};
 use smda::{
     function::{Function, Instruction},

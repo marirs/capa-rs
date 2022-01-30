@@ -17,12 +17,16 @@ struct CliOpts {
     /// Path to CAPA Rules
     #[clap(short = 'r', long, value_name = "CAPA_RULES")]
     rules_path: String,
+    /// verbose output
+    #[clap(long)]
+    verbose: bool,
 }
 
 fn main() {
     let cli = CliOpts::parse();
     let filename = cli.name;
     let rules_path = cli.rules_path;
+    let verbose = cli.verbose;
 
     let start = Instant::now();
     match capa::from_file(&filename, &rules_path, true, true, &|_s| {}) {
@@ -72,11 +76,13 @@ fn main() {
                     println!();
 
                     // print the Function/feature/capabilities
-                    if let Some(extra) = data.get("functions_capabilities") {
-                        let extra = extra.as_object().unwrap();
-                        if !extra.is_empty() {
-                            let tbl = get_verbose_info(extra);
-                            tbl.printstd();
+                    if verbose {
+                        if let Some(extra) = data.get("functions_capabilities") {
+                            let extra = extra.as_object().unwrap();
+                            if !extra.is_empty() {
+                                let tbl = get_verbose_info(extra);
+                                tbl.printstd();
+                            }
                         }
                     }
                     println!();
