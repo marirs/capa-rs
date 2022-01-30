@@ -7,16 +7,16 @@ capa detects capabilities in executable files. You run it against a PE, ELF, or 
 For example, it might suggest that the file is a backdoor, is capable of installing services, or relies on HTTP to communicate.
 
 It is a port from https://github.com/mandiant/capa without IDA plugins, etc. Its just a capa library that gives out capability information. 
-The Library itself can be used in other applications. 
+The Library itself can be used in other applications. The rules are available here: `https://github.com/mandiant/capa-rules`
 
 The example contains a `CLI` to output the extracted capabilities to `stdout`.
 
 ### Requirements
-- Rust 1.50+ (edition 2018)
+- Rust 1.56+ (edition 2021)
 
 ### Running the example cli
 ```bash
-./capa_cli Demo64.dll
+./capa_cli data/Demo64.dll
 +--------------+-------------+
 |      File Properties       |
 +==============+=============+

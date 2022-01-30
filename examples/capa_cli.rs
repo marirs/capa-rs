@@ -1,21 +1,31 @@
+use clap::Parser;
 use prettytable::{color, format::Alignment, Attr, Cell, Row, Table};
 use serde_json::{to_value, Map, Value};
 use std::time::Instant;
 
+#[derive(Parser)]
+#[clap(
+    author,
+    version,
+    about,
+    long_about = "Find Capabilities of a given file!"
+)]
+struct CliOpts {
+    /// File to analyse
+    #[clap(value_name = "FILE")]
+    name: String,
+    /// Path to CAPA Rules
+    #[clap(short = 'r', long, value_name = "CAPA_RULES")]
+    rules_path: String,
+}
+
 fn main() {
-    let filename = match std::env::args()
-        .nth(1)
-        .ok_or("Please provide file to analyse!")
-    {
-        Ok(fname) => fname,
-        Err(e) => {
-            println!("{}", e);
-            std::process::exit(1)
-        }
-    };
+    let cli = CliOpts::parse();
+    let filename = cli.name;
+    let rules_path = cli.rules_path;
 
     let start = Instant::now();
-    match capa::from_file(&filename, "rules", true, true, &|_s| {}) {
+    match capa::from_file(&filename, &rules_path, true, true, &|_s| {}) {
         Err(e) => println!("{:?}", e),
         Ok(s) => {
             match to_value(&s) {
@@ -89,13 +99,17 @@ fn get_properties(props: &Value, features: Option<&Value>) -> Table {
     .with_hspan(2)]));
     for (k, v) in &*meta {
         tbl.add_row(Row::new(vec![
-            Cell::new(k).with_style(Attr::ForegroundColor(color::BRIGHT_BLUE)),
+            Cell::new(k)
+                .with_style(Attr::ForegroundColor(color::BRIGHT_BLUE))
+                .with_style(Attr::Bold),
             Cell::new(v.as_str().unwrap()),
         ]));
     }
     if let Some(f) = features {
         tbl.add_row(Row::new(vec![
-            Cell::new("features").with_style(Attr::ForegroundColor(color::BRIGHT_BLUE)),
+            Cell::new("features")
+                .with_style(Attr::ForegroundColor(color::BRIGHT_BLUE))
+                .with_style(Attr::Bold),
             Cell::new(&f.as_u64().unwrap().to_string()),
         ]));
     }
@@ -124,7 +138,9 @@ fn get_mitre(attacks: &Map<String, Value>) -> Table {
             .collect::<Vec<_>>();
 
         tbl.add_row(Row::new(vec![
-            Cell::new(tatic).with_style(Attr::ForegroundColor(color::BRIGHT_CYAN)),
+            Cell::new(tatic)
+                .with_style(Attr::ForegroundColor(color::MAGENTA))
+                .with_style(Attr::Bold),
             Cell::new(&techniques.join("\n")),
         ]));
     }
@@ -152,7 +168,9 @@ fn get_mbc(mbc: &Map<String, Value>) -> Table {
             .collect::<Vec<_>>();
 
         tbl.add_row(Row::new(vec![
-            Cell::new(objective).with_style(Attr::ForegroundColor(color::BRIGHT_CYAN)),
+            Cell::new(objective)
+                .with_style(Attr::ForegroundColor(color::RED))
+                .with_style(Attr::Bold),
             Cell::new(&behaviours.join("\n")),
         ]));
     }
@@ -176,7 +194,9 @@ fn get_namespace(namespace: &Map<String, Value>) -> Table {
         let ns = v.as_str().unwrap().to_string();
 
         tbl.add_row(Row::new(vec![
-            Cell::new(capability).with_style(Attr::ForegroundColor(color::BRIGHT_CYAN)),
+            Cell::new(capability)
+                .with_style(Attr::ForegroundColor(color::CYAN))
+                .with_style(Attr::Bold),
             Cell::new(&ns),
         ]));
     }
@@ -205,7 +225,8 @@ fn get_verbose_info(extra: &Map<String, Value>) -> Table {
 
         tbl.add_row(Row::new(vec![
             Cell::new(&("@".to_string() + function))
-                .with_style(Attr::ForegroundColor(color::BRIGHT_CYAN)),
+                .with_style(Attr::ForegroundColor(color::GREEN))
+                .with_style(Attr::Bold),
             Cell::new(address),
             Cell::new(&features),
             Cell::new(&capabilities.join("\n")),

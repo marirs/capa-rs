@@ -377,14 +377,13 @@ where
     D: serde::Deserializer<'de>,
 {
     let buf = String::deserialize(d)?;
-    if !buf.starts_with("0x"){
+    if !buf.starts_with("0x") {
         return Err(serde::de::Error::custom(buf));
     }
     usize::from_str_radix(&buf[2..], 16).map_err(serde::de::Error::custom)
 }
 
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FileCapabilities {
     #[cfg(feature = "properties")]
     properties: Properties,

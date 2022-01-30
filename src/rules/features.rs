@@ -358,14 +358,14 @@ impl BasicBlockFeature {
 #[derive(Debug, Clone)]
 pub struct MnemonicFeature {
     value: String,
-    description: String,
+    _description: String,
 }
 
 impl MnemonicFeature {
     pub fn new(value: &str, description: &str) -> Result<MnemonicFeature> {
         Ok(MnemonicFeature {
             value: value.to_string(),
-            description: description.to_string(),
+            _description: description.to_string(),
         })
     }
     pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
@@ -403,17 +403,17 @@ impl Eq for MnemonicFeature {}
 
 #[derive(Debug, Clone)]
 pub struct OffsetFeature {
-    bitness: u32,
+    _bits: u32,
     value: i128,
-    description: String,
+    _description: String,
 }
 
 impl OffsetFeature {
     pub fn new(bitness: u32, value: &i128, description: &str) -> Result<OffsetFeature> {
         Ok(OffsetFeature {
-            bitness,
+            _bits: bitness,
             value: *value,
-            description: description.to_string(),
+            _description: description.to_string(),
         })
     }
     pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
@@ -451,17 +451,17 @@ impl Eq for OffsetFeature {}
 
 #[derive(Debug, Clone)]
 pub struct NumberFeature {
-    bitness: u32,
+    _bits: u32,
     value: i128,
-    description: String,
+    _description: String,
 }
 
 impl NumberFeature {
     pub fn new(bitness: u32, value: &i128, description: &str) -> Result<NumberFeature> {
         Ok(NumberFeature {
-            bitness,
+            _bits: bitness,
             value: *value,
-            description: description.to_string(),
+            _description: description.to_string(),
         })
     }
     pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
@@ -719,7 +719,7 @@ impl SubstringFeature {
 #[derive(Debug, Clone)]
 pub struct RegexFeature {
     value: String,
-    description: String,
+    _description: String,
     re: regex::bytes::Regex,
 }
 
@@ -742,7 +742,7 @@ impl RegexFeature {
         };
         Ok(RegexFeature {
             value: value.to_string(),
-            description: description.to_string(),
+            _description: description.to_string(),
             re: rr,
         })
     }
@@ -826,14 +826,14 @@ impl Eq for RegexFeature {}
 #[derive(Debug, Clone)]
 pub struct BytesFeature {
     value: Vec<u8>,
-    description: String,
+    _description: String,
 }
 
 impl BytesFeature {
     pub fn new(value: &[u8], description: &str) -> Result<BytesFeature> {
         Ok(BytesFeature {
             value: value.to_owned(),
-            description: description.to_string(),
+            _description: description.to_string(),
         })
     }
     pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
@@ -878,14 +878,14 @@ impl Eq for BytesFeature {}
 #[derive(Debug, Clone)]
 pub struct ArchFeature {
     value: String,
-    description: String,
+    _description: String,
 }
 
 impl ArchFeature {
     pub fn new(value: &str, description: &str) -> Result<ArchFeature> {
         Ok(ArchFeature {
             value: value.to_string(),
-            description: description.to_string(),
+            _description: description.to_string(),
         })
     }
     pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
@@ -924,14 +924,14 @@ impl Eq for ArchFeature {}
 #[derive(Debug, Clone)]
 pub struct OsFeature {
     value: String,
-    description: String,
+    _description: String,
 }
 
 impl OsFeature {
     pub fn new(value: &str, description: &str) -> Result<OsFeature> {
         Ok(OsFeature {
             value: value.to_string(),
-            description: description.to_string(),
+            _description: description.to_string(),
         })
     }
     pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
@@ -970,14 +970,14 @@ impl Eq for OsFeature {}
 #[derive(Debug, Clone)]
 pub struct FormatFeature {
     value: String,
-    description: String,
+    _description: String,
 }
 
 impl FormatFeature {
     pub fn new(value: &str, description: &str) -> Result<FormatFeature> {
         Ok(FormatFeature {
             value: value.to_string(),
-            description: description.to_string(),
+            _description: description.to_string(),
         })
     }
     pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
