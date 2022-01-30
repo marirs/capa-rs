@@ -59,12 +59,8 @@ impl Extractor {
     }
     pub fn extract_os(&self) -> Result<crate::Os> {
         match goblin::Object::parse(&self.buf)? {
-            goblin::Object::Elf(elf) => {
-                Extractor::get_elf_os(&elf)
-            }
-            goblin::Object::PE(_) => {
-                Ok(crate::Os::WINDOWS)
-            }
+            goblin::Object::Elf(elf) => Extractor::get_elf_os(&elf),
+            goblin::Object::PE(_) => Ok(crate::Os::WINDOWS),
             _ => Err(Error::UnsupportedOsError),
         }
     }
