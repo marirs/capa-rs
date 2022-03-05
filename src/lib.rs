@@ -458,7 +458,7 @@ fn find_file_capabilities<'a>(
     Ok((matches, file_features.len()))
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FunctionCapabilities {
     #[serde(serialize_with = "to_hex", deserialize_with = "from_hex")]
     address: usize,
@@ -476,7 +476,7 @@ pub struct Properties {
     base_address: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileCapabilities {
     #[cfg(feature = "properties")]
     properties: Properties,
