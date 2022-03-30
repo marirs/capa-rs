@@ -484,25 +484,25 @@ pub struct FunctionCapabilities {
 #[cfg(feature = "properties")]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Properties {
-    format: FileFormat,
-    arch: FileArchitecture,
-    os: Os,
+    pub format: FileFormat,
+    pub arch: FileArchitecture,
+    pub os: Os,
     #[serde(serialize_with = "to_hex", deserialize_with = "from_hex")]
-    base_address: usize,
+    pub base_address: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileCapabilities {
     #[cfg(feature = "properties")]
-    properties: Properties,
-    attacks: BTreeMap<String, BTreeSet<String>>,
-    mbc: BTreeMap<String, BTreeSet<String>>,
-    capability_namespaces: BTreeMap<String, String>,
+    pub properties: Properties,
+    pub attacks: BTreeMap<String, BTreeSet<String>>,
+    pub mbc: BTreeMap<String, BTreeSet<String>>,
+    pub capability_namespaces: BTreeMap<String, String>,
     #[cfg(feature = "verbose")]
-    features: usize,
+    pub features: usize,
     #[cfg(feature = "verbose")]
-    functions_capabilities: BTreeMap<u64, FunctionCapabilities>,
-    tags: BTreeSet<String>
+    pub functions_capabilities: BTreeMap<u64, FunctionCapabilities>,
+    pub tags: BTreeSet<String>
 }
 
 fn match_fn<'a>(
