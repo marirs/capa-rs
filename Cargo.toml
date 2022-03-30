@@ -16,8 +16,8 @@ hex = "0.4.3"
 itertools = "0.10.3"
 pdb = "0.7.0"
 petgraph = "0.6.0"
-regex = "1.5.4"
-serde = { version = "1.0", features = ["derive"] }
+regex = "1.5.5"
+serde = { version = "1", features = ["derive"] }
 smda = "0.2.3"
 thiserror = "1.0.30"
 walkdir = "2.3.2"
@@ -25,8 +25,8 @@ yaml-rust = "0.4.5"
 goblin = { version = "0.4.3", features = ["alloc"] }
 
 [dev-dependencies]
-clap = { version = "3.0.13", features = ["cargo", "derive"] }
-serde_json = "1.0.78"
+clap = { version = "3.1.6", features = ["cargo", "derive"] }
+serde_json = "1"
 prettytable-rs = "0.8.0"
 
 [lib]
