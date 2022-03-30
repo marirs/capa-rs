@@ -87,6 +87,17 @@ fn main() {
                         }
                     }
                     println!();
+
+                    //print tags
+
+                    if let Some(tags) = data.get("tags") {
+                        let tt = tags.as_array().unwrap();
+                        if !tt.is_empty() {
+                            println!("TAGS: [{}]", tt.iter().map(|s| s.as_str().unwrap().to_string()).collect::<Vec<String>>().join(", "));
+                        }
+                    }
+                    println!();
+
                 }
             }
         }
