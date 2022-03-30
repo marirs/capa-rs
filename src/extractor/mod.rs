@@ -281,6 +281,7 @@ impl Extractor {
         res.extend(self.extract_insn_bytes_features(f, bb, insn)?);
         res.extend(self.extract_insn_offset_features(f, bb, insn)?);
         res.extend(self.extract_insn_nzxor_characteristic_features(f, bb, insn)?);
+        res.extend(self.extract_insn_obfs_call_plus_5_characteristic_features(f, bb, insn)?);
         res.extend(self.extract_insn_mnemonic_features(f, bb, insn)?);
         res.extend(self.extract_insn_peb_access_characteristic_features(f, bb, insn)?);
         res.extend(self.extract_insn_cross_section_cflow(f, bb, insn)?);
@@ -516,6 +517,34 @@ impl Extractor {
         ));
         Ok(res)
     }
+
+    pub fn extract_insn_obfs_call_plus_5_characteristic_features(
+        &self,
+        _f: &Function,
+        _bb: &(&u64, &Vec<Instruction>),
+        insn: &Instruction,
+    ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+        let mut res = vec![];
+        if &insn.mnemonic[..] != "call" {
+            return Ok(res);
+        }
+        if let Some(o) = &insn.operands {
+            if !o.starts_with("0x"){
+                return Ok(res);
+            }
+            if u64::from_str_radix(&o[2..], 16)? == insn.offset + 5{
+                res.push((
+                    crate::rules::features::Feature::Characteristic(
+                        crate::rules::features::CharacteristicFeature::new("call $+5", "")?,
+                    ),
+                    insn.offset,
+                ));
+            }
+        }
+        Ok(res)
+    }
+
+
 
     pub fn extract_insn_offset_features(
         &self,

@@ -85,6 +85,7 @@ impl FileCapabilities {
             features: 0,
             #[cfg(feature = "verbose")]
             functions_capabilities: BTreeMap::new(),
+            tags: BTreeSet::new()
         })
     }
 
@@ -108,14 +109,21 @@ impl FileCapabilities {
                             .split("::")
                             .collect();
                         if parts.len() > 1 {
+                            let ss = parts[1..].join("::");
+                            let re = regex::Regex::new(r##"[^\]]*\[(?P<tag>[^\]]*)\]"##)?;
+                            if let Some(s) = re.captures(&ss){
+                                if let Some(t) = s.name("tag"){
+                                    self.tags.insert(t.as_str().to_string());
+                                }
+                            }
                             match self.attacks.get_mut(parts[0]) {
                                 Some(s) => {
-                                    s.insert(parts[1..].join("::"));
+                                    s.insert(ss);
                                 }
                                 _ => {
                                     self.attacks.insert(
                                         parts[0].to_string(),
-                                        vec![parts[1..].join("::").to_string()]
+                                        vec![ss.to_string()]
                                             .iter()
                                             .cloned()
                                             .collect(),
@@ -140,14 +148,21 @@ impl FileCapabilities {
                             .split("::")
                             .collect();
                         if parts.len() > 1 {
+                            let ss = parts[1..].join("::");
+                            let re = regex::Regex::new(r##"[^\]]*\[(?P<tag>[^\]]*)\]"##)?;
+                            if let Some(s) = re.captures(&ss){
+                                if let Some(t) = s.name("tag"){
+                                    self.tags.insert(t.as_str().to_string());
+                                }
+                            }
                             match self.mbc.get_mut(parts[0]) {
                                 Some(s) => {
-                                    s.insert(parts[1..].join("::"));
+                                    s.insert(ss);
                                 }
                                 _ => {
                                     self.mbc.insert(
                                         parts[0].to_string(),
-                                        vec![parts[1..].join("::").to_string()]
+                                        vec![ss.to_string()]
                                             .iter()
                                             .cloned()
                                             .collect(),
@@ -487,6 +502,7 @@ pub struct FileCapabilities {
     features: usize,
     #[cfg(feature = "verbose")]
     functions_capabilities: BTreeMap<u64, FunctionCapabilities>,
+    tags: BTreeSet<String>
 }
 
 fn match_fn<'a>(

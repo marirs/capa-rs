@@ -588,6 +588,7 @@ impl CharacteristicFeature {
                 "tight loop" => Ok(true),
                 "stack string" => Ok(true),
                 "indirect call" => Ok(true),
+                "call $+5" => Ok(true),
                 _ => Ok(false),
             },
             crate::rules::Scope::File => match self.value.as_str() {
@@ -603,6 +604,7 @@ impl CharacteristicFeature {
                 "tight loop" => Ok(true),
                 "stack string" => Ok(true),
                 "indirect call" => Ok(true),
+                "call $+5" => Ok(true),
                 _ => Ok(false),
             },
         }

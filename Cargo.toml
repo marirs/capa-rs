@@ -22,7 +22,7 @@ smda = "0.2.3"
 thiserror = "1.0.30"
 walkdir = "2.3.2"
 yaml-rust = "0.4.5"
-goblin = { version = "0.4.3", features = ["alloc"] }
+goblin = { version = "0.5.1", features = ["alloc"] }
 
 [dev-dependencies]
 clap = { version = "3.1.6", features = ["cargo", "derive"] }
