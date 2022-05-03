@@ -10,6 +10,8 @@ pub enum Error {
     YamlError(#[from] yaml_rust::ScanError),
     #[error("{0}")]
     PdbError(#[from] pdb::Error),
+    #[error("{0}")]
+    DnFileError(#[from] dnfile::error::Error),
 
     #[error("{0}")]
     IoError(#[from] std::io::Error),

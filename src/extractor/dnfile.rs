@@ -1,5 +1,7 @@
 use crate::Result;
 use std::collections::HashMap;
+use dnfile::stream::meta_data_tables::mdtables::{*, codedindex::*, enums::*};
+
 
 #[derive(Debug, Clone)]
 struct Instruction {
@@ -18,7 +20,8 @@ impl super::Instruction for Instruction{
 }
 
 #[derive(Debug, Clone)]
-struct Function {
+struct Function{
+    f: dnfile::Function
 }
 
 impl super::Function for Function{
@@ -85,7 +88,18 @@ impl super::Extractor for Extractor<'_>{
     }
 
     fn get_functions(&self) -> Result<std::collections::HashMap<u64, Box<dyn super::Function>>>{
-        unimplemented!()
+        let mut res = hashmap!{};
+        let method_def_table = self.pe.net()?.md_table("MemthodDef")?;
+        for i in 0..method_def_table.row_count(){
+            let row = method_def_table.row::<MethodDef>(i)?;
+            if row.impl_flags.contains(&ClrMethodImpl::MethodCodeType(CorMethodCodeType::IL))
+                || row.flags.contains(&ClrMethodAttr::AttrFlag(CorMethodAttrFlag::Abstract))
+                || row.flags.contains(&ClrMethodAttr::AttrFlag(CorMethodAttrFlag::PinvokeImpl)){
+                    continue;
+                }
+            res.insert(row.rva as u64, Box::new(Function{f: self.pe.net()?.cil_method_body(row)}));
+        }
+        Ok(res)
     }
 
     fn extract_function_features(&self, f: &Box<dyn super::Function>) -> Result<Vec<(crate::rules::features::Feature, u64)>>{
@@ -131,6 +145,10 @@ impl Extractor<'_>{
         }
     }
 
+    pub fn extract_file_format(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>>{
+        Ok(vec![(crate::rules::features::Feature::Os(crate::rules::features::OsFeature::new("dotnet", "")?), 0)])
+    }
+
     pub fn extract_file_import_names(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>>{
         let mut res = vec![];
         for (token, imp) in self.get_dotnet_managed_imports()?.iter().chain(self.get_dotnet_unmanaged_imports()?.iter()){
@@ -148,21 +166,15 @@ impl Extractor<'_>{
 
     pub fn get_dotnet_managed_imports(&self) -> Result<Vec<(u64, String)>>{
         let mut res = vec![];
-        let memref = match self.pe.net()?.md_table("MemberRef"){
-            Some(s) => s,
-            None => return Ok(res)
-        };
-        let typeref = match self.pe.net()?.md_table("TypeRef"){
-            Some(s) => s,
-            None => return Ok(res)
-        };
+        let memref = self.pe.net()?.md_table("MemberRef")?;
+        let typeref = self.pe.net()?.md_table("TypeRef")?;
         for rid in 0..memref.row_count(){
-            let row = memref.row::<dnfile::stream::meta_data_tables::mdtables::MemberRef>(rid)?;
+            let row = memref.row::<MemberRef>(rid)?;
             if row.class.table != "TypeRef"{
                 continue;
             }
-            let typeref_row = typeref.row::<dnfile::stream::meta_data_tables::mdtables::TypeRef>(row.class.row_index)?;
-            let token = calculate_dotnet_token_value(dnfile::stream::meta_data_tables::mdtables::table_name_2_index("MemberRef")?, rid + 1);
+            let typeref_row = typeref.row::<TypeRef>(row.class.row_index)?;
+            let token = calculate_dotnet_token_value("MemberRef", rid + 1)?;
             let imp = format!("{}.{}::{}", typeref_row.type_namespace, typeref_row.type_name, row.name);
             res.push((token, imp))
         }
@@ -170,29 +182,25 @@ impl Extractor<'_>{
     }
 
     pub fn get_dotnet_unmanaged_imports(&self) -> Result<Vec<(u64, String)>>{
-        if not hasattr(pe.net.mdtables, "ImplMap"):
-    return
-
-        for row in pe.net.mdtables.ImplMap:
-    dll: str = row.ImportScope.row.Name
-        symbol: str = row.ImportName
-
-                # ECMA says "Each row of the ImplMap table associates a row in the MethodDef table (MemberForwarded) with the
-        # name of a routine (ImportName) in some unmanaged DLL (ImportScope)"; so we calculate and map the MemberForwarded
-    # MethodDef table token to help us later record native import method calls made from CIL
-    token: int = calculate_dotnet_token_value(row.MemberForwarded.table.number, row.MemberForwarded.row_index)
-
-        # like Kernel32.dll
-    if dll and "." in dll:
-    dll = dll.split(".")[0]
-
-        # like kernel32.CreateFileA
-    imp: str = f"{dll}.{symbol}"
-
-                yield token, imp
+        let mut res = vec![];
+        let implmap = self.pe.net()?.md_table("ImplMap")?;
+        for rid in 0..implmap.row_count(){
+            let row = implmap.row::<ImplMap>(rid)?;
+            let import_scope = self.pe.net()?.resolve_coded_index::<MemberRef>(&row.import_scope)?;
+            let mut dll = import_scope.name.clone();
+            let symbol = row.import_name.clone();
+            let member_forwarded = self.pe.net()?.resolve_coded_index::<MemberRef>(&row.member_forwarded)?;
+            let token = calculate_dotnet_token_value(row.member_forwarded.table(), row.member_forwarded.row_index())?;
+            if dll!="" && dll.contains('.'){
+                dll = dll.split(".").collect::<Vec<&str>>()[0].to_string();
+            }
+            res.push((token, format!("{}.{}", dll, symbol)));
+        }
+        Ok(res)
+    }
 }
 
-pub fn calculate_dotnet_token_value(table: usize, rid: usize) -> u64{
-    unimplemented!()
-//    return ((table & 0xFF) << Token.TABLE_SHIFT) | (rid & Token.RID_MASK)
+pub fn calculate_dotnet_token_value(table: &'static str, rid: usize) -> Result<u64>{
+    let table_number = table_name_2_index(table)?;
+    Ok((((table_number & 0xFF) << dnfile::cil::clr::token::TABLE_SHIFT) | (rid & dnfile::cil::clr::token::RID_MASK)) as u64)
 }

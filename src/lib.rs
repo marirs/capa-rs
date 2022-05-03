@@ -1,5 +1,7 @@
 #![allow(clippy::type_complexity)]
 mod consts;
+#[macro_use]
+extern crate maplit;
 mod extractor;
 pub mod rules;
 mod sede;
@@ -7,7 +9,7 @@ mod sede;
 use consts::Os;
 use sede::{from_hex, to_hex};
 use serde::{Deserialize, Serialize};
-use smda::{function::Function, FileArchitecture, FileFormat};
+use smda::{FileArchitecture, FileFormat};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     thread::spawn,
@@ -38,7 +40,7 @@ impl FileCapabilities {
         let f = file_name.to_string();
         let r = rule_path.to_string();
         let extractor_thread_handle =
-            spawn(move || extractor::Extractor::new(&f, high_accuracy, resolve_tailcalls));
+            spawn(move || extractor::smda::Extractor::new(&f, high_accuracy, resolve_tailcalls));
         let rules_thread_handle = spawn(move || rules::RuleSet::new(&r));
         let rules = rules_thread_handle.join().unwrap()?;
         let extractor = extractor_thread_handle.join().unwrap()?;
@@ -68,7 +70,7 @@ impl FileCapabilities {
     }
 
     fn new(
-        #[cfg(feature = "properties")] extractor: &extractor::Extractor,
+        #[cfg(feature = "properties")] extractor: &dyn extractor::Extractor,
     ) -> Result<FileCapabilities> {
         Ok(FileCapabilities {
             #[cfg(feature = "properties")]
@@ -214,21 +216,21 @@ impl FileCapabilities {
         Ok(())
     }
 
-    fn get_format(extractor: &extractor::Extractor) -> Result<FileFormat> {
-        Ok(extractor.report.format)
+    fn get_format(extractor: &dyn extractor::Extractor) -> Result<extractor::FileFormat> {
+        Ok(extractor.format())
     }
 
-    fn get_arch(extractor: &extractor::Extractor) -> Result<FileArchitecture> {
-        if extractor.report.bitness == 32 {
+    fn get_arch(extractor: &dyn extractor::Extractor) -> Result<FileArchitecture> {
+        if extractor.bitness() == 32 {
             return Ok(FileArchitecture::I386);
-        } else if extractor.report.bitness == 64 {
+        } else if extractor.bitness() == 64 {
             return Ok(FileArchitecture::AMD64);
         }
         Err(Error::UnsupportedArchError)
     }
 
-    fn get_os(extractor: &extractor::Extractor) -> Result<Os> {
-        if let FileFormat::PE = extractor.report.format {
+    fn get_os(extractor: &dyn extractor::Extractor) -> Result<Os> {
+        if let extractor::FileFormat::PE = extractor.format() {
             Ok(Os::WINDOWS)
         } else {
             Ok(Os::LINUX)
@@ -238,8 +240,8 @@ impl FileCapabilities {
 
 fn find_function_capabilities<'a>(
     ruleset: &'a crate::rules::RuleSet,
-    extractor: &crate::extractor::Extractor,
-    f: &Function,
+    extractor: &dyn crate::extractor::Extractor,
+    f: &Box<dyn extractor::Function>,
     logger: &dyn Fn(&str),
 ) -> Result<(
     HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
@@ -300,7 +302,7 @@ fn find_function_capabilities<'a>(
         for (_insn_index, insn) in insns.iter().enumerate() {
             //            println!("0x{:02x}, {:?}", insn.offset, insn);
             //            logger(&format!("\t\tinstruction {} from {}", insn_index, _n_insns));
-            for (feature, va) in extractor.extract_insn_features(f, &bb, insn)? {
+            for (feature, va) in extractor.extract_insn_features(f, insn)? {
                 match bb_features.get_mut(&feature) {
                     Some(s) => s.push(va),
                     _ => {
@@ -350,7 +352,7 @@ fn find_function_capabilities<'a>(
     let (_, function_matches) = match_fn(
         &ruleset.function_rules,
         &function_features,
-        &f.offset,
+        &f.offset(),
         logger,
     )?;
     Ok((function_matches, bb_matches, function_features.len()))
@@ -358,7 +360,7 @@ fn find_function_capabilities<'a>(
 
 fn find_capabilities(
     ruleset: &crate::rules::RuleSet,
-    extractor: &crate::extractor::Extractor,
+    extractor: &dyn crate::extractor::Extractor,
     logger: &dyn Fn(&str),
 ) -> Result<(
     HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
@@ -434,7 +436,7 @@ fn find_capabilities(
 
 fn find_file_capabilities<'a>(
     ruleset: &'a crate::rules::RuleSet,
-    extractor: &crate::extractor::Extractor,
+    extractor: &dyn crate::extractor::Extractor,
     function_features: &HashMap<crate::rules::features::Feature, Vec<u64>>,
     logger: &dyn Fn(&str),
 ) -> Result<(
@@ -484,7 +486,7 @@ pub struct FunctionCapabilities {
 #[cfg(feature = "properties")]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Properties {
-    pub format: FileFormat,
+    pub format: extractor::FileFormat,
     pub arch: FileArchitecture,
     pub os: Os,
     #[serde(serialize_with = "to_hex", deserialize_with = "from_hex")]
