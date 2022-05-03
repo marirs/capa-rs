@@ -21,7 +21,7 @@ impl super::Instruction for Instruction{
 
 #[derive(Debug, Clone)]
 struct Function{
-    f: dnfile::Function
+    f: dnfile::cil::cil::function::Function
 }
 
 impl super::Function for Function{
