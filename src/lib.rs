@@ -1,7 +1,7 @@
 #![allow(clippy::type_complexity)]
 mod consts;
-#[macro_use]
-extern crate maplit;
+//#[macro_use]
+//extern crate maplit;
 mod extractor;
 pub mod rules;
 mod sede;
@@ -44,6 +44,10 @@ impl FileCapabilities {
         let rules_thread_handle = spawn(move || rules::RuleSet::new(&r));
         let rules = rules_thread_handle.join().unwrap()?;
         let extractor = extractor_thread_handle.join().unwrap()?;
+        //let buffer = std::fs::read(&f)?;
+        //if let Ok(e) = extractor::dnfile::Extractor::new(&f, &buffer){
+        //extractors.push(Box::new(e));
+        //}
 
         let mut file_capabilities;
         #[cfg(not(feature = "properties"))]

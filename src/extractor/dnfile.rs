@@ -1,10 +1,13 @@
 use crate::Result;
 use std::collections::HashMap;
-use dnfile::stream::meta_data_tables::mdtables::{*, codedindex::*, enums::*};
+use dnfile::{stream::meta_data_tables::mdtables::{*, codedindex::*},
+             cil::cil::enums::*};
 
+use crate::extractor::Extractor as BaseExtractor;
 
 #[derive(Debug, Clone)]
 struct Instruction {
+    i: dnfile::cil::cil::instruction::Instruction
 }
 
 impl super::Instruction for Instruction{
@@ -32,11 +35,16 @@ impl super::Function for Function{
         unimplemented!()
     }
     fn offset(&self) -> u64{
-        unimplemented!()
+        self.f.offset as u64
     }
 
     fn get_blocks(&self) -> Result<HashMap<u64, Vec<Box<dyn super::Instruction>>>>{
         let mut res = HashMap::<u64, Vec<Box<dyn super::Instruction>>>::new();
+        let mut insts : Vec<Box<dyn super::Instruction>> = vec![];
+        for i in &self.f.instructions{
+            insts.push(Box::new(Instruction{i: i.clone()}));
+        }
+        res.insert(self.f.instructions[0].offset as u64, insts);
         Ok(res)
     }
     fn as_any(&self) -> &dyn std::any::Any{
@@ -45,7 +53,7 @@ impl super::Function for Function{
 }
 
 #[derive(Debug)]
-struct Extractor<'a> {
+pub struct Extractor<'a> {
     pe: dnfile::DnPe<'a>
 }
 
@@ -88,38 +96,36 @@ impl super::Extractor for Extractor<'_>{
     }
 
     fn get_functions(&self) -> Result<std::collections::HashMap<u64, Box<dyn super::Function>>>{
-        let mut res = hashmap!{};
-        let method_def_table = self.pe.net()?.md_table("MemthodDef")?;
-        for i in 0..method_def_table.row_count(){
-            let row = method_def_table.row::<MethodDef>(i)?;
-            if row.impl_flags.contains(&ClrMethodImpl::MethodCodeType(CorMethodCodeType::IL))
-                || row.flags.contains(&ClrMethodAttr::AttrFlag(CorMethodAttrFlag::Abstract))
-                || row.flags.contains(&ClrMethodAttr::AttrFlag(CorMethodAttrFlag::PinvokeImpl)){
-                    continue;
-                }
-            res.insert(row.rva as u64, Box::new(Function{f: self.pe.net()?.cil_method_body(row)}));
+        let mut res : std::collections::HashMap<u64, Box<dyn super::Function>> = std::collections::HashMap::new();
+        for f in self.pe.net()?.functions(){
+            res.insert(f.offset as u64, Box::new(Function{f: f.clone()}));
         }
         Ok(res)
     }
 
-    fn extract_function_features(&self, f: &Box<dyn super::Function>) -> Result<Vec<(crate::rules::features::Feature, u64)>>{
-        unimplemented!()
+    fn extract_function_features(&self, _f: &Box<dyn super::Function>) -> Result<Vec<(crate::rules::features::Feature, u64)>>{
+        Ok(vec![])
     }
 
     fn get_basic_blocks(&self, f: &Box<dyn super::Function>) -> Result<std::collections::HashMap<u64, Vec<Box<dyn super::Instruction>>>>{
-        unimplemented!()
+        f.get_blocks()
     }
 
-    fn get_instructions<'a>(&self, f: &Box<dyn super::Function>, bb: &'a (&u64, &Vec<Box<dyn super::Instruction>>)) -> Result<&'a Vec<Box<dyn super::Instruction>>>{
-        unimplemented!()
+    fn get_instructions<'a>(&self, _f: &Box<dyn super::Function>, bb: &'a (&u64, &Vec<Box<dyn super::Instruction>>)) -> Result<&'a Vec<Box<dyn super::Instruction>>>{
+        Ok(bb.1)
     }
 
-    fn extract_basic_block_features(&self, f: &Box<dyn super::Function>, bb: &(&u64, &Vec<Box<dyn super::Instruction>>)) -> Result<Vec<(crate::rules::features::Feature, u64)>>{
-        unimplemented!()
+    fn extract_basic_block_features(&self, _f: &Box<dyn super::Function>, _bb: &(&u64, &Vec<Box<dyn super::Instruction>>)) -> Result<Vec<(crate::rules::features::Feature, u64)>>{
+        Ok(vec![])
     }
 
     fn extract_insn_features(&self, f: &Box<dyn super::Function>, insn: &Box<dyn super::Instruction>) -> Result<Vec<(crate::rules::features::Feature, u64)>>{
-        unimplemented!()
+        let f: &Function = f.as_any().downcast_ref::<Function>().unwrap();
+        let insn: &Instruction = insn.as_any().downcast_ref::<Instruction>().unwrap();
+        let mut ss = self.extract_insn_api_features(&f.f, &insn.i)?;
+        ss.extend(self.extract_insn_number_features(&f.f, &insn.i)?);
+        ss.extend(self.extract_insn_string_features(&f.f, &insn.i)?);
+        Ok(ss)
     }
 }
 
@@ -189,7 +195,6 @@ impl Extractor<'_>{
             let import_scope = self.pe.net()?.resolve_coded_index::<MemberRef>(&row.import_scope)?;
             let mut dll = import_scope.name.clone();
             let symbol = row.import_name.clone();
-            let member_forwarded = self.pe.net()?.resolve_coded_index::<MemberRef>(&row.member_forwarded)?;
             let token = calculate_dotnet_token_value(row.member_forwarded.table(), row.member_forwarded.row_index())?;
             if dll!="" && dll.contains('.'){
                 dll = dll.split(".").collect::<Vec<&str>>()[0].to_string();
@@ -197,6 +202,61 @@ impl Extractor<'_>{
             res.push((token, format!("{}.{}", dll, symbol)));
         }
         Ok(res)
+    }
+
+    pub fn extract_insn_api_features(&self, _f: &dnfile::cil::cil::function::Function, insn: &dnfile::cil::cil::instruction::Instruction) -> Result<Vec<(crate::rules::features::Feature, u64)>>{
+        let mut res = vec![];
+        if vec![OpCodeValue::Call, OpCodeValue::Callvirt, OpCodeValue::Jmp, OpCodeValue::Calli].contains(&insn.opcode.value){
+            return Ok(vec![]);
+        }
+        let mut name = None;
+        let managed_imports = self.get_dotnet_managed_imports()?;
+        let unmanaged_imports = self.get_dotnet_unmanaged_imports()?;
+        for (token, imp) in managed_imports.iter().chain(unmanaged_imports.iter()){
+            if *token == insn.operand.value()? as u64{
+                name = Some(imp);
+            }
+        }
+        let name = match name{
+            None => return Ok(vec![]),
+            Some(s) => s
+        };
+
+        if name.contains("::"){
+            res.push((crate::rules::features::Feature::Api(crate::rules::features::ApiFeature::new(&name, "")?), insn.offset as u64));
+        } else {
+            let ss = name.split(".").collect::<Vec<&str>>();
+            for symbol_variant in crate::extractor::smda::generate_symbols(&Some(ss[0].to_string()), &Some(ss[2].to_string()))?{
+                res.push((crate::rules::features::Feature::Api(crate::rules::features::ApiFeature::new(&symbol_variant, "")?), insn.offset as u64));
+            }
+        }
+        Ok(res)
+    }
+
+    pub fn extract_insn_number_features(&self, _f: &dnfile::cil::cil::function::Function, insn: &dnfile::cil::cil::instruction::Instruction) -> Result<Vec<(crate::rules::features::Feature, u64)>>{
+        let mut res = vec![];
+        if insn.is_ldc(){
+            res.push((crate::rules::features::Feature::Number(crate::rules::features::NumberFeature::new(self.bitness(), &(insn.get_ldc().unwrap() as i128), "")?), insn.offset as u64));
+        }
+        Ok(res)
+    }
+
+    pub fn extract_insn_string_features(&self, _f: &dnfile::cil::cil::function::Function, insn: &dnfile::cil::cil::instruction::Instruction) -> Result<Vec<(crate::rules::features::Feature, u64)>>{
+        let mut res = vec![];
+        if !insn.is_ldstr(){
+            return Ok(res);
+        }
+        if let dnfile::cil::cil::instruction::Operand::StringToken(t) = &insn.operand{
+            match self.pe.net()?.get_us(t.rid()){
+                Err(_) => Ok(res),
+                Ok(s) => {
+                    res.push((crate::rules::features::Feature::String(crate::rules::features::StringFeature::new(&s, "")?), insn.offset as u64));
+                    Ok(res)
+                }
+            }
+        } else {
+            Ok(res)
+        }
     }
 }
 
