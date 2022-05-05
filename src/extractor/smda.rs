@@ -65,6 +65,10 @@ pub struct Extractor {
 }
 
 impl super::Extractor for Extractor{
+    fn is_dot_net(&self) -> bool{
+        false
+    }
+
     fn get_base_address(&self) -> Result<u64> {
         Ok(self.report.base_addr)
     }

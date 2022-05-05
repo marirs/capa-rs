@@ -53,11 +53,15 @@ impl super::Function for Function{
 }
 
 #[derive(Debug)]
-pub struct Extractor<'a> {
-    pe: dnfile::DnPe<'a>
+pub struct Extractor {
+    pe: dnfile::DnPe
 }
 
-impl super::Extractor for Extractor<'_>{
+impl super::Extractor for Extractor{
+    fn is_dot_net(&self) -> bool{
+        true
+    }
+
     fn get_base_address(&self) -> Result<u64>{
         Ok(0)
     }
@@ -129,16 +133,16 @@ impl super::Extractor for Extractor<'_>{
     }
 }
 
-impl Extractor<'_>{
-    pub fn new<'a>(file_path: &'a str, data: &'a [u8]) -> Result<Extractor<'a>>{
+impl Extractor{
+    pub fn new(file_path: &str) -> Result<Extractor>{
         let res = Extractor{
-            pe: dnfile::DnPe::new(file_path, data)?
+            pe: dnfile::DnPe::new(file_path)?
         };
         Ok(res)
     }
 
     pub fn extract_arch(&self) -> Result<crate::FileArchitecture> {
-        if let Some(oh) = self.pe.pe.header.optional_header{
+        if let Some(oh) = self.pe.pe()?.header.optional_header{
             if self.pe.net()?.flags.contains(&dnfile::ClrHeaderFlags::BitRequired32) && oh.standard_fields.magic == goblin::pe::optional_header::MAGIC_32{
                 Ok(crate::FileArchitecture::I386)
             } else if !self.pe.net()?.flags.contains(&dnfile::ClrHeaderFlags::BitRequired32) && oh.standard_fields.magic == goblin::pe::optional_header::MAGIC_64{

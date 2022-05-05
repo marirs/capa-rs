@@ -1,6 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
+#[derive(Debug, Clone, Serialize, Deserialize, Copy)]
+pub enum Format {
+    PE,
+    ELF,
+    DOTNET
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Os {
     WINDOWS,

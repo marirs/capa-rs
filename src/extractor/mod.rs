@@ -36,4 +36,5 @@ pub trait Extractor{
     fn get_instructions<'a>(&self, f: &Box<dyn Function>, bb: &'a (&u64, &Vec<Box<dyn Instruction>>)) -> Result<&'a Vec<Box<dyn Instruction>>>;
     fn extract_basic_block_features(&self, f: &Box<dyn Function>, bb: &(&u64, &Vec<Box<dyn Instruction>>)) -> Result<Vec<(crate::rules::features::Feature, u64)>>;
     fn extract_insn_features(&self, f: &Box<dyn Function>, insn: &Box<dyn Instruction>) -> Result<Vec<(crate::rules::features::Feature, u64)>>;
+    fn is_dot_net(&self) -> bool;
 }

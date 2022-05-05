@@ -6,7 +6,7 @@ mod extractor;
 pub mod rules;
 mod sede;
 
-use consts::Os;
+use consts::{Os, Format};
 use sede::{from_hex, to_hex};
 use serde::{Deserialize, Serialize};
 use smda::{FileArchitecture, FileFormat};
@@ -39,15 +39,17 @@ impl FileCapabilities {
         //! ```
         let f = file_name.to_string();
         let r = rule_path.to_string();
-        let extractor_thread_handle =
-            spawn(move || extractor::smda::Extractor::new(&f, high_accuracy, resolve_tailcalls));
+        let mut format = get_format(&f)?;
+        let file_extractors = get_file_extractors(&f, format)?;
+        for extractor in file_extractors{
+            if extractor.is_dot_net(){
+                format = Format::DOTNET;
+            }
+        }
+
         let rules_thread_handle = spawn(move || rules::RuleSet::new(&r));
+        let extractor = get_extractor(&f, format, high_accuracy, resolve_tailcalls)?;
         let rules = rules_thread_handle.join().unwrap()?;
-        let extractor = extractor_thread_handle.join().unwrap()?;
-        //let buffer = std::fs::read(&f)?;
-        //if let Ok(e) = extractor::dnfile::Extractor::new(&f, &buffer){
-        //extractors.push(Box::new(e));
-        //}
 
         let mut file_capabilities;
         #[cfg(not(feature = "properties"))]
@@ -74,7 +76,7 @@ impl FileCapabilities {
     }
 
     fn new(
-        #[cfg(feature = "properties")] extractor: &dyn extractor::Extractor,
+        #[cfg(feature = "properties")] extractor: &Box<dyn extractor::Extractor>,
     ) -> Result<FileCapabilities> {
         Ok(FileCapabilities {
             #[cfg(feature = "properties")]
@@ -220,11 +222,11 @@ impl FileCapabilities {
         Ok(())
     }
 
-    fn get_format(extractor: &dyn extractor::Extractor) -> Result<extractor::FileFormat> {
+    fn get_format(extractor: &Box<dyn extractor::Extractor>) -> Result<extractor::FileFormat> {
         Ok(extractor.format())
     }
 
-    fn get_arch(extractor: &dyn extractor::Extractor) -> Result<FileArchitecture> {
+    fn get_arch(extractor: &Box<dyn extractor::Extractor>) -> Result<FileArchitecture> {
         if extractor.bitness() == 32 {
             return Ok(FileArchitecture::I386);
         } else if extractor.bitness() == 64 {
@@ -233,7 +235,7 @@ impl FileCapabilities {
         Err(Error::UnsupportedArchError)
     }
 
-    fn get_os(extractor: &dyn extractor::Extractor) -> Result<Os> {
+    fn get_os(extractor: &Box<dyn extractor::Extractor>) -> Result<Os> {
         if let extractor::FileFormat::PE = extractor.format() {
             Ok(Os::WINDOWS)
         } else {
@@ -244,7 +246,7 @@ impl FileCapabilities {
 
 fn find_function_capabilities<'a>(
     ruleset: &'a crate::rules::RuleSet,
-    extractor: &dyn crate::extractor::Extractor,
+    extractor: &Box<dyn crate::extractor::Extractor>,
     f: &Box<dyn extractor::Function>,
     logger: &dyn Fn(&str),
 ) -> Result<(
@@ -364,7 +366,7 @@ fn find_function_capabilities<'a>(
 
 fn find_capabilities(
     ruleset: &crate::rules::RuleSet,
-    extractor: &dyn crate::extractor::Extractor,
+    extractor: &Box<dyn crate::extractor::Extractor>,
     logger: &dyn Fn(&str),
 ) -> Result<(
     HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
@@ -440,7 +442,7 @@ fn find_capabilities(
 
 fn find_file_capabilities<'a>(
     ruleset: &'a crate::rules::RuleSet,
-    extractor: &dyn crate::extractor::Extractor,
+    extractor: &Box<dyn crate::extractor::Extractor>,
     function_features: &HashMap<crate::rules::features::Feature, Vec<u64>>,
     logger: &dyn Fn(&str),
 ) -> Result<(
@@ -610,4 +612,43 @@ fn index_rule_matches(
         }
     }
     Ok(())
+}
+
+fn get_format(f: &str) -> Result<Format>{
+    let buffer = std::fs::read(f)?;
+    if buffer.starts_with(b"MZ"){
+        Ok(Format::PE)
+    } else if buffer.starts_with(b"\x7fELF"){
+        Ok(Format::ELF)
+    } else {
+        Err(error::Error::UnsupportedFormatError)
+    }
+}
+
+fn get_file_extractors(f: &str, format: Format) -> Result<Vec<Box<dyn extractor::Extractor>>>{
+    let mut res: Vec<Box<dyn extractor::Extractor>> = vec![];
+    match format{
+        Format::PE => {
+            res.push(Box::new(extractor::smda::Extractor::new(f, false, false)?));
+            if let Ok(e) = extractor::dnfile::Extractor::new(f){
+                res.push(Box::new(e));
+            }
+            Ok(res)
+        }
+        Format::ELF => {
+            res.push(Box::new(extractor::smda::Extractor::new(f, false, false)?));
+            Ok(res)
+        }
+        _ => Ok(res)
+    }
+}
+
+fn get_extractor(f: &str, format: Format, high_accuracy: bool, resolve_tailcalls: bool) -> Result<Box<dyn extractor::Extractor>>{
+    match format{
+        Format::PE => Ok(Box::new(extractor::smda::Extractor::new(f, high_accuracy, resolve_tailcalls)?)),
+        Format::DOTNET => {
+            Ok(Box::new(extractor::dnfile::Extractor::new(f)?))
+        }
+        Format::ELF => Ok(Box::new(extractor::smda::Extractor::new(f, high_accuracy, resolve_tailcalls)?))
+    }
 }
