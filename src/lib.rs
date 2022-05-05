@@ -1,5 +1,5 @@
 #![allow(clippy::type_complexity)]
-mod consts;
+pub(crate) mod consts;
 //#[macro_use]
 //extern crate maplit;
 mod extractor;
@@ -236,10 +236,9 @@ impl FileCapabilities {
     }
 
     fn get_os(extractor: &Box<dyn extractor::Extractor>) -> Result<Os> {
-        if let extractor::FileFormat::PE = extractor.format() {
-            Ok(Os::WINDOWS)
-        } else {
-            Ok(Os::LINUX)
+        match extractor.format(){
+            extractor::FileFormat::PE | extractor::FileFormat::DOTNET => Ok(Os::WINDOWS),
+            _ => Ok(Os::LINUX)
         }
     }
 }

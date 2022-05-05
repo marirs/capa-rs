@@ -7,7 +7,8 @@ pub mod dnfile;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum FileFormat{
     PE,
-    ELF
+    ELF,
+    DOTNET
 }
 
 pub trait Instruction{

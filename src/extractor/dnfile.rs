@@ -67,11 +67,14 @@ impl super::Extractor for Extractor{
     }
 
     fn format(&self) -> super::FileFormat{
-        super::FileFormat::PE
+        super::FileFormat::DOTNET
     }
 
     fn bitness(&self) -> u32{
-        unimplemented!()
+        match self.extract_arch(){
+            Ok(crate::FileArchitecture::AMD64) => 64,
+            _ => 32
+        }
     }
 
     fn extract_global_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>>{
@@ -145,10 +148,8 @@ impl Extractor{
         if let Some(oh) = self.pe.pe()?.header.optional_header{
             if self.pe.net()?.flags.contains(&dnfile::ClrHeaderFlags::BitRequired32) && oh.standard_fields.magic == goblin::pe::optional_header::MAGIC_32{
                 Ok(crate::FileArchitecture::I386)
-            } else if !self.pe.net()?.flags.contains(&dnfile::ClrHeaderFlags::BitRequired32) && oh.standard_fields.magic == goblin::pe::optional_header::MAGIC_64{
-                Ok(crate::FileArchitecture::AMD64)
             } else {
-                Err(crate::Error::UnsupportedArchError)
+                Ok(crate::FileArchitecture::AMD64)
             }
         } else {
             Err(crate::Error::UnsupportedArchError)
@@ -183,7 +184,7 @@ impl Extractor{
             if row.class.table != "TypeRef"{
                 continue;
             }
-            let typeref_row = typeref.row::<TypeRef>(row.class.row_index)?;
+            let typeref_row = typeref.row::<TypeRef>(row.class.row_index-1)?;
             let token = calculate_dotnet_token_value("MemberRef", rid + 1)?;
             let imp = format!("{}.{}::{}", typeref_row.type_namespace, typeref_row.type_name, row.name);
             res.push((token, imp))
@@ -193,17 +194,18 @@ impl Extractor{
 
     pub fn get_dotnet_unmanaged_imports(&self) -> Result<Vec<(u64, String)>>{
         let mut res = vec![];
-        let implmap = self.pe.net()?.md_table("ImplMap")?;
-        for rid in 0..implmap.row_count(){
-            let row = implmap.row::<ImplMap>(rid)?;
-            let import_scope = self.pe.net()?.resolve_coded_index::<MemberRef>(&row.import_scope)?;
-            let mut dll = import_scope.name.clone();
-            let symbol = row.import_name.clone();
-            let token = calculate_dotnet_token_value(row.member_forwarded.table(), row.member_forwarded.row_index())?;
-            if dll!="" && dll.contains('.'){
-                dll = dll.split(".").collect::<Vec<&str>>()[0].to_string();
+        if let Ok(implmap) = self.pe.net()?.md_table("ImplMap"){
+            for rid in 0..implmap.row_count(){
+                let row = implmap.row::<ImplMap>(rid)?;
+                let import_scope = self.pe.net()?.resolve_coded_index::<MemberRef>(&row.import_scope)?;
+                let mut dll = import_scope.name.clone();
+                let symbol = row.import_name.clone();
+                let token = calculate_dotnet_token_value(row.member_forwarded.table(), row.member_forwarded.row_index())?;
+                if dll!="" && dll.contains('.'){
+                    dll = dll.split(".").collect::<Vec<&str>>()[0].to_string();
+                }
+                res.push((token, format!("{}.{}", dll, symbol)));
             }
-            res.push((token, format!("{}.{}", dll, symbol)));
         }
         Ok(res)
     }
@@ -217,8 +219,10 @@ impl Extractor{
         let managed_imports = self.get_dotnet_managed_imports()?;
         let unmanaged_imports = self.get_dotnet_unmanaged_imports()?;
         for (token, imp) in managed_imports.iter().chain(unmanaged_imports.iter()){
-            if *token == insn.operand.value()? as u64{
-                name = Some(imp);
+            if let Ok(operand_value) = insn.operand.value(){
+                if *token == operand_value as u64{
+                    name = Some(imp);
+                }
             }
         }
         let name = match name{
