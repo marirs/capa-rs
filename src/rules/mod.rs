@@ -82,11 +82,11 @@ impl Rule {
         let mut deps = vec![];
 
         fn rec(
-            statement: &crate::rules::StatementElement,
+            statement: &StatementElement,
             deps: &mut Vec<String>,
             namespaces: &std::collections::HashMap<String, Vec<&Rule>>,
         ) -> Result<()> {
-            if let crate::rules::StatementElement::Feature(f) = statement {
+            if let StatementElement::Feature(f) = statement {
                 if let crate::rules::features::Feature::MatchedRule(s) = &**f {
                     if namespaces.contains_key(&s.value) {
                         //# matches a namespace, so take precedence and
@@ -99,7 +99,7 @@ impl Rule {
                         deps.push(s.value.clone());
                     }
                 }
-            } else if let crate::rules::StatementElement::Statement(s) = statement {
+            } else if let StatementElement::Statement(s) = statement {
                 for child in s.get_children()? {
                     rec(child, deps, namespaces)?;
                 }
