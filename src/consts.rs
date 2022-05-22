@@ -2,11 +2,22 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy)]
-pub enum Format {
+pub enum FileFormat {
     PE,
     ELF,
     DOTNET,
 }
+
+impl std::fmt::Display for FileFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            FileFormat::PE => write!(f, "PE file"),
+            FileFormat::ELF => write!(f, "Elf file"),
+            FileFormat::DOTNET => write!(f, "DotNet file")
+        }
+    }
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Os {

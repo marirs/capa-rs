@@ -1,15 +1,13 @@
 #![allow(clippy::type_complexity)]
 pub(crate) mod consts;
-//#[macro_use]
-//extern crate maplit;
 mod extractor;
 pub mod rules;
 mod sede;
 
-use consts::{Format, Os};
+use consts::{FileFormat, Os};
 use sede::{from_hex, to_hex};
 use serde::{Deserialize, Serialize};
-use smda::{FileArchitecture, FileFormat};
+use smda::FileArchitecture;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     thread::spawn,
@@ -43,7 +41,7 @@ impl FileCapabilities {
         let file_extractors = get_file_extractors(&f, format)?;
         for extractor in file_extractors {
             if extractor.is_dot_net() {
-                format = Format::DOTNET;
+                format = FileFormat::DOTNET;
             }
         }
 
@@ -216,7 +214,7 @@ impl FileCapabilities {
         Ok(())
     }
 
-    fn get_format(extractor: &Box<dyn extractor::Extractor>) -> Result<extractor::FileFormat> {
+    fn get_format(extractor: &Box<dyn extractor::Extractor>) -> Result<FileFormat> {
         Ok(extractor.format())
     }
 
@@ -231,7 +229,7 @@ impl FileCapabilities {
 
     fn get_os(extractor: &Box<dyn extractor::Extractor>) -> Result<Os> {
         match extractor.format() {
-            extractor::FileFormat::PE | extractor::FileFormat::DOTNET => Ok(Os::WINDOWS),
+            FileFormat::PE | FileFormat::DOTNET => Ok(Os::WINDOWS),
             _ => Ok(Os::LINUX),
         }
     }
@@ -485,7 +483,7 @@ pub struct FunctionCapabilities {
 #[cfg(feature = "properties")]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Properties {
-    pub format: extractor::FileFormat,
+    pub format: FileFormat,
     pub arch: FileArchitecture,
     pub os: Os,
     #[serde(serialize_with = "to_hex", deserialize_with = "from_hex")]
@@ -607,28 +605,28 @@ fn index_rule_matches(
     Ok(())
 }
 
-fn get_format(f: &str) -> Result<Format> {
+fn get_format(f: &str) -> Result<FileFormat> {
     let buffer = std::fs::read(f)?;
     if buffer.starts_with(b"MZ") {
-        Ok(Format::PE)
+        Ok(FileFormat::PE)
     } else if buffer.starts_with(b"\x7fELF") {
-        Ok(Format::ELF)
+        Ok(FileFormat::ELF)
     } else {
         Err(error::Error::UnsupportedFormatError)
     }
 }
 
-fn get_file_extractors(f: &str, format: Format) -> Result<Vec<Box<dyn extractor::Extractor>>> {
+fn get_file_extractors(f: &str, format: FileFormat) -> Result<Vec<Box<dyn extractor::Extractor>>> {
     let mut res: Vec<Box<dyn extractor::Extractor>> = vec![];
     match format {
-        Format::PE => {
+        FileFormat::PE => {
             res.push(Box::new(extractor::smda::Extractor::new(f, false, false)?));
             if let Ok(e) = extractor::dnfile::Extractor::new(f) {
                 res.push(Box::new(e));
             }
             Ok(res)
         }
-        Format::ELF => {
+        FileFormat::ELF => {
             res.push(Box::new(extractor::smda::Extractor::new(f, false, false)?));
             Ok(res)
         }
@@ -638,18 +636,18 @@ fn get_file_extractors(f: &str, format: Format) -> Result<Vec<Box<dyn extractor:
 
 fn get_extractor(
     f: &str,
-    format: Format,
+    format: FileFormat,
     high_accuracy: bool,
     resolve_tailcalls: bool,
 ) -> Result<Box<dyn extractor::Extractor>> {
     match format {
-        Format::PE => Ok(Box::new(extractor::smda::Extractor::new(
+        FileFormat::PE => Ok(Box::new(extractor::smda::Extractor::new(
             f,
             high_accuracy,
             resolve_tailcalls,
         )?)),
-        Format::DOTNET => Ok(Box::new(extractor::dnfile::Extractor::new(f)?)),
-        Format::ELF => Ok(Box::new(extractor::smda::Extractor::new(
+        FileFormat::DOTNET => Ok(Box::new(extractor::dnfile::Extractor::new(f)?)),
+        FileFormat::ELF => Ok(Box::new(extractor::smda::Extractor::new(
             f,
             high_accuracy,
             resolve_tailcalls,

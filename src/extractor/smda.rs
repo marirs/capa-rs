@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 #![allow(clippy::to_string_in_format_args)]
-use crate::{consts::Os, error::Error, Result};
+use crate::{consts::{Os, FileFormat}, error::Error, Result};
 use smda::{
     function::{Function, Instruction},
     report::DisassemblyReport,
@@ -73,10 +73,10 @@ impl super::Extractor for Extractor {
         Ok(self.report.base_addr)
     }
 
-    fn format(&self) -> super::FileFormat {
+    fn format(&self) -> FileFormat {
         match self.report.format {
-            smda::FileFormat::PE => super::FileFormat::PE,
-            smda::FileFormat::ELF => super::FileFormat::ELF,
+            smda::FileFormat::PE => FileFormat::PE,
+            smda::FileFormat::ELF => FileFormat::ELF,
         }
     }
 
@@ -322,7 +322,7 @@ impl Extractor {
         let mut res = vec![];
         res.push((
             crate::rules::features::Feature::Format(crate::rules::features::FormatFeature::new(
-                if let crate::FileFormat::PE = self.report.format {
+                if let smda::FileFormat::PE = self.report.format {
                     "pe"
                 } else {
                     "elf"
