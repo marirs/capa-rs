@@ -11,6 +11,16 @@ pub enum FileFormat {
     DOTNET,
 }
 
+impl std::fmt::Display for FileFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            FileFormat::PE => write!(f, "PE file"),
+            FileFormat::ELF => write!(f, "Elf file"),
+            FileFormat::DOTNET => write!(f, "DotNet file")
+        }
+    }
+}
+
 pub trait Instruction {
     fn is_mov_imm_to_stack(&self) -> Result<bool>;
     fn get_printable_len(&self) -> Result<u64>;
