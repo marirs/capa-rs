@@ -1,6 +1,7 @@
 use crate::Result;
 use dnfile::{
-    cil::cil::enums::*,
+    DnPe,
+    lang::{cil::{self, enums::*}, clr},
     stream::meta_data_tables::mdtables::{codedindex::*, *},
 };
 use std::collections::HashMap;
@@ -9,7 +10,7 @@ use crate::extractor::Extractor as BaseExtractor;
 
 #[derive(Debug, Clone)]
 struct Instruction {
-    i: dnfile::cil::cil::instruction::Instruction,
+    i: cil::instruction::Instruction,
 }
 
 impl super::Instruction for Instruction {
@@ -26,7 +27,7 @@ impl super::Instruction for Instruction {
 
 #[derive(Debug, Clone)]
 struct Function {
-    f: dnfile::cil::cil::function::Function,
+    f: cil::function::Function,
 }
 
 impl super::Function for Function {
@@ -56,7 +57,7 @@ impl super::Function for Function {
 
 #[derive(Debug)]
 pub struct Extractor {
-    pe: dnfile::DnPe,
+    pe: DnPe,
 }
 
 impl super::Extractor for Extractor {
@@ -270,8 +271,8 @@ impl Extractor {
 
     pub fn extract_insn_api_features(
         &self,
-        _f: &dnfile::cil::cil::function::Function,
-        insn: &dnfile::cil::cil::instruction::Instruction,
+        _f: &cil::function::Function,
+        insn: &cil::instruction::Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         if vec![
@@ -326,8 +327,8 @@ impl Extractor {
 
     pub fn extract_insn_number_features(
         &self,
-        _f: &dnfile::cil::cil::function::Function,
-        insn: &dnfile::cil::cil::instruction::Instruction,
+        _f: &cil::function::Function,
+        insn: &cil::instruction::Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         if insn.is_ldc() {
@@ -347,14 +348,14 @@ impl Extractor {
 
     pub fn extract_insn_string_features(
         &self,
-        _f: &dnfile::cil::cil::function::Function,
-        insn: &dnfile::cil::cil::instruction::Instruction,
+        _f: &cil::function::Function,
+        insn: &cil::instruction::Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         if !insn.is_ldstr() {
             return Ok(res);
         }
-        if let dnfile::cil::cil::instruction::Operand::StringToken(t) = &insn.operand {
+        if let cil::instruction::Operand::StringToken(t) = &insn.operand {
             match self.pe.net()?.get_us(t.rid()) {
                 Err(_) => Ok(res),
                 Ok(s) => {
@@ -376,7 +377,7 @@ impl Extractor {
 pub fn calculate_dotnet_token_value(table: &'static str, rid: usize) -> Result<u64> {
     let table_number = table_name_2_index(table)?;
     Ok(
-        (((table_number & 0xFF) << dnfile::cil::clr::token::TABLE_SHIFT)
-            | (rid & dnfile::cil::clr::token::RID_MASK)) as u64,
+        (((table_number & 0xFF) << clr::token::TABLE_SHIFT)
+            | (rid & clr::token::RID_MASK)) as u64,
     )
 }
