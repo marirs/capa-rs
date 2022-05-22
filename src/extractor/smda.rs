@@ -729,7 +729,7 @@ impl Extractor {
                 }
                 res.push((
                     crate::rules::features::Feature::Bytes(
-                        crate::rules::features::BytesFeature::new(&bytes_read.to_vec(), "")?,
+                        crate::rules::features::BytesFeature::new(bytes_read, "")?,
                     ),
                     insn.offset,
                 ));

@@ -181,7 +181,7 @@ impl Rule {
     }
 
     fn parse_bytes(s: &str) -> Result<Vec<u8>> {
-        let b = hex::decode(s.replace(" ", ""))?;
+        let b = hex::decode(s.replace(' ', ""))?;
         if b.len() > MAX_BYTES_FEATURE_SIZE {
             return Err(Error::InvalidRule(line!(), s.to_string()));
         }
@@ -662,7 +662,7 @@ fn is_hidden(entry: &walkdir::DirEntry) -> bool {
     entry
         .file_name()
         .to_str()
-        .map(|s| s.starts_with("."))
+        .map(|s| s.starts_with('.'))
         .unwrap_or_default()
 }
 

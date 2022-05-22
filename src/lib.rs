@@ -371,7 +371,7 @@ fn find_capabilities(
     let mut meta = HashMap::new();
     let functions = extractor.get_functions()?;
     let _n_funcs = functions.len();
-    logger(&"functions capabilities started".to_string());
+    logger("functions capabilities started");
     for (index, (function_address, f)) in functions.iter().enumerate() {
         logger(&format!(
             "function 0x{:02x} {} from {} started",
@@ -409,7 +409,7 @@ fn find_capabilities(
             function_address, index, _n_funcs
         ));
     }
-    logger(&"functions capabilities finish".to_string());
+    logger("functions capabilities finish");
     //# collection of features that captures the rule matches within function and BB scopes.
     //# mapping from feature (matched rule) to set of addresses at which it matched.
     let mut function_and_lower_features = HashMap::new();
