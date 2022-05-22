@@ -692,28 +692,16 @@ pub struct RuleSet {
 
 impl RuleSet {
     pub fn new(path: &str) -> Result<RuleSet> {
-        let pp = get_rules(path)?;
-        let bb = get_basic_block_rules(&pp)?;
-        let fu = get_function_rules(&pp)?;
-        let fi = get_file_rules(&pp)?;
+        let rules = get_rules(path)?;
+        let basic_block_rules = get_basic_block_rules(&rules)?;
+        let function_rules = get_function_rules(&rules)?;
+        let file_rules = get_file_rules(&rules)?;
         Ok(RuleSet {
-            rules: pp.clone(),
-            basic_block_rules: bb.iter().map(|r| (*r).clone()).collect(),
-            function_rules: fu.iter().map(|r| (*r).clone()).collect(),
-            file_rules: fi.iter().map(|r| (*r).clone()).collect(),
+            rules: rules.clone(),
+            basic_block_rules: basic_block_rules.iter().map(|r| (*r).clone()).collect(),
+            function_rules: function_rules.iter().map(|r| (*r).clone()).collect(),
+            file_rules: file_rules.iter().map(|r| (*r).clone()).collect(),
         })
-    }
-
-    pub fn get_basic_block_rules(&self) -> Result<&Vec<Rule>> {
-        Ok(&self.basic_block_rules)
-    }
-
-    pub fn get_function_rules(&self) -> Result<&Vec<Rule>> {
-        Ok(&self.function_rules)
-    }
-
-    pub fn get_file_rules(&self) -> Result<&Vec<Rule>> {
-        Ok(&self.file_rules)
     }
 }
 
