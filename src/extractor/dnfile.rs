@@ -202,12 +202,12 @@ impl Extractor {
             if imp.contains("::") {
                 res.push((
                     crate::rules::features::Feature::Import(
-                        crate::rules::features::ImportFeature::new(&imp, "")?,
+                        crate::rules::features::ImportFeature::new(imp, "")?,
                     ),
                     *token,
                 ));
             } else {
-                let ss = imp.split(".").collect::<Vec<&str>>();
+                let ss = imp.split('.').collect::<Vec<&str>>();
                 for symbol_variant in crate::extractor::smda::generate_symbols(
                     &Some(ss[0].to_string()),
                     &Some(ss[2].to_string()),
@@ -259,8 +259,8 @@ impl Extractor {
                     row.member_forwarded.table(),
                     row.member_forwarded.row_index(),
                 )?;
-                if dll != "" && dll.contains('.') {
-                    dll = dll.split(".").collect::<Vec<&str>>()[0].to_string();
+                if !dll.is_empty() && dll.contains('.') {
+                    dll = dll.split('.').collect::<Vec<&str>>()[0].to_string();
                 }
                 res.push((token, format!("{}.{}", dll, symbol)));
             }
@@ -302,12 +302,12 @@ impl Extractor {
         if name.contains("::") {
             res.push((
                 crate::rules::features::Feature::Api(crate::rules::features::ApiFeature::new(
-                    &name, "",
+                    name, "",
                 )?),
                 insn.offset as u64,
             ));
         } else {
-            let ss = name.split(".").collect::<Vec<&str>>();
+            let ss = name.split('.').collect::<Vec<&str>>();
             for symbol_variant in crate::extractor::smda::generate_symbols(
                 &Some(ss[0].to_string()),
                 &Some(ss[2].to_string()),
