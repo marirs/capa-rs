@@ -77,14 +77,14 @@ impl Rule {
 
     pub fn get_dependencies(
         &self,
-        namespaces: &std::collections::HashMap<String, Vec<&crate::rules::Rule>>,
+        namespaces: &std::collections::HashMap<String, Vec<&Rule>>,
     ) -> Result<Vec<String>> {
         let mut deps = vec![];
 
         fn rec(
             statement: &crate::rules::StatementElement,
             deps: &mut Vec<String>,
-            namespaces: &std::collections::HashMap<String, Vec<&crate::rules::Rule>>,
+            namespaces: &std::collections::HashMap<String, Vec<&Rule>>,
         ) -> Result<()> {
             if let crate::rules::StatementElement::Feature(f) = statement {
                 if let crate::rules::features::Feature::MatchedRule(s) = &**f {
@@ -676,10 +676,10 @@ pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
 
 #[derive(Debug)]
 pub struct RuleSet {
-    pub rules: Vec<crate::rules::Rule>,
-    pub basic_block_rules: Vec<crate::rules::Rule>,
-    pub function_rules: Vec<crate::rules::Rule>,
-    pub file_rules: Vec<crate::rules::Rule>,
+    pub rules: Vec<Rule>,
+    pub basic_block_rules: Vec<Rule>,
+    pub function_rules: Vec<Rule>,
+    pub file_rules: Vec<Rule>,
 }
 
 impl RuleSet {
@@ -696,35 +696,35 @@ impl RuleSet {
         })
     }
 
-    pub fn get_basic_block_rules(&self) -> Result<&Vec<crate::rules::Rule>> {
+    pub fn get_basic_block_rules(&self) -> Result<&Vec<Rule>> {
         Ok(&self.basic_block_rules)
     }
 
-    pub fn get_function_rules(&self) -> Result<&Vec<crate::rules::Rule>> {
+    pub fn get_function_rules(&self) -> Result<&Vec<Rule>> {
         Ok(&self.function_rules)
     }
 
-    pub fn get_file_rules(&self) -> Result<&Vec<crate::rules::Rule>> {
+    pub fn get_file_rules(&self) -> Result<&Vec<Rule>> {
         Ok(&self.file_rules)
     }
 }
 
-pub fn get_basic_block_rules(rules: &[crate::rules::Rule]) -> Result<Vec<&crate::rules::Rule>> {
+pub fn get_basic_block_rules(rules: &[Rule]) -> Result<Vec<&Rule>> {
     get_rules_for_scope(rules, &Scope::BasicBlock)
 }
 
-pub fn get_function_rules(rules: &[crate::rules::Rule]) -> Result<Vec<&crate::rules::Rule>> {
+pub fn get_function_rules(rules: &[Rule]) -> Result<Vec<&Rule>> {
     get_rules_for_scope(rules, &Scope::Function)
 }
 
-pub fn get_file_rules(rules: &[crate::rules::Rule]) -> Result<Vec<&crate::rules::Rule>> {
+pub fn get_file_rules(rules: &[Rule]) -> Result<Vec<&Rule>> {
     get_rules_for_scope(rules, &Scope::File)
 }
 
 pub fn get_rules_for_scope<'a>(
-    rules: &'a [crate::rules::Rule],
+    rules: &'a [Rule],
     scope: &Scope,
-) -> Result<Vec<&'a crate::rules::Rule>> {
+) -> Result<Vec<&'a Rule>> {
     let mut scope_rules = vec![];
     for rule in rules {
         if rule
@@ -747,9 +747,9 @@ pub fn get_rules_for_scope<'a>(
 }
 
 pub fn get_rules_and_dependencies<'a>(
-    rules: &'a [crate::rules::Rule],
+    rules: &'a [Rule],
     rule_name: &str,
-) -> Result<Vec<&'a crate::rules::Rule>> {
+) -> Result<Vec<&'a Rule>> {
     let mut res = vec![];
     //# we evaluate `rules` multiple times, so if its a generator, realize it into a list.
     let namespaces = index_rules_by_namespace(rules)?;
@@ -761,9 +761,9 @@ pub fn get_rules_and_dependencies<'a>(
 
     fn rec<'a>(
         want: &mut Vec<String>,
-        rule: &'a crate::rules::Rule,
-        rules_by_name: &std::collections::HashMap<String, &crate::rules::Rule>,
-        namespaces: &std::collections::HashMap<String, Vec<&crate::rules::Rule>>,
+        rule: &'a Rule,
+        rules_by_name: &std::collections::HashMap<String, &Rule>,
+        namespaces: &std::collections::HashMap<String, Vec<&Rule>>,
     ) -> Result<()> {
         want.push(rule.name.clone());
         for dep in rule.get_dependencies(namespaces)? {
@@ -787,9 +787,9 @@ pub fn get_rules_and_dependencies<'a>(
 }
 
 pub fn get_rules_with_scope<'a>(
-    rules: Vec<&'a crate::rules::Rule>,
+    rules: Vec<&'a Rule>,
     scope: &Scope,
-) -> Result<Vec<&'a crate::rules::Rule>> {
+) -> Result<Vec<&'a Rule>> {
     let mut res = vec![];
     for rule in rules {
         if &rule.scope == scope {
@@ -800,9 +800,9 @@ pub fn get_rules_with_scope<'a>(
 }
 
 pub fn index_rules_by_namespace(
-    rules: &[crate::rules::Rule],
-) -> Result<std::collections::HashMap<String, Vec<&crate::rules::Rule>>> {
-    let mut namespaces: std::collections::HashMap<String, Vec<&crate::rules::Rule>> =
+    rules: &[Rule],
+) -> Result<std::collections::HashMap<String, Vec<&Rule>>> {
+    let mut namespaces: std::collections::HashMap<String, Vec<&Rule>> =
         std::collections::HashMap::new();
     for rule in rules {
         if rule
@@ -844,9 +844,9 @@ pub fn index_rules_by_namespace(
 }
 
 pub fn index_rules_by_namespace2<'a>(
-    rules: &[&'a crate::rules::Rule],
-) -> Result<std::collections::HashMap<String, Vec<&'a crate::rules::Rule>>> {
-    let mut namespaces: std::collections::HashMap<String, Vec<&crate::rules::Rule>> =
+    rules: &[&'a Rule],
+) -> Result<std::collections::HashMap<String, Vec<&'a Rule>>> {
+    let mut namespaces: std::collections::HashMap<String, Vec<&Rule>> =
         std::collections::HashMap::new();
     for rule in rules {
         if rule
@@ -888,8 +888,8 @@ pub fn index_rules_by_namespace2<'a>(
 }
 
 pub fn topologically_order_rules(
-    rules: Vec<&crate::rules::Rule>,
-) -> Result<Vec<&crate::rules::Rule>> {
+    rules: Vec<&Rule>,
+) -> Result<Vec<&Rule>> {
     //# we evaluate `rules` multiple times, so if its a generator, realize it into a list.
     let namespaces = index_rules_by_namespace2(&rules)?;
     let mut rules_by_name = std::collections::HashMap::new();
@@ -900,11 +900,11 @@ pub fn topologically_order_rules(
     let mut ret = vec![];
 
     fn rec<'a>(
-        rule: &'a crate::rules::Rule,
+        rule: &'a Rule,
         seen: &mut std::collections::HashSet<String>,
-        rules_by_name: &std::collections::HashMap<String, &'a crate::rules::Rule>,
-        namespaces: &std::collections::HashMap<String, Vec<&'a crate::rules::Rule>>,
-    ) -> Result<Vec<&'a crate::rules::Rule>> {
+        rules_by_name: &std::collections::HashMap<String, &'a Rule>,
+        namespaces: &std::collections::HashMap<String, Vec<&'a Rule>>,
+    ) -> Result<Vec<&'a Rule>> {
         if seen.contains(&rule.name) {
             return Ok(vec![]);
         }
