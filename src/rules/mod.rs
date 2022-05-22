@@ -659,7 +659,8 @@ impl Rule {
 }
 
 fn is_hidden(entry: &walkdir::DirEntry) -> bool {
-    entry.file_name()
+    entry
+        .file_name()
         .to_str()
         .map(|s| s.starts_with("."))
         .unwrap_or_default()
@@ -669,7 +670,7 @@ pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
     let mut rules = vec![];
     for entry in walkdir::WalkDir::new(rule_path)
         .into_iter()
-        .filter_entry(|e|!is_hidden(e))
+        .filter_entry(|e| !is_hidden(e))
         .filter_map(|e| e.ok())
     {
         let fname = entry.path().to_str().unwrap().to_string();
@@ -722,11 +723,9 @@ pub fn get_rules_for_scope<'a>(rules: &'a [Rule], scope: &Scope) -> Result<Vec<&
     for rule in rules {
         if rule
             .meta
-            .contains_key(&yaml_rust::Yaml::String("capa/subscope-rule".to_string()))
+            .contains_key(&Yaml::String("capa/subscope-rule".to_string()))
         {
-            if let yaml_rust::Yaml::Boolean(b) =
-                rule.meta[&yaml_rust::Yaml::String("capa/subscope-rule".to_string())]
-            {
+            if let Yaml::Boolean(b) = rule.meta[&Yaml::String("capa/subscope-rule".to_string())] {
                 if b {
                     continue;
                 }
