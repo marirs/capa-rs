@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum FileFormat {
     PE,
     ELF,
@@ -19,6 +20,7 @@ impl std::fmt::Display for FileFormat {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum Os {
     WINDOWS,
     HPUX,
