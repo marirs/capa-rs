@@ -6,7 +6,7 @@ mod extractor;
 pub mod rules;
 mod sede;
 
-use consts::{Os, Format};
+use consts::{Format, Os};
 use sede::{from_hex, to_hex};
 use serde::{Deserialize, Serialize};
 use smda::{FileArchitecture, FileFormat};
@@ -41,8 +41,8 @@ impl FileCapabilities {
         let r = rule_path.to_string();
         let mut format = get_format(&f)?;
         let file_extractors = get_file_extractors(&f, format)?;
-        for extractor in file_extractors{
-            if extractor.is_dot_net(){
+        for extractor in file_extractors {
+            if extractor.is_dot_net() {
                 format = Format::DOTNET;
             }
         }
@@ -93,7 +93,7 @@ impl FileCapabilities {
             features: 0,
             #[cfg(feature = "verbose")]
             functions_capabilities: BTreeMap::new(),
-            tags: BTreeSet::new()
+            tags: BTreeSet::new(),
         })
     }
 
@@ -119,8 +119,8 @@ impl FileCapabilities {
                         if parts.len() > 1 {
                             let ss = parts[1..].join("::");
                             let re = regex::Regex::new(r##"[^\]]*\[(?P<tag>[^\]]*)\]"##)?;
-                            if let Some(s) = re.captures(&ss){
-                                if let Some(t) = s.name("tag"){
+                            if let Some(s) = re.captures(&ss) {
+                                if let Some(t) = s.name("tag") {
                                     self.tags.insert(t.as_str().to_string());
                                 }
                             }
@@ -131,10 +131,7 @@ impl FileCapabilities {
                                 _ => {
                                     self.attacks.insert(
                                         parts[0].to_string(),
-                                        vec![ss.to_string()]
-                                            .iter()
-                                            .cloned()
-                                            .collect(),
+                                        vec![ss.to_string()].iter().cloned().collect(),
                                     );
                                 }
                             }
@@ -158,8 +155,8 @@ impl FileCapabilities {
                         if parts.len() > 1 {
                             let ss = parts[1..].join("::");
                             let re = regex::Regex::new(r##"[^\]]*\[(?P<tag>[^\]]*)\]"##)?;
-                            if let Some(s) = re.captures(&ss){
-                                if let Some(t) = s.name("tag"){
+                            if let Some(s) = re.captures(&ss) {
+                                if let Some(t) = s.name("tag") {
                                     self.tags.insert(t.as_str().to_string());
                                 }
                             }
@@ -170,10 +167,7 @@ impl FileCapabilities {
                                 _ => {
                                     self.mbc.insert(
                                         parts[0].to_string(),
-                                        vec![ss.to_string()]
-                                            .iter()
-                                            .cloned()
-                                            .collect(),
+                                        vec![ss.to_string()].iter().cloned().collect(),
                                     );
                                 }
                             }
@@ -236,9 +230,9 @@ impl FileCapabilities {
     }
 
     fn get_os(extractor: &Box<dyn extractor::Extractor>) -> Result<Os> {
-        match extractor.format(){
+        match extractor.format() {
             extractor::FileFormat::PE | extractor::FileFormat::DOTNET => Ok(Os::WINDOWS),
-            _ => Ok(Os::LINUX)
+            _ => Ok(Os::LINUX),
         }
     }
 }
@@ -509,7 +503,7 @@ pub struct FileCapabilities {
     pub features: usize,
     #[cfg(feature = "verbose")]
     pub functions_capabilities: BTreeMap<u64, FunctionCapabilities>,
-    pub tags: BTreeSet<String>
+    pub tags: BTreeSet<String>,
 }
 
 fn match_fn<'a>(
@@ -613,23 +607,23 @@ fn index_rule_matches(
     Ok(())
 }
 
-fn get_format(f: &str) -> Result<Format>{
+fn get_format(f: &str) -> Result<Format> {
     let buffer = std::fs::read(f)?;
-    if buffer.starts_with(b"MZ"){
+    if buffer.starts_with(b"MZ") {
         Ok(Format::PE)
-    } else if buffer.starts_with(b"\x7fELF"){
+    } else if buffer.starts_with(b"\x7fELF") {
         Ok(Format::ELF)
     } else {
         Err(error::Error::UnsupportedFormatError)
     }
 }
 
-fn get_file_extractors(f: &str, format: Format) -> Result<Vec<Box<dyn extractor::Extractor>>>{
+fn get_file_extractors(f: &str, format: Format) -> Result<Vec<Box<dyn extractor::Extractor>>> {
     let mut res: Vec<Box<dyn extractor::Extractor>> = vec![];
-    match format{
+    match format {
         Format::PE => {
             res.push(Box::new(extractor::smda::Extractor::new(f, false, false)?));
-            if let Ok(e) = extractor::dnfile::Extractor::new(f){
+            if let Ok(e) = extractor::dnfile::Extractor::new(f) {
                 res.push(Box::new(e));
             }
             Ok(res)
@@ -638,16 +632,27 @@ fn get_file_extractors(f: &str, format: Format) -> Result<Vec<Box<dyn extractor:
             res.push(Box::new(extractor::smda::Extractor::new(f, false, false)?));
             Ok(res)
         }
-        _ => Ok(res)
+        _ => Ok(res),
     }
 }
 
-fn get_extractor(f: &str, format: Format, high_accuracy: bool, resolve_tailcalls: bool) -> Result<Box<dyn extractor::Extractor>>{
-    match format{
-        Format::PE => Ok(Box::new(extractor::smda::Extractor::new(f, high_accuracy, resolve_tailcalls)?)),
-        Format::DOTNET => {
-            Ok(Box::new(extractor::dnfile::Extractor::new(f)?))
-        }
-        Format::ELF => Ok(Box::new(extractor::smda::Extractor::new(f, high_accuracy, resolve_tailcalls)?))
+fn get_extractor(
+    f: &str,
+    format: Format,
+    high_accuracy: bool,
+    resolve_tailcalls: bool,
+) -> Result<Box<dyn extractor::Extractor>> {
+    match format {
+        Format::PE => Ok(Box::new(extractor::smda::Extractor::new(
+            f,
+            high_accuracy,
+            resolve_tailcalls,
+        )?)),
+        Format::DOTNET => Ok(Box::new(extractor::dnfile::Extractor::new(f)?)),
+        Format::ELF => Ok(Box::new(extractor::smda::Extractor::new(
+            f,
+            high_accuracy,
+            resolve_tailcalls,
+        )?)),
     }
 }

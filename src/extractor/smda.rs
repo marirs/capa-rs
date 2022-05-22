@@ -10,49 +10,49 @@ use std::{collections::HashMap, convert::TryInto};
 
 #[derive(Debug, Clone)]
 struct InstructionS {
-    i: Instruction
+    i: Instruction,
 }
 
-impl super::Instruction for InstructionS{
-    fn is_mov_imm_to_stack(&self) -> Result<bool>{
+impl super::Instruction for InstructionS {
+    fn is_mov_imm_to_stack(&self) -> Result<bool> {
         is_mov_imm_to_stack(&self.i)
     }
-    fn get_printable_len(&self) -> Result<u64>{
+    fn get_printable_len(&self) -> Result<u64> {
         Ok(self.i.get_printable_len()?)
     }
-    fn as_any(&self) -> &dyn std::any::Any{
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }
 
 #[derive(Debug, Clone)]
 struct FunctionS {
-    f: Function
+    f: Function,
 }
 
-impl super::Function for FunctionS{
-    fn inrefs(&self) -> &Vec<u64>{
+impl super::Function for FunctionS {
+    fn inrefs(&self) -> &Vec<u64> {
         &self.f.inrefs
     }
-    fn blockrefs(&self) -> &HashMap<u64, Vec<u64>>{
+    fn blockrefs(&self) -> &HashMap<u64, Vec<u64>> {
         &self.f.blockrefs
     }
-    fn offset(&self) -> u64{
+    fn offset(&self) -> u64 {
         self.f.offset
     }
 
-    fn get_blocks(&self) -> Result<HashMap<u64, Vec<Box<dyn super::Instruction>>>>{
+    fn get_blocks(&self) -> Result<HashMap<u64, Vec<Box<dyn super::Instruction>>>> {
         let mut res = HashMap::<u64, Vec<Box<dyn super::Instruction>>>::new();
-        for (u, b) in self.f.get_blocks()?{
+        for (u, b) in self.f.get_blocks()? {
             let mut instr: Vec<Box<dyn super::Instruction>> = vec![];
-            for i in b{
-                instr.push(Box::new(InstructionS{i: i.clone()}));
+            for i in b {
+                instr.push(Box::new(InstructionS { i: i.clone() }));
             }
             res.insert(*u, instr);
         }
         Ok(res)
     }
-    fn as_any(&self) -> &dyn std::any::Any{
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }
@@ -64,8 +64,8 @@ pub struct Extractor {
     path: String,
 }
 
-impl super::Extractor for Extractor{
-    fn is_dot_net(&self) -> bool{
+impl super::Extractor for Extractor {
+    fn is_dot_net(&self) -> bool {
         false
     }
 
@@ -73,14 +73,14 @@ impl super::Extractor for Extractor{
         Ok(self.report.base_addr)
     }
 
-    fn format(&self) -> super::FileFormat{
-        match self.report.format{
+    fn format(&self) -> super::FileFormat {
+        match self.report.format {
             smda::FileFormat::PE => super::FileFormat::PE,
-            smda::FileFormat::ELF => super::FileFormat::ELF
+            smda::FileFormat::ELF => super::FileFormat::ELF,
         }
     }
 
-    fn bitness(&self) -> u32{
+    fn bitness(&self) -> u32 {
         self.report.bitness
     }
 
@@ -117,8 +117,8 @@ impl super::Extractor for Extractor{
 
     fn get_functions(&self) -> Result<HashMap<u64, Box<dyn super::Function>>> {
         let mut res = HashMap::<u64, Box<dyn super::Function>>::new();
-        for (u, f) in self.report.get_functions()?{
-            res.insert(*u, Box::new(FunctionS{f: f.clone()}));
+        for (u, f) in self.report.get_functions()? {
+            res.insert(*u, Box::new(FunctionS { f: f.clone() }));
         }
         Ok(res)
     }
@@ -158,7 +158,10 @@ impl super::Extractor for Extractor{
         Ok(res)
     }
 
-    fn get_basic_blocks(&self, f: &Box<dyn super::Function>) -> Result<HashMap<u64, Vec<Box<dyn super::Instruction>>>>{
+    fn get_basic_blocks(
+        &self,
+        f: &Box<dyn super::Function>,
+    ) -> Result<HashMap<u64, Vec<Box<dyn super::Instruction>>>> {
         f.get_blocks()
     }
 
@@ -230,7 +233,6 @@ impl super::Extractor for Extractor{
         res.extend(self.extract_function_indirect_call_characteristic_features(&f.f, &insn.i)?);
         Ok(res)
     }
-
 }
 
 impl Extractor {
@@ -618,10 +620,10 @@ impl Extractor {
             return Ok(res);
         }
         if let Some(o) = &insn.operands {
-            if !o.starts_with("0x"){
+            if !o.starts_with("0x") {
                 return Ok(res);
             }
-            if u64::from_str_radix(&o[2..], 16)? == insn.offset + 5{
+            if u64::from_str_radix(&o[2..], 16)? == insn.offset + 5 {
                 res.push((
                     crate::rules::features::Feature::Characteristic(
                         crate::rules::features::CharacteristicFeature::new("call $+5", "")?,
@@ -632,8 +634,6 @@ impl Extractor {
         }
         Ok(res)
     }
-
-
 
     pub fn extract_insn_offset_features(
         &self,
@@ -1053,10 +1053,7 @@ pub fn all_zeros(bytez: &[u8]) -> Result<bool> {
     Ok(res)
 }
 
-pub fn is_security_cookie(
-    f: &Function,
-    insn: &Instruction,
-) -> Result<bool> {
+pub fn is_security_cookie(f: &Function, insn: &Instruction) -> Result<bool> {
     //# security cookie check should use SP or BP
     if let Some(o) = &insn.operands {
         let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();

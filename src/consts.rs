@@ -5,7 +5,7 @@ use std::fmt::Display;
 pub enum Format {
     PE,
     ELF,
-    DOTNET
+    DOTNET,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
