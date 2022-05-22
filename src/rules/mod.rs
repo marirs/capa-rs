@@ -2,6 +2,7 @@ pub mod features;
 mod statement;
 
 use crate::{Error, Result};
+use std::collections::HashMap;
 use features::{Feature, RuleFeatureType};
 use statement::{
     AndStatement, Description, NotStatement, OrStatement, RangeStatement, SomeStatement, Statement,
@@ -77,14 +78,14 @@ impl Rule {
 
     pub fn get_dependencies(
         &self,
-        namespaces: &std::collections::HashMap<String, Vec<&Rule>>,
+        namespaces: &HashMap<String, Vec<&Rule>>,
     ) -> Result<Vec<String>> {
         let mut deps = vec![];
 
         fn rec(
             statement: &StatementElement,
             deps: &mut Vec<String>,
-            namespaces: &std::collections::HashMap<String, Vec<&Rule>>,
+            namespaces: &HashMap<String, Vec<&Rule>>,
         ) -> Result<()> {
             if let StatementElement::Feature(f) = statement {
                 if let crate::rules::features::Feature::MatchedRule(s) = &**f {
@@ -648,7 +649,7 @@ impl Rule {
 
     pub fn evaluate(
         &self,
-        features: &std::collections::HashMap<Feature, Vec<u64>>,
+        features: &HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
         match self.statement.evaluate(features) {
             Ok(s) => Ok(s),
@@ -753,7 +754,7 @@ pub fn get_rules_and_dependencies<'a>(
     let mut res = vec![];
     //# we evaluate `rules` multiple times, so if its a generator, realize it into a list.
     let namespaces = index_rules_by_namespace(rules)?;
-    let mut rules_by_name = std::collections::HashMap::new();
+    let mut rules_by_name = HashMap::new();
     for rule in rules {
         rules_by_name.insert(rule.name.clone(), rule);
     }
@@ -762,8 +763,8 @@ pub fn get_rules_and_dependencies<'a>(
     fn rec<'a>(
         want: &mut Vec<String>,
         rule: &'a Rule,
-        rules_by_name: &std::collections::HashMap<String, &Rule>,
-        namespaces: &std::collections::HashMap<String, Vec<&Rule>>,
+        rules_by_name: &HashMap<String, &Rule>,
+        namespaces: &HashMap<String, Vec<&Rule>>,
     ) -> Result<()> {
         want.push(rule.name.clone());
         for dep in rule.get_dependencies(namespaces)? {
@@ -801,9 +802,9 @@ pub fn get_rules_with_scope<'a>(
 
 pub fn index_rules_by_namespace(
     rules: &[Rule],
-) -> Result<std::collections::HashMap<String, Vec<&Rule>>> {
-    let mut namespaces: std::collections::HashMap<String, Vec<&Rule>> =
-        std::collections::HashMap::new();
+) -> Result<HashMap<String, Vec<&Rule>>> {
+    let mut namespaces: HashMap<String, Vec<&Rule>> =
+        HashMap::new();
     for rule in rules {
         if rule
             .meta
@@ -845,9 +846,9 @@ pub fn index_rules_by_namespace(
 
 pub fn index_rules_by_namespace2<'a>(
     rules: &[&'a Rule],
-) -> Result<std::collections::HashMap<String, Vec<&'a Rule>>> {
-    let mut namespaces: std::collections::HashMap<String, Vec<&Rule>> =
-        std::collections::HashMap::new();
+) -> Result<HashMap<String, Vec<&'a Rule>>> {
+    let mut namespaces: HashMap<String, Vec<&Rule>> =
+        HashMap::new();
     for rule in rules {
         if rule
             .meta
@@ -892,7 +893,7 @@ pub fn topologically_order_rules(
 ) -> Result<Vec<&Rule>> {
     //# we evaluate `rules` multiple times, so if its a generator, realize it into a list.
     let namespaces = index_rules_by_namespace2(&rules)?;
-    let mut rules_by_name = std::collections::HashMap::new();
+    let mut rules_by_name = HashMap::new();
     for rule in &rules {
         rules_by_name.insert(rule.name.clone(), *rule);
     }
@@ -902,8 +903,8 @@ pub fn topologically_order_rules(
     fn rec<'a>(
         rule: &'a Rule,
         seen: &mut std::collections::HashSet<String>,
-        rules_by_name: &std::collections::HashMap<String, &'a Rule>,
-        namespaces: &std::collections::HashMap<String, Vec<&'a Rule>>,
+        rules_by_name: &HashMap<String, &'a Rule>,
+        namespaces: &HashMap<String, Vec<&'a Rule>>,
     ) -> Result<Vec<&'a Rule>> {
         if seen.contains(&rule.name) {
             return Ok(vec![]);
