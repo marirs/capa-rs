@@ -8,7 +8,6 @@ use statement::{
     StatementElement, SubscopeStatement,
 };
 use std::collections::HashMap;
-use walkdir::WalkDir;
 use yaml_rust::{yaml::Hash, Yaml, YamlLoader};
 
 const MAX_BYTES_FEATURE_SIZE: usize = 0x100;
@@ -659,13 +658,24 @@ impl Rule {
     }
 }
 
+fn is_hidden(entry: &walkdir::DirEntry) -> bool {
+    entry.file_name()
+        .to_str()
+        .map(|s| s.starts_with("."))
+        .unwrap_or_default()
+}
+
 pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
     let mut rules = vec![];
-    for entry in WalkDir::new(rule_path).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(rule_path)
+        .into_iter()
+        .filter_entry(|e|!is_hidden(e))
+        .filter_map(|e| e.ok())
+    {
         let fname = entry.path().to_str().unwrap().to_string();
-        if fname.ends_with(".yml") {
+        if fname.ends_with(".yml") || fname.ends_with(".yaml") {
             let mut rule = Rule::from_yaml_file(&fname)?;
-            rule.set_path(fname)?;
+            rule.set_path(fname.clone())?;
             rules.push(rule)
         }
     }

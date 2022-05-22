@@ -39,6 +39,8 @@ pub enum Error {
     JsonFormatError(&'static str, u32),
     #[error("invalid rule: {0} - {1}")]
     InvalidRule(u32, String),
+    #[error("{0}")]
+    InvalidRuleFile(String),
     #[error("operand error")]
     OperandError,
     #[error("subscope evaluation error")]
