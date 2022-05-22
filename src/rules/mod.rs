@@ -665,7 +665,7 @@ pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
         let fname = entry.path().to_str().unwrap().to_string();
         if fname.ends_with(".yml") {
             let mut rule = Rule::from_yaml_file(&fname)?;
-            rule.set_path(fname.clone())?;
+            rule.set_path(fname)?;
             rules.push(rule)
         }
     }
