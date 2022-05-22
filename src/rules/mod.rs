@@ -88,7 +88,7 @@ impl Rule {
             namespaces: &HashMap<String, Vec<&Rule>>,
         ) -> Result<()> {
             if let StatementElement::Feature(f) = statement {
-                if let crate::rules::features::Feature::MatchedRule(s) = &**f {
+                if let features::Feature::MatchedRule(s) = &**f {
                     if namespaces.contains_key(&s.value) {
                         //# matches a namespace, so take precedence and
                         // don't even check rule names.
