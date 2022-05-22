@@ -13,11 +13,10 @@ impl std::fmt::Display for FileFormat {
         match self {
             FileFormat::PE => write!(f, "PE file"),
             FileFormat::ELF => write!(f, "Elf file"),
-            FileFormat::DOTNET => write!(f, "DotNet file")
+            FileFormat::DOTNET => write!(f, "DotNet file"),
         }
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Os {

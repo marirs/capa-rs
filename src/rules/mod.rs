@@ -2,12 +2,12 @@ pub mod features;
 mod statement;
 
 use crate::{Error, Result};
-use std::collections::HashMap;
 use features::{Feature, RuleFeatureType};
 use statement::{
     AndStatement, Description, NotStatement, OrStatement, RangeStatement, SomeStatement, Statement,
     StatementElement, SubscopeStatement,
 };
+use std::collections::HashMap;
 use walkdir::WalkDir;
 use yaml_rust::{yaml::Hash, Yaml, YamlLoader};
 
@@ -647,10 +647,7 @@ impl Rule {
         ))
     }
 
-    pub fn evaluate(
-        &self,
-        features: &HashMap<Feature, Vec<u64>>,
-    ) -> Result<(bool, Vec<u64>)> {
+    pub fn evaluate(&self, features: &HashMap<Feature, Vec<u64>>) -> Result<(bool, Vec<u64>)> {
         match self.statement.evaluate(features) {
             Ok(s) => Ok(s),
             Err(e) => {
@@ -722,10 +719,7 @@ pub fn get_file_rules(rules: &[Rule]) -> Result<Vec<&Rule>> {
     get_rules_for_scope(rules, &Scope::File)
 }
 
-pub fn get_rules_for_scope<'a>(
-    rules: &'a [Rule],
-    scope: &Scope,
-) -> Result<Vec<&'a Rule>> {
+pub fn get_rules_for_scope<'a>(rules: &'a [Rule], scope: &Scope) -> Result<Vec<&'a Rule>> {
     let mut scope_rules = vec![];
     for rule in rules {
         if rule
@@ -747,10 +741,7 @@ pub fn get_rules_for_scope<'a>(
     get_rules_with_scope(trules, scope)
 }
 
-pub fn get_rules_and_dependencies<'a>(
-    rules: &'a [Rule],
-    rule_name: &str,
-) -> Result<Vec<&'a Rule>> {
+pub fn get_rules_and_dependencies<'a>(rules: &'a [Rule], rule_name: &str) -> Result<Vec<&'a Rule>> {
     let mut res = vec![];
     //# we evaluate `rules` multiple times, so if its a generator, realize it into a list.
     let namespaces = index_rules_by_namespace(rules)?;
@@ -787,10 +778,7 @@ pub fn get_rules_and_dependencies<'a>(
     Ok(res)
 }
 
-pub fn get_rules_with_scope<'a>(
-    rules: Vec<&'a Rule>,
-    scope: &Scope,
-) -> Result<Vec<&'a Rule>> {
+pub fn get_rules_with_scope<'a>(rules: Vec<&'a Rule>, scope: &Scope) -> Result<Vec<&'a Rule>> {
     let mut res = vec![];
     for rule in rules {
         if &rule.scope == scope {
@@ -800,11 +788,8 @@ pub fn get_rules_with_scope<'a>(
     Ok(res)
 }
 
-pub fn index_rules_by_namespace(
-    rules: &[Rule],
-) -> Result<HashMap<String, Vec<&Rule>>> {
-    let mut namespaces: HashMap<String, Vec<&Rule>> =
-        HashMap::new();
+pub fn index_rules_by_namespace(rules: &[Rule]) -> Result<HashMap<String, Vec<&Rule>>> {
+    let mut namespaces: HashMap<String, Vec<&Rule>> = HashMap::new();
     for rule in rules {
         if rule
             .meta
@@ -844,11 +829,8 @@ pub fn index_rules_by_namespace(
     Ok(namespaces)
 }
 
-pub fn index_rules_by_namespace2<'a>(
-    rules: &[&'a Rule],
-) -> Result<HashMap<String, Vec<&'a Rule>>> {
-    let mut namespaces: HashMap<String, Vec<&Rule>> =
-        HashMap::new();
+pub fn index_rules_by_namespace2<'a>(rules: &[&'a Rule]) -> Result<HashMap<String, Vec<&'a Rule>>> {
+    let mut namespaces: HashMap<String, Vec<&Rule>> = HashMap::new();
     for rule in rules {
         if rule
             .meta
@@ -888,9 +870,7 @@ pub fn index_rules_by_namespace2<'a>(
     Ok(namespaces)
 }
 
-pub fn topologically_order_rules(
-    rules: Vec<&Rule>,
-) -> Result<Vec<&Rule>> {
+pub fn topologically_order_rules(rules: Vec<&Rule>) -> Result<Vec<&Rule>> {
     //# we evaluate `rules` multiple times, so if its a generator, realize it into a list.
     let namespaces = index_rules_by_namespace2(&rules)?;
     let mut rules_by_name = HashMap::new();

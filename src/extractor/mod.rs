@@ -1,4 +1,4 @@
-use crate::{Result, consts::FileFormat};
+use crate::{consts::FileFormat, Result};
 
 pub mod dnfile;
 pub mod smda;
