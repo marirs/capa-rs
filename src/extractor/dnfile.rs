@@ -211,7 +211,7 @@ impl Extractor {
                 let ss = imp.split('.').collect::<Vec<&str>>();
                 for symbol_variant in crate::extractor::smda::generate_symbols(
                     &Some(ss[0].to_string()),
-                    &Some(ss[2].to_string()),
+                    &Some(ss[1].to_string()),
                 )? {
                     res.push((
                         crate::rules::features::Feature::Import(
@@ -253,7 +253,7 @@ impl Extractor {
                 let import_scope = self
                     .pe
                     .net()?
-                    .resolve_coded_index::<MemberRef>(&row.import_scope)?;
+                    .resolve_coded_index::<ModuleRef>(&row.import_scope)?;
                 let mut dll = import_scope.name.clone();
                 let symbol = row.import_name.clone();
                 let token = calculate_dotnet_token_value(
