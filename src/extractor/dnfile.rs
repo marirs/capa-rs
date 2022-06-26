@@ -1,8 +1,11 @@
 use crate::Result;
 use dnfile::{
-    DnPe,
-    lang::{cil::{self, enums::*}, clr},
+    lang::{
+        cil::{self, enums::*},
+        clr,
+    },
     stream::meta_data_tables::mdtables::{codedindex::*, *},
+    DnPe,
 };
 use std::collections::HashMap;
 
@@ -376,8 +379,5 @@ impl Extractor {
 
 pub fn calculate_dotnet_token_value(table: &'static str, rid: usize) -> Result<u64> {
     let table_number = table_name_2_index(table)?;
-    Ok(
-        (((table_number & 0xFF) << clr::token::TABLE_SHIFT)
-            | (rid & clr::token::RID_MASK)) as u64,
-    )
+    Ok((((table_number & 0xFF) << clr::token::TABLE_SHIFT) | (rid & clr::token::RID_MASK)) as u64)
 }
