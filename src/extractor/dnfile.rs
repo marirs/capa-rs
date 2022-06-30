@@ -56,6 +56,31 @@ impl super::Function for Function {
 }
 
 #[derive(Debug)]
+pub struct DnMethod {
+    name: String,
+    namespace: String,
+    class_name: String,
+    token: u64
+}
+
+impl DnMethod{
+    pub fn new(token: u64, namespace: &str, class_name: &str, method_name: &str) -> Self{
+        Self{
+            token,
+            namespace: namespace.to_string(),
+            class_name: class_name.to_string(),
+            name: method_name.to_string()
+        }
+    }
+}
+
+impl std::fmt::Display for DnMethod{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}::{}", self.namespace, self.class_name, self.name)
+    }
+}
+
+#[derive(Debug)]
 pub struct Extractor {
     pe: DnPe,
 }
@@ -101,7 +126,12 @@ impl super::Extractor for Extractor {
 
     fn extract_file_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut ss = self.extract_file_import_names()?;
+        ss.extend(self.extract_file_function_names()?);
+        //ss.extend(self.extract_file_string()?);
         ss.extend(self.extract_file_format()?);
+        ss.extend(self.extract_file_mixed_mode_characteristic_features()?);
+        //ss.extend(self.extract_file_namespace_features()?);
+        //ss.extend(self.extract_file_class_features()?);
         Ok(ss)
     }
 
@@ -225,6 +255,29 @@ impl Extractor {
         Ok(res)
     }
 
+    pub fn extract_file_function_names(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+        let mut res = vec![];
+        for method in self.get_dotnet_managed_methods()?{
+            res.push((crate::rules::features::Feature::FunctionName(crate::rules::features::FunctionNameFeature::new(&method.to_string(), "")?),
+                      method.token,
+            ));
+        }
+        Ok(res)
+    }
+
+    pub fn get_dotnet_managed_methods(&self) -> Result<Vec<DnMethod>>{
+        let mut res = vec![];
+        let typedef = self.pe.net()?.md_table("TypeDef")?;
+        for rid in 0..typedef.row_count() {
+            let row = typedef.row::<TypeDef>(rid)?;
+            for metdef in &row.method_list{
+                let token = calculate_dotnet_token_value("MemberRef", rid + 1)?;
+                res.push(DnMethod::new(token, &row.type_namespace, &row.type_name, &self.pe.net()?.resolve_coded_index::<MethodDef>(metdef)?.name));
+            }
+        }
+        Ok(res)
+    }
+
     pub fn get_dotnet_managed_imports(&self) -> Result<Vec<(u64, String)>> {
         let mut res = vec![];
         let memref = self.pe.net()?.md_table("MemberRef")?;
@@ -267,6 +320,14 @@ impl Extractor {
             }
         }
         Ok(res)
+    }
+
+    pub fn extract_file_mixed_mode_characteristic_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>>{
+        if is_dotnet_mixed_mode(&self.pe)?{
+            Ok(vec![(crate::rules::features::Feature::Characteristic(crate::rules::features::CharacteristicFeature::new("mixed mode",  "")?), 0)])
+        } else {
+            Ok(vec![])
+        }
     }
 
     pub fn extract_insn_api_features(
@@ -380,4 +441,8 @@ pub fn calculate_dotnet_token_value(table: &'static str, rid: usize) -> Result<u
         (((table_number & 0xFF) << clr::token::TABLE_SHIFT)
             | (rid & clr::token::RID_MASK)) as u64,
     )
+}
+
+pub fn is_dotnet_mixed_mode(pe: &dnfile::DnPe) -> Result<bool>{
+    return Ok(!pe.net()?.flags.contains(&dnfile::ClrHeaderFlags::IlOnly))
 }
