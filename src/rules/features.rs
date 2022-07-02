@@ -21,6 +21,8 @@ pub enum RuleFeatureType {
     Os,
     Format,
     Arch,
+    Namespace,
+    Class
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -43,6 +45,8 @@ pub enum Feature {
     Os(OsFeature),
     Format(FormatFeature),
     Arch(ArchFeature),
+    Namespace(NamespaceFeature),
+    Class(ClassFeature),
 }
 
 impl Feature {
@@ -129,6 +133,14 @@ impl Feature {
                 &value.get_str()?,
                 description,
             )?)),
+            RuleFeatureType::Namespace => Ok(Feature::Namespace(NamespaceFeature::new(
+                &value.get_str()?,
+                description,
+            )?)),
+            RuleFeatureType::Class => Ok(Feature::Class(ClassFeature::new(
+                &value.get_str()?,
+                description,
+            )?)),
         }
     }
 
@@ -152,6 +164,8 @@ impl Feature {
             Feature::Os(a) => a.is_supported_in_scope(scope),
             Feature::Format(a) => a.is_supported_in_scope(scope),
             Feature::Arch(a) => a.is_supported_in_scope(scope),
+            Feature::Namespace(a) => a.is_supported_in_scope(scope),
+            Feature::Class(a) => a.is_supported_in_scope(scope),
         }
     }
 
@@ -178,6 +192,8 @@ impl Feature {
             Feature::Os(a) => a.evaluate(features),
             Feature::Format(a) => a.evaluate(features),
             Feature::Arch(a) => a.evaluate(features),
+            Feature::Namespace(a) => a.evaluate(features),
+            Feature::Class(a) => a.evaluate(features),
         }
     }
 
@@ -201,6 +217,8 @@ impl Feature {
             Feature::Os(a) => Ok(a.value.clone()),
             Feature::Format(a) => Ok(a.value.clone()),
             Feature::Arch(a) => Ok(a.value.clone()),
+            Feature::Namespace(a) => Ok(a.value.clone()),
+            Feature::Class(a) => Ok(a.value.clone()),
         }
     }
 }
@@ -922,6 +940,99 @@ impl PartialEq for ArchFeature {
 }
 
 impl Eq for ArchFeature {}
+
+#[derive(Debug, Clone)]
+pub struct NamespaceFeature {
+    value: String,
+    _description: String,
+}
+
+impl NamespaceFeature {
+    pub fn new(value: &str, description: &str) -> Result<Self> {
+        Ok(Self {
+            value: value.to_string(),
+            _description: description.to_string(),
+        })
+    }
+    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
+        match scope {
+            crate::rules::Scope::Function => Ok(true),
+            crate::rules::Scope::File => Ok(true),
+            crate::rules::Scope::BasicBlock => Ok(true),
+        }
+    }
+    pub fn evaluate(
+        &self,
+        features: &std::collections::HashMap<Feature, Vec<u64>>,
+    ) -> Result<(bool, Vec<u64>)> {
+        if features.contains_key(&Feature::Namespace(self.clone())) {
+            return Ok((true, features[&Feature::Namespace(self.clone())].clone()));
+        }
+        Ok((false, vec![]))
+    }
+}
+
+impl std::hash::Hash for NamespaceFeature {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        "namespace_feature".hash(state);
+        self.value.to_lowercase().hash(state);
+    }
+}
+
+impl PartialEq for NamespaceFeature {
+    fn eq(&self, other: &NamespaceFeature) -> bool {
+        self.value.to_lowercase() == other.value.to_lowercase()
+    }
+}
+
+impl Eq for NamespaceFeature {}
+
+#[derive(Debug, Clone)]
+pub struct ClassFeature {
+    value: String,
+    _description: String,
+}
+
+impl ClassFeature {
+    pub fn new(value: &str, description: &str) -> Result<Self> {
+        Ok(Self {
+            value: value.to_string(),
+            _description: description.to_string(),
+        })
+    }
+    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
+        match scope {
+            crate::rules::Scope::Function => Ok(true),
+            crate::rules::Scope::File => Ok(true),
+            crate::rules::Scope::BasicBlock => Ok(true),
+        }
+    }
+    pub fn evaluate(
+        &self,
+        features: &std::collections::HashMap<Feature, Vec<u64>>,
+    ) -> Result<(bool, Vec<u64>)> {
+        if features.contains_key(&Feature::Class(self.clone())) {
+            return Ok((true, features[&Feature::Class(self.clone())].clone()));
+        }
+        Ok((false, vec![]))
+    }
+}
+
+impl std::hash::Hash for ClassFeature {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        "namespace_feature".hash(state);
+        self.value.to_lowercase().hash(state);
+    }
+}
+
+impl PartialEq for ClassFeature {
+    fn eq(&self, other: &Self) -> bool {
+        self.value.to_lowercase() == other.value.to_lowercase()
+    }
+}
+
+impl Eq for ClassFeature {}
+
 
 #[derive(Debug, Clone)]
 pub struct OsFeature {

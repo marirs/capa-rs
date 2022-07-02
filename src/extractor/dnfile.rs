@@ -133,8 +133,7 @@ impl super::Extractor for Extractor {
         //ss.extend(self.extract_file_string()?);
         ss.extend(self.extract_file_format()?);
         ss.extend(self.extract_file_mixed_mode_characteristic_features()?);
-        //ss.extend(self.extract_file_namespace_features()?);
-        //ss.extend(self.extract_file_class_features()?);
+        ss.extend(self.extract_file_namespace_and_class_features()?);
         Ok(ss)
     }
 
@@ -254,6 +253,37 @@ impl Extractor {
                     ));
                 }
             }
+        }
+        Ok(res)
+    }
+
+    ///emit namespace features from TypeRef and TypeDef tables
+    pub fn extract_file_namespace_and_class_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+        let mut res = vec![];
+        // namespaces may be referenced multiple times, so we need to filter
+        let mut namespaces = std::collections::HashSet::new();
+        let typedef = self.pe.net()?.md_table("TypeDef")?;
+        for rid in 0..typedef.row_count() {
+            let row = typedef.row::<TypeDef>(rid)?;
+            namespaces.insert(row.type_namespace.clone());
+            let token = calculate_dotnet_token_value("TypeDef", rid + 1)?;
+            res.push((crate::rules::features::Feature::Class(crate::rules::features::ClassFeature::new(&format!("{}.{}", row.type_namespace, row.type_name), "")?),
+                      token,
+            ))
+        }
+        let typedef = self.pe.net()?.md_table("TypeRef")?;
+        for rid in 0..typedef.row_count() {
+            let row = typedef.row::<TypeRef>(rid)?;
+            namespaces.insert(row.type_namespace.clone());
+            let token = calculate_dotnet_token_value("TypeRef", rid + 1)?;
+            res.push((crate::rules::features::Feature::Class(crate::rules::features::ClassFeature::new(&format!("{}.{}", row.type_namespace, row.type_name), "")?),
+                      token,
+            ))
+        }
+        for ns in namespaces{
+            res.push((crate::rules::features::Feature::Namespace(crate::rules::features::NamespaceFeature::new(&ns, "")?),
+                      0,
+            ))
         }
         Ok(res)
     }
