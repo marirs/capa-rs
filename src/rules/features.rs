@@ -22,7 +22,9 @@ pub enum RuleFeatureType {
     Format,
     Arch,
     Namespace,
-    Class
+    Class,
+    OperandNumber(usize),
+    OperandOffset(usize)
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -47,6 +49,8 @@ pub enum Feature {
     Arch(ArchFeature),
     Namespace(NamespaceFeature),
     Class(ClassFeature),
+    OperandNumber(OperandNumberFeature),
+    OperandOffset(OperandOffsetFeature),
 }
 
 impl Feature {
@@ -141,6 +145,16 @@ impl Feature {
                 &value.get_str()?,
                 description,
             )?)),
+            RuleFeatureType::OperandNumber(a) => Ok(Feature::OperandNumber(OperandNumberFeature::new(
+                &a,
+                &value.get_int()?,
+                description,
+            )?)),
+            RuleFeatureType::OperandOffset(a) => Ok(Feature::OperandOffset(OperandOffsetFeature::new(
+                &a,
+                &value.get_int()? as &i128,
+                description,
+            )?)),
         }
     }
 
@@ -166,6 +180,8 @@ impl Feature {
             Feature::Arch(a) => a.is_supported_in_scope(scope),
             Feature::Namespace(a) => a.is_supported_in_scope(scope),
             Feature::Class(a) => a.is_supported_in_scope(scope),
+            Feature::OperandNumber(a) => a.is_supported_in_scope(scope),
+            Feature::OperandOffset(a) => a.is_supported_in_scope(scope),
         }
     }
 
@@ -194,6 +210,8 @@ impl Feature {
             Feature::Arch(a) => a.evaluate(features),
             Feature::Namespace(a) => a.evaluate(features),
             Feature::Class(a) => a.evaluate(features),
+            Feature::OperandNumber(a) => a.evaluate(features),
+            Feature::OperandOffset(a) => a.evaluate(features),
         }
     }
 
@@ -219,6 +237,8 @@ impl Feature {
             Feature::Arch(a) => Ok(a.value.clone()),
             Feature::Namespace(a) => Ok(a.value.clone()),
             Feature::Class(a) => Ok(a.value.clone()),
+            Feature::OperandNumber(a) => Ok(a.value.to_string()),
+            Feature::OperandOffset(a) => Ok(a.value.to_string()),
         }
     }
 }
@@ -242,6 +262,7 @@ impl FunctionNameFeature {
             crate::rules::Scope::Function => Ok(false),
             crate::rules::Scope::File => Ok(true),
             crate::rules::Scope::BasicBlock => Ok(false),
+            crate::rules::Scope::Instruction => Ok(false),
         }
     }
     pub fn evaluate(
@@ -273,6 +294,7 @@ impl SectionFeature {
             crate::rules::Scope::Function => Ok(false),
             crate::rules::Scope::File => Ok(true),
             crate::rules::Scope::BasicBlock => Ok(false),
+            crate::rules::Scope::Instruction => Ok(false),
         }
     }
     pub fn evaluate(
@@ -304,6 +326,7 @@ impl ImportFeature {
             crate::rules::Scope::Function => Ok(false),
             crate::rules::Scope::File => Ok(true),
             crate::rules::Scope::BasicBlock => Ok(false),
+            crate::rules::Scope::Instruction => Ok(false),
         }
     }
     pub fn evaluate(
@@ -335,6 +358,7 @@ impl ExportFeature {
             crate::rules::Scope::Function => Ok(false),
             crate::rules::Scope::File => Ok(true),
             crate::rules::Scope::BasicBlock => Ok(false),
+            crate::rules::Scope::Instruction => Ok(false),
         }
     }
     pub fn evaluate(
@@ -360,6 +384,7 @@ impl BasicBlockFeature {
             crate::rules::Scope::Function => Ok(true),
             crate::rules::Scope::File => Ok(false),
             crate::rules::Scope::BasicBlock => Ok(false),
+            crate::rules::Scope::Instruction => Ok(false),
         }
     }
     pub fn evaluate(
@@ -391,6 +416,7 @@ impl MnemonicFeature {
             crate::rules::Scope::Function => Ok(true),
             crate::rules::Scope::File => Ok(false),
             crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
         }
     }
     pub fn evaluate(
@@ -439,6 +465,7 @@ impl OffsetFeature {
             crate::rules::Scope::Function => Ok(true),
             crate::rules::Scope::File => Ok(false),
             crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
         }
     }
     pub fn evaluate(
@@ -468,6 +495,56 @@ impl PartialEq for OffsetFeature {
 impl Eq for OffsetFeature {}
 
 #[derive(Debug, Clone)]
+pub struct OperandOffsetFeature {
+    index: usize,
+    value: i128,
+    _description: String,
+}
+
+impl OperandOffsetFeature {
+    pub fn new(index: &usize, value: &i128, description: &str) -> Result<Self> {
+        Ok(Self {
+            index: *index,
+            value: *value,
+            _description: description.to_string(),
+        })
+    }
+    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
+        match scope {
+            crate::rules::Scope::Function => Ok(true),
+            crate::rules::Scope::File => Ok(false),
+            crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
+        }
+    }
+    pub fn evaluate(
+        &self,
+        features: &std::collections::HashMap<Feature, Vec<u64>>,
+    ) -> Result<(bool, Vec<u64>)> {
+        if features.contains_key(&Feature::OperandOffset(self.clone())) {
+            return Ok((true, features[&Feature::OperandOffset(self.clone())].clone()));
+        }
+        Ok((false, vec![]))
+    }
+}
+
+impl std::hash::Hash for OperandOffsetFeature {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        "operand_offset_feature".hash(state);
+        self.index.hash(state);
+        self.value.hash(state);
+    }
+}
+
+impl PartialEq for OperandOffsetFeature {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value && self.index == other.index
+    }
+}
+
+impl Eq for OperandOffsetFeature {}
+
+#[derive(Debug, Clone)]
 pub struct NumberFeature {
     _bits: u32,
     value: i128,
@@ -487,6 +564,7 @@ impl NumberFeature {
             crate::rules::Scope::Function => Ok(true),
             crate::rules::Scope::File => Ok(false),
             crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
         }
     }
     pub fn evaluate(
@@ -515,6 +593,57 @@ impl PartialEq for NumberFeature {
 
 impl Eq for NumberFeature {}
 
+#[derive(Debug, Clone)]
+pub struct OperandNumberFeature {
+    index: usize,
+    value: i128,
+    _description: String,
+}
+
+impl OperandNumberFeature {
+    pub fn new(index: &usize, value: &i128, description: &str) -> Result<Self> {
+        Ok(Self {
+            index: *index,
+            value: *value,
+            _description: description.to_string(),
+        })
+    }
+    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
+        match scope {
+            crate::rules::Scope::Function => Ok(true),
+            crate::rules::Scope::File => Ok(false),
+            crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
+        }
+    }
+    pub fn evaluate(
+        &self,
+        features: &std::collections::HashMap<Feature, Vec<u64>>,
+    ) -> Result<(bool, Vec<u64>)> {
+        if features.contains_key(&Feature::OperandNumber(self.clone())) {
+            return Ok((true, features[&Feature::OperandNumber(self.clone())].clone()));
+        }
+        Ok((false, vec![]))
+    }
+}
+
+impl std::hash::Hash for OperandNumberFeature {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        "operand_number_feature".hash(state);
+        self.index.hash(state);
+        self.value.hash(state);
+    }
+}
+
+impl PartialEq for OperandNumberFeature {
+    fn eq(&self, other: &OperandNumberFeature) -> bool {
+        self.value == other.value && self.index == other.index
+    }
+}
+
+impl Eq for OperandNumberFeature {}
+
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct ApiFeature {
     value: String,
@@ -533,6 +662,7 @@ impl ApiFeature {
             crate::rules::Scope::Function => Ok(true),
             crate::rules::Scope::File => Ok(false),
             crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
         }
     }
     pub fn evaluate(
@@ -564,6 +694,7 @@ impl MatchedRuleFeature {
             crate::rules::Scope::Function => Ok(true),
             crate::rules::Scope::File => Ok(true),
             crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
         }
     }
     pub fn evaluate(
@@ -607,10 +738,12 @@ impl CharacteristicFeature {
                 "stack string" => Ok(true),
                 "indirect call" => Ok(true),
                 "call $+5" => Ok(true),
+                "unmanaged call" => Ok(true),
                 _ => Ok(false),
             },
             crate::rules::Scope::File => match self.value.as_str() {
                 "embedded pe" => Ok(true),
+                "mixed mode" => Ok(true),
                 _ => Ok(false),
             },
             crate::rules::Scope::BasicBlock => match self.value.as_str() {
@@ -623,6 +756,18 @@ impl CharacteristicFeature {
                 "stack string" => Ok(true),
                 "indirect call" => Ok(true),
                 "call $+5" => Ok(true),
+                "unmanaged call" => Ok(true),
+                _ => Ok(false),
+            },
+            crate::rules::Scope::Instruction => match self.value.as_str() {
+                "nzxor" => Ok(true),
+                "peb access" => Ok(true),
+                "fs access" => Ok(true),
+                "gs access" => Ok(true),
+                "cross section flow" => Ok(true),
+                "indirect call" => Ok(true),
+                "call $+5" => Ok(true),
+                "unmanaged call" => Ok(true),
                 _ => Ok(false),
             },
         }
@@ -660,6 +805,7 @@ impl StringFeature {
             crate::rules::Scope::Function => Ok(true),
             crate::rules::Scope::File => Ok(true),
             crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
         }
     }
     pub fn evaluate(
@@ -691,6 +837,7 @@ impl SubstringFeature {
             crate::rules::Scope::Function => Ok(true),
             crate::rules::Scope::File => Ok(true),
             crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
         }
     }
     pub fn evaluate(
@@ -771,6 +918,7 @@ impl RegexFeature {
             crate::rules::Scope::Function => Ok(true),
             crate::rules::Scope::File => Ok(true),
             crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
         }
     }
     pub fn evaluate(
@@ -861,6 +1009,7 @@ impl BytesFeature {
             crate::rules::Scope::Function => Ok(true),
             crate::rules::Scope::File => Ok(false),
             crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
         }
     }
     pub fn evaluate(
@@ -913,6 +1062,7 @@ impl ArchFeature {
             crate::rules::Scope::Function => Ok(true),
             crate::rules::Scope::File => Ok(true),
             crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
         }
     }
     pub fn evaluate(
@@ -959,6 +1109,7 @@ impl NamespaceFeature {
             crate::rules::Scope::Function => Ok(true),
             crate::rules::Scope::File => Ok(true),
             crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
         }
     }
     pub fn evaluate(
@@ -1005,6 +1156,7 @@ impl ClassFeature {
             crate::rules::Scope::Function => Ok(true),
             crate::rules::Scope::File => Ok(true),
             crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
         }
     }
     pub fn evaluate(
@@ -1052,6 +1204,7 @@ impl OsFeature {
             crate::rules::Scope::Function => Ok(true),
             crate::rules::Scope::File => Ok(true),
             crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
         }
     }
     pub fn evaluate(
@@ -1098,6 +1251,7 @@ impl FormatFeature {
             crate::rules::Scope::Function => Ok(false),
             crate::rules::Scope::File => Ok(true),
             crate::rules::Scope::BasicBlock => Ok(false),
+            crate::rules::Scope::Instruction => Ok(false),
         }
     }
     pub fn evaluate(

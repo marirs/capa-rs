@@ -57,6 +57,7 @@ pub enum Scope {
     Function,
     File,
     BasicBlock,
+    Instruction
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
@@ -163,6 +164,7 @@ impl Rule {
             "function-name" => Ok(RuleFeatureType::FunctionName),
             "os" => Ok(RuleFeatureType::Os),
             "format" => Ok(RuleFeatureType::Format),
+            "class" => Ok(RuleFeatureType::Class),
             "arch" => Ok(RuleFeatureType::Arch),
             _ => {
                 if key.starts_with("number/") {
@@ -174,6 +176,14 @@ impl Rule {
                     let parts: Vec<&str> = key.split('/').collect();
                     let bitness = Rule::parse_int(&parts[1].trim()[1..])? as u32;
                     return Ok(RuleFeatureType::Offset(bitness));
+                }
+                if key.starts_with("operand[") && key.ends_with("].number") {
+                    let index = usize::from_str_radix(&key["operand[".len()..key.len() - "].number".len()], 10)?;
+                    return Ok(RuleFeatureType::OperandNumber(index));
+                }
+                if key.starts_with("operand[") && key.ends_with("].offset") {
+                    let index = usize::from_str_radix(&key["operand[".len()..key.len() - "].offset".len()], 10)?;
+                    return Ok(RuleFeatureType::OperandOffset(index));
                 }
                 Err(Error::InvalidRule(line!(), key.to_string()))
             }
@@ -234,16 +244,12 @@ impl Rule {
                 //we need to convert the value to the expected type.
                 //for example, from `number: 10 = CONST_FOO` we have
                 //the string "10" that needs to become the number 10.
-                #[allow(clippy::if_same_then_else)]
-                if let RuleFeatureType::Bytes = value_type {
-                    value = Value::Bytes(Rule::parse_bytes(v)?);
-                } else if let RuleFeatureType::Number(_) = value_type {
-                    value = Value::Int(Rule::parse_int(v)?);
-                } else if let RuleFeatureType::Offset(_) = value_type {
-                    value = Value::Int(Rule::parse_int(v)?);
-                } else {
-                    value = Value::Str(v.to_string());
-                }
+                value = match value_type{
+                    RuleFeatureType::Bytes => Value::Bytes(Rule::parse_bytes(v)?),
+                    RuleFeatureType::Number(_) | RuleFeatureType::OperandNumber(_) => Value::Int(Rule::parse_int(v)?),
+                    RuleFeatureType::Offset(_) | RuleFeatureType::OperandOffset(_) => Value::Int(Rule::parse_int(v)?),
+                    _ => Value::Str(v.to_string())
+                };
             }
         }
         Ok((value, dd))
@@ -274,6 +280,7 @@ impl Rule {
                 "function" => Scope::Function,
                 "file" => Scope::File,
                 "basic block" => Scope::BasicBlock,
+                "instruction" => Scope::Instruction,
                 _ => return Err(Error::InvalidRule(line!(), definition.to_string())),
             },
             Yaml::Null => Scope::Function,
@@ -479,6 +486,39 @@ impl Rule {
                     return Err(Error::InvalidRule(
                         line!(),
                         format!("{:?}: {:?}", key, vval),
+                    ));
+                }
+                "instruction" => {
+                    if let Scope::BasicBlock | Scope::Function = scope {
+                        let mut params = vec![];
+                        let mut description = "".to_string();
+                        let val = vval
+                            .as_vec()
+                            .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+                        for vv in val {
+                            let p = Rule::build_statements(vv, scope)?;
+                            match p {
+                                StatementElement::Description(s) => description = s.value,
+                                _ => params.push(p),
+                            }
+                        }
+//                        if params.len() != 1 {
+//                            return Err(Error::InvalidRule(
+//                                line!(),
+//                                format!("{:?}: {:?}", key, vval),
+//                            ));
+//                        }
+                        return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
+                            SubscopeStatement::new(
+                                Scope::Instruction,
+                                params[0].clone(),
+                                &description,
+                            )?,
+                        ))));
+                    }
+                    return Err(Error::InvalidRule(
+                        line!(),
+                        format!("{:?},  {:?}: {:?}", scope, key, vval),
                     ));
                 }
                 _ => {

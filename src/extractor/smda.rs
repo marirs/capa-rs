@@ -651,7 +651,7 @@ impl Extractor {
         //#     mov eax, [esi + ecx + 16384]
         if let Some(o) = &insn.operands {
             let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
-            for operand in operands {
+            for (i, operand) in operands.iter().enumerate() {
                 if !operand.contains("ptr") {
                     continue;
                 }
@@ -681,6 +681,12 @@ impl Extractor {
                 res.push((
                     crate::rules::features::Feature::Offset(
                         crate::rules::features::OffsetFeature::new(f.bitness, &number, "")?,
+                    ),
+                    insn.offset,
+                ));
+                res.push((
+                    crate::rules::features::Feature::OperandOffset(
+                        crate::rules::features::OperandOffsetFeature::new(&i, &number, "")?,
                     ),
                     insn.offset,
                 ));
@@ -758,12 +764,18 @@ impl Extractor {
                 //#    .text:00401145                 add     esp, 0Ch
                 return Ok(vec![]);
             }
-            for operand in &operands {
+            for (i, operand) in operands.iter().enumerate() {
                 if let Some(x) = operand.strip_prefix("0x") {
                     if let Ok(s) = i128::from_str_radix(x, 16) {
                         res.push((
                             crate::rules::features::Feature::Number(
                                 crate::rules::features::NumberFeature::new(f.bitness, &s, "")?,
+                            ),
+                            insn.offset,
+                        ));
+                        res.push((
+                            crate::rules::features::Feature::OperandNumber(
+                                crate::rules::features::OperandNumberFeature::new(&i, &s, "")?,
                             ),
                             insn.offset,
                         ));
@@ -776,6 +788,12 @@ impl Extractor {
                             ),
                             insn.offset,
                         ));
+                        res.push((
+                            crate::rules::features::Feature::OperandNumber(
+                                crate::rules::features::OperandNumberFeature::new(&i, &s, "")?,
+                            ),
+                            insn.offset,
+                        ));
                     }
                 } else if let Ok(s) = i128::from_str_radix(operand, 16) {
                     res.push((
@@ -784,6 +802,13 @@ impl Extractor {
                         ),
                         insn.offset,
                     ));
+                    res.push((
+                        crate::rules::features::Feature::OperandNumber(
+                            crate::rules::features::OperandNumberFeature::new(&i, &s, "")?,
+                        ),
+                        insn.offset,
+                    ));
+
                 }
             }
         }
