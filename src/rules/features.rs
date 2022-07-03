@@ -22,7 +22,7 @@ pub enum RuleFeatureType {
     Format,
     Arch,
     Namespace,
-    Class
+    Class,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -1032,7 +1032,6 @@ impl PartialEq for ClassFeature {
 }
 
 impl Eq for ClassFeature {}
-
 
 #[derive(Debug, Clone)]
 pub struct OsFeature {
