@@ -14,22 +14,20 @@ edition = "2021"
 [dependencies]
 hex = "0.4.3"
 itertools = "0.10.3"
-pdb = "0.7.0"
-petgraph = "0.6.0"
+pdb = "0.8.0"
+petgraph = "0.6.2"
 regex = "1.5"
 serde = { version = "1", features = ["derive"] }
 smda = "0.2.4"
 thiserror = "1"
 walkdir = "2.3.2"
 yaml-rust = "0.4.5"
-goblin = { version = "0.5.1", features = ["alloc"] }
+goblin = { version = "0.5.2", features = ["alloc"] }
 maplit = "1"
 dnfile = { git = "https://github.com/marirs/dnfile-rs.git", branch = "master" }
-#dnfile = { path = "../dnfile-rs"}
-
 
 [dev-dependencies]
-clap = { version = "3.1.18", features = ["cargo", "derive"] }
+clap = { version = "3.2.8", features = ["cargo", "derive"] }
 serde_json = "1"
 prettytable-rs = "0.8.0"
 
