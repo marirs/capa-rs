@@ -665,8 +665,8 @@ impl Extractor {
                 let re_number_hex =
                     regex::Regex::new(r"(?P<sign>[+\-]) (?P<num>0x[a-fA-F0-9]+)").unwrap();
                 let re_number_int = regex::Regex::new(r"(?P<sign>[+\-]) (?P<num>[0-9])").unwrap();
-                let number_hex = re_number_hex.captures(&operand);
-                let number_int = re_number_int.captures(&operand);
+                let number_hex = re_number_hex.captures(operand);
+                let number_int = re_number_int.captures(operand);
                 if let Some(n) = number_hex {
                     number = i128::from_str_radix(&n["num"][2..], 16)?;
                     if &n["num"] == "-" {

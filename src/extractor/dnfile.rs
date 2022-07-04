@@ -622,6 +622,6 @@ pub fn resolve_dotnet_token<'a>(pe: &'a dnfile::DnPe, token: &cil::instruction::
 }
 
 ///read user string from #US stream
-pub fn read_dotnet_user_string(pe: &dnfile::DnPe, token: &clr::token::Token) -> Result<String>{
+pub fn _read_dotnet_user_string(pe: &dnfile::DnPe, token: &clr::token::Token) -> Result<String>{
     Ok(pe.net()?.metadata.get_us(token.rid())?)
 }
