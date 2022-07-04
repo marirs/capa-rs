@@ -57,7 +57,7 @@ pub enum Scope {
     Function,
     File,
     BasicBlock,
-    Instruction
+    Instruction,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
@@ -178,11 +178,13 @@ impl Rule {
                     return Ok(RuleFeatureType::Offset(bitness));
                 }
                 if key.starts_with("operand[") && key.ends_with("].number") {
-                    let index = usize::from_str_radix(&key["operand[".len()..key.len() - "].number".len()], 10)?;
+                    let index =
+                        (&key["operand[".len()..key.len() - "].number".len()]).parse::<usize>()?;
                     return Ok(RuleFeatureType::OperandNumber(index));
                 }
                 if key.starts_with("operand[") && key.ends_with("].offset") {
-                    let index = usize::from_str_radix(&key["operand[".len()..key.len() - "].offset".len()], 10)?;
+                    let index =
+                        (&key["operand[".len()..key.len() - "].offset".len()]).parse::<usize>()?;
                     return Ok(RuleFeatureType::OperandOffset(index));
                 }
                 Err(Error::InvalidRule(line!(), key.to_string()))
@@ -244,11 +246,15 @@ impl Rule {
                 //we need to convert the value to the expected type.
                 //for example, from `number: 10 = CONST_FOO` we have
                 //the string "10" that needs to become the number 10.
-                value = match value_type{
+                value = match value_type {
                     RuleFeatureType::Bytes => Value::Bytes(Rule::parse_bytes(v)?),
-                    RuleFeatureType::Number(_) | RuleFeatureType::OperandNumber(_) => Value::Int(Rule::parse_int(v)?),
-                    RuleFeatureType::Offset(_) | RuleFeatureType::OperandOffset(_) => Value::Int(Rule::parse_int(v)?),
-                    _ => Value::Str(v.to_string())
+                    RuleFeatureType::Number(_) | RuleFeatureType::OperandNumber(_) => {
+                        Value::Int(Rule::parse_int(v)?)
+                    }
+                    RuleFeatureType::Offset(_) | RuleFeatureType::OperandOffset(_) => {
+                        Value::Int(Rule::parse_int(v)?)
+                    }
+                    _ => Value::Str(v.to_string()),
                 };
             }
         }
@@ -502,12 +508,12 @@ impl Rule {
                                 _ => params.push(p),
                             }
                         }
-//                        if params.len() != 1 {
-//                            return Err(Error::InvalidRule(
-//                                line!(),
-//                                format!("{:?}: {:?}", key, vval),
-//                            ));
-//                        }
+                        //                        if params.len() != 1 {
+                        //                            return Err(Error::InvalidRule(
+                        //                                line!(),
+                        //                                format!("{:?}: {:?}", key, vval),
+                        //                            ));
+                        //                        }
                         return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
                             SubscopeStatement::new(
                                 Scope::Instruction,

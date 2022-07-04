@@ -808,7 +808,6 @@ impl Extractor {
                         ),
                         insn.offset,
                     ));
-
                 }
             }
         }

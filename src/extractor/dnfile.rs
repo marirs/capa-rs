@@ -505,9 +505,10 @@ impl Extractor {
     }
 
     ///parse instruction namespace features
-    pub fn extract_insn_namespace_features(&self,
-                                           _f: &cil::function::Function,
-                                           insn: &cil::instruction::Instruction,
+    pub fn extract_insn_namespace_features(
+        &self,
+        _f: &cil::function::Function,
+        insn: &cil::instruction::Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         if !vec![
             OpCodeValue::Call,
@@ -520,15 +521,24 @@ impl Extractor {
             return Ok(vec![]);
         }
         let mut res = vec![];
-        let row = resolve_dotnet_token(&self.pe, &cil::instruction::Operand::Token(clr::token::Token::new(insn.operand.value()?)))?;
-        if let Some(s) = row.downcast_ref::<MemberRef>(){
-            if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeDef>(&s.class){
-                res.push((crate::rules::features::Feature::Namespace(crate::rules::features::NamespaceFeature::new(&ss.type_namespace, "")?),
-                          insn.offset as u64,
+        let row = resolve_dotnet_token(
+            &self.pe,
+            &cil::instruction::Operand::Token(clr::token::Token::new(insn.operand.value()?)),
+        )?;
+        if let Some(s) = row.downcast_ref::<MemberRef>() {
+            if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeDef>(&s.class) {
+                res.push((
+                    crate::rules::features::Feature::Namespace(
+                        crate::rules::features::NamespaceFeature::new(&ss.type_namespace, "")?,
+                    ),
+                    insn.offset as u64,
                 ))
-            } else if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeRef>(&s.class){
-                res.push((crate::rules::features::Feature::Namespace(crate::rules::features::NamespaceFeature::new(&ss.type_namespace, "")?),
-                          insn.offset as u64,
+            } else if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeRef>(&s.class) {
+                res.push((
+                    crate::rules::features::Feature::Namespace(
+                        crate::rules::features::NamespaceFeature::new(&ss.type_namespace, "")?,
+                    ),
+                    insn.offset as u64,
                 ));
             }
         }
@@ -536,9 +546,10 @@ impl Extractor {
     }
 
     ///parse instruction class features
-    pub fn extract_insn_class_features(&self,
-                                       _f: &cil::function::Function,
-                                       insn: &cil::instruction::Instruction,
+    pub fn extract_insn_class_features(
+        &self,
+        _f: &cil::function::Function,
+        insn: &cil::instruction::Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         if !vec![
             OpCodeValue::Call,
@@ -551,24 +562,40 @@ impl Extractor {
             return Ok(vec![]);
         }
         let mut res = vec![];
-        let row = resolve_dotnet_token(&self.pe, &cil::instruction::Operand::Token(clr::token::Token::new(insn.operand.value()?)))?;
-        if let Some(s) = row.downcast_ref::<MemberRef>(){
-            if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeDef>(&s.class){
-                res.push((crate::rules::features::Feature::Class(crate::rules::features::ClassFeature::new(&format!("{}.{}", ss.type_namespace, ss.type_name), "")?),
-                          insn.offset as u64,
+        let row = resolve_dotnet_token(
+            &self.pe,
+            &cil::instruction::Operand::Token(clr::token::Token::new(insn.operand.value()?)),
+        )?;
+        if let Some(s) = row.downcast_ref::<MemberRef>() {
+            if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeDef>(&s.class) {
+                res.push((
+                    crate::rules::features::Feature::Class(
+                        crate::rules::features::ClassFeature::new(
+                            &format!("{}.{}", ss.type_namespace, ss.type_name),
+                            "",
+                        )?,
+                    ),
+                    insn.offset as u64,
                 ))
-            } else if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeRef>(&s.class){
-                res.push((crate::rules::features::Feature::Class(crate::rules::features::ClassFeature::new(&format!("{}.{}", ss.type_namespace, ss.type_name), "")?),
-                          insn.offset as u64,
+            } else if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeRef>(&s.class) {
+                res.push((
+                    crate::rules::features::Feature::Class(
+                        crate::rules::features::ClassFeature::new(
+                            &format!("{}.{}", ss.type_namespace, ss.type_name),
+                            "",
+                        )?,
+                    ),
+                    insn.offset as u64,
                 ));
             }
         }
         Ok(res)
     }
 
-    pub fn extract_unmanaged_call_characteristic_features(&self,
-                                                              _f: &cil::function::Function,
-                                                              insn: &cil::instruction::Instruction,
+    pub fn extract_unmanaged_call_characteristic_features(
+        &self,
+        _f: &cil::function::Function,
+        insn: &cil::instruction::Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         if !vec![
             OpCodeValue::Call,
@@ -582,7 +609,7 @@ impl Extractor {
         }
         let mut res = vec![];
         let token = resolve_dotnet_token(&self.pe, &insn.operand)?;
-        if let Some(s) = token.downcast_ref::<MethodDef>(){
+        if let Some(s) = token.downcast_ref::<MethodDef>() {
             if s.flags.contains(&dnfile::stream::meta_data_tables::mdtables::enums::ClrMethodAttr::AttrFlag(dnfile::stream::meta_data_tables::mdtables::enums::CorMethodAttrFlag::PinvokeImpl))
                 || s.impl_flags.contains(&dnfile::stream::meta_data_tables::mdtables::enums::ClrMethodImpl::MethodManaged(dnfile::stream::meta_data_tables::mdtables::enums::CorMethodManaged::Unmanaged))
                 || s.impl_flags.contains(&dnfile::stream::meta_data_tables::mdtables::enums::ClrMethodImpl::MethodCodeType(dnfile::stream::meta_data_tables::mdtables::enums::CorMethodCodeType::Native)){
@@ -605,16 +632,19 @@ pub fn is_dotnet_mixed_mode(pe: &dnfile::DnPe) -> Result<bool> {
 }
 
 ///map generic token to string or table row
-pub fn resolve_dotnet_token<'a>(pe: &'a dnfile::DnPe, token: &cil::instruction::Operand) -> Result<&'a dyn std::any::Any>{
-//    if let cil::instruction::Operand::StringToken(t) = token{
-//        let user_string = read_dotnet_user_string(pe, t);
-//        if let Ok(s) = user_string{
-//            return Ok(s);
-//        } else {
-//            return Err(crate::Error::InvalidToken(format!("{:?}", token)));
-//        }
-//    }
-    if let cil::instruction::Operand::Token(t) = token{
+pub fn resolve_dotnet_token<'a>(
+    pe: &'a dnfile::DnPe,
+    token: &cil::instruction::Operand,
+) -> Result<&'a dyn std::any::Any> {
+    //    if let cil::instruction::Operand::StringToken(t) = token{
+    //        let user_string = read_dotnet_user_string(pe, t);
+    //        if let Ok(s) = user_string{
+    //            return Ok(s);
+    //        } else {
+    //            return Err(crate::Error::InvalidToken(format!("{:?}", token)));
+    //        }
+    //    }
+    if let cil::instruction::Operand::Token(t) = token {
         let table = pe.net()?.md_table_by_index(&t.table())?;
         return Ok(table.get_row(t.rid() - 1)?.get_row().as_any());
     }
@@ -622,6 +652,6 @@ pub fn resolve_dotnet_token<'a>(pe: &'a dnfile::DnPe, token: &cil::instruction::
 }
 
 ///read user string from #US stream
-pub fn _read_dotnet_user_string(pe: &dnfile::DnPe, token: &clr::token::Token) -> Result<String>{
+pub fn _read_dotnet_user_string(pe: &dnfile::DnPe, token: &clr::token::Token) -> Result<String> {
     Ok(pe.net()?.metadata.get_us(token.rid())?)
 }

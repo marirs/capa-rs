@@ -24,7 +24,7 @@ pub enum RuleFeatureType {
     Namespace,
     Class,
     OperandNumber(usize),
-    OperandOffset(usize)
+    OperandOffset(usize),
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -145,16 +145,12 @@ impl Feature {
                 &value.get_str()?,
                 description,
             )?)),
-            RuleFeatureType::OperandNumber(a) => Ok(Feature::OperandNumber(OperandNumberFeature::new(
-                &a,
-                &value.get_int()?,
-                description,
-            )?)),
-            RuleFeatureType::OperandOffset(a) => Ok(Feature::OperandOffset(OperandOffsetFeature::new(
-                &a,
-                &value.get_int()? as &i128,
-                description,
-            )?)),
+            RuleFeatureType::OperandNumber(a) => Ok(Feature::OperandNumber(
+                OperandNumberFeature::new(&a, &value.get_int()?, description)?,
+            )),
+            RuleFeatureType::OperandOffset(a) => Ok(Feature::OperandOffset(
+                OperandOffsetFeature::new(&a, &value.get_int()? as &i128, description)?,
+            )),
         }
     }
 
@@ -522,7 +518,10 @@ impl OperandOffsetFeature {
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
         if features.contains_key(&Feature::OperandOffset(self.clone())) {
-            return Ok((true, features[&Feature::OperandOffset(self.clone())].clone()));
+            return Ok((
+                true,
+                features[&Feature::OperandOffset(self.clone())].clone(),
+            ));
         }
         Ok((false, vec![]))
     }
@@ -621,7 +620,10 @@ impl OperandNumberFeature {
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
         if features.contains_key(&Feature::OperandNumber(self.clone())) {
-            return Ok((true, features[&Feature::OperandNumber(self.clone())].clone()));
+            return Ok((
+                true,
+                features[&Feature::OperandNumber(self.clone())].clone(),
+            ));
         }
         Ok((false, vec![]))
     }
@@ -642,7 +644,6 @@ impl PartialEq for OperandNumberFeature {
 }
 
 impl Eq for OperandNumberFeature {}
-
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct ApiFeature {
