@@ -24,8 +24,8 @@ walkdir = "2.3.2"
 yaml-rust = "0.4.5"
 goblin = { version = "0.5.1", features = ["alloc"] }
 maplit = "1"
-dnfile = { git = "https://github.com/marirs/dnfile-rs.git", branch = "master" }
-#dnfile = { path = "../dnfile-rs"}
+#dnfile = { git = "https://github.com/marirs/dnfile-rs.git", branch = "master" }
+dnfile = { path = "../dnfile-rs"}
 
 
 [dev-dependencies]

@@ -49,7 +49,8 @@ pub enum Error {
     DescriptionEvaluationError,
     #[error("range statement error")]
     RangeStatementError,
-
+    #[error("invalid token {0}")]
+    InvalidToken(String),
     #[error("not implemented")]
     NoiImplementedError,
 }
