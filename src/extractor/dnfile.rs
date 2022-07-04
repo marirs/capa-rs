@@ -372,7 +372,7 @@ impl Extractor {
         insn: &cil::instruction::Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        if vec![
+        if !vec![
             OpCodeValue::Call,
             OpCodeValue::Callvirt,
             OpCodeValue::Jmp,
@@ -408,7 +408,7 @@ impl Extractor {
             let ss = name.split('.').collect::<Vec<&str>>();
             for symbol_variant in crate::extractor::smda::generate_symbols(
                 &Some(ss[0].to_string()),
-                &Some(ss[2].to_string()),
+                &Some(ss[1].to_string()),
             )? {
                 res.push((
                     crate::rules::features::Feature::Api(crate::rules::features::ApiFeature::new(
