@@ -1185,7 +1185,6 @@ impl PartialEq for ClassFeature {
 
 impl Eq for ClassFeature {}
 
-
 #[derive(Debug, Clone)]
 pub struct OsFeature {
     value: String,

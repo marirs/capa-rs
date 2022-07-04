@@ -1,4 +1,4 @@
-#![allow(clippy::type_complexity)]
+#![allow(clippy::type_complexity, clippy::borrowed_box)]
 pub(crate) mod consts;
 mod extractor;
 pub mod rules;
