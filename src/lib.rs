@@ -58,7 +58,6 @@ impl FileCapabilities {
         {
             file_capabilities = FileCapabilities::new(&extractor)?;
         }
-
         #[cfg(not(feature = "verbose"))]
         {
             let (capabilities, _counts) = find_capabilities(&rules, &extractor, logger)?;
@@ -74,7 +73,7 @@ impl FileCapabilities {
     }
 
     fn new(
-        #[cfg(feature = "properties")] extractor: &Box<dyn extractor::Extractor>,
+       #[cfg(feature = "properties")] extractor: &Box<dyn extractor::Extractor>,
     ) -> Result<FileCapabilities> {
         Ok(FileCapabilities {
             #[cfg(feature = "properties")]

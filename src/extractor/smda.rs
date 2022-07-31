@@ -113,7 +113,7 @@ impl super::Extractor for Extractor {
         res.extend(self.extract_file_export_names()?);
         res.extend(self.extract_file_import_names()?);
         res.extend(self.extract_file_section_names()?);
-        //        res.extend(self.extract_file_strings(pbytes)?);
+        res.extend(self.extract_file_strings()?);
         //        res.extend(self.extract_file_function_names(pbytes)?);
         res.extend(self.extract_file_format()?);
         Ok(res)
@@ -310,17 +310,17 @@ impl Extractor {
         Ok(res)
     }
 
-    pub fn extract_file_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-        let mut res = vec![];
-        //        res.extend(self.extract_file_embedded_pe()?);
-        res.extend(self.extract_file_export_names()?);
-        res.extend(self.extract_file_import_names()?);
-        res.extend(self.extract_file_section_names()?);
-        //        res.extend(self.extract_file_strings(pbytes)?);
-        //        res.extend(self.extract_file_function_names(pbytes)?);
-        res.extend(self.extract_file_format()?);
-        Ok(res)
-    }
+//    pub fn extract_file_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+//        let mut res = vec![];
+//        //        res.extend(self.extract_file_embedded_pe()?);
+//        res.extend(self.extract_file_export_names()?);
+//        res.extend(self.extract_file_import_names()?);
+//        res.extend(self.extract_file_section_names()?);
+//        res.extend(self.extract_file_strings()?);
+//        //        res.extend(self.extract_file_function_names(pbytes)?);
+//        res.extend(self.extract_file_format()?);
+//        Ok(res)
+//    }
 
     fn extract_file_format(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
@@ -390,6 +390,14 @@ impl Extractor {
                     *o as u64,
                 ));
             }
+        }
+        Ok(res)
+    }
+
+    fn extract_file_strings(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+        let mut res = vec![];
+        for (s, a) in extract_file_strings(&self.buf)?{
+            res.push((crate::rules::features::Feature::String(crate::rules::features::StringFeature::new(&s, "")?), a));
         }
         Ok(res)
     }
@@ -1119,4 +1127,61 @@ pub fn to_u16(src: &[u8]) -> Result<Vec<u16>> {
         i += 2;
     }
     Ok(res)
+}
+
+fn extract_file_strings(buf: &[u8]) -> Result<Vec<(String, u64)>>{
+    let mut res = vec![];
+    for (s, a) in extract_ascii_strings(buf, 4)?{
+        res.push((s, a));
+    }
+    for (s, a) in extract_unicode_strings(buf, 4)?{
+        res.push((s, a));
+    }
+    Ok(res)
+}
+
+const ASCII_BYTE: &str = r##" !"#$%&'()*+,-\./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ\[\]^_\x60abcdefghijklmnopqrstuvwxyz{|}\\~\t"##;
+const SLICE_SIZE: usize = 4096;
+
+lazy_static::lazy_static!{
+    static ref REPEATS: Vec<u8> = vec![b'A', 0, 0xfe, 0xff];
+}
+
+pub fn extract_ascii_strings(data: &[u8], min_length: usize) -> Result<Vec<(String, u64)>>{
+    if REPEATS.contains(&data[0]) && buf_filled_with(data, &data[0]){
+        return Ok(vec![]);
+
+    }
+    let re = regex::bytes::Regex::new(&format!(r##"([{}]{{{},}})"##, ASCII_BYTE, min_length))?;
+    Ok(re.find_iter(data).map(|d| (std::string::String::from_utf8_lossy(d.as_bytes()).to_string(), d.start() as u64)).collect())
+
+}
+
+pub fn extract_unicode_strings(data: &[u8], min_length: usize) -> Result<Vec<(String, u64)>>{
+    if REPEATS.contains(&data[0]) && buf_filled_with(data, &data[0]){
+        return Ok(vec![]);
+
+    }
+    let re = regex::bytes::Regex::new(&format!(r##"((?:[{}]\x00){{{},}})"##, ASCII_BYTE, min_length))?;
+    Ok(re.find_iter(data).map(|d| {
+        let dd = (0..(d.end()+1 - d.start())/2).map(|i| u16::from_be_bytes([d.as_bytes()[2*i], d.as_bytes()[2*i+1]])).collect::<Vec<u16>>();
+        (std::string::String::from_utf16_lossy(&dd).to_string(), d.start() as u64)
+    }).collect())
+}
+
+fn buf_filled_with(data: &[u8], character: &u8) -> bool{
+    let dupe_chunk = vec![*character; SLICE_SIZE];
+    let mut offset = 0;
+    while offset < data.len(){
+        let new_chunk = if offset + SLICE_SIZE >= data.len(){
+            data[offset..].to_vec()
+        } else {
+            data[offset..offset + SLICE_SIZE].to_vec()
+        };
+        if dupe_chunk[..new_chunk.len()] != new_chunk{
+            return false;
+        }
+        offset += SLICE_SIZE;
+    }
+    true
 }
