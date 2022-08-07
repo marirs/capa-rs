@@ -1183,7 +1183,7 @@ pub fn extract_unicode_strings(data: &[u8], min_length: usize) -> Result<Vec<(St
                 .map(|i| u16::from_be_bytes([d.as_bytes()[2 * i], d.as_bytes()[2 * i + 1]]))
                 .collect::<Vec<u16>>();
             (
-                std::string::String::from_utf16_lossy(&dd).to_string(),
+                std::string::String::from_utf16_lossy(&dd),
                 d.start() as u64,
             )
         })
