@@ -5,6 +5,8 @@
 [![macOS](https://github.com/marirs/capa-rs/actions/workflows/macos.yml/badge.svg)](https://github.com/marirs/capa-rs/actions/workflows/macos.yml)
 [![Windows](https://github.com/marirs/capa-rs/actions/workflows/windows.yml/badge.svg)](https://github.com/marirs/capa-rs/actions/workflows/windows.yml)
 
+Test it online: https://www.analyze.rs/
+
 capa detects capabilities in executable files. You run it against a PE, ELF, or shellcode file and it tells you what it thinks the program can do. 
 For example, it might suggest that the file is a backdoor, is capable of installing services, or relies on HTTP to communicate.
 
