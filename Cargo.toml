@@ -18,12 +18,11 @@ pdb = "0.8.0"
 petgraph = "0.6.2"
 regex = "1.5"
 serde = { version = "1", features = ["derive"] }
-smda = { git  = "https://github.com/marirs/smda-rs.git"}
-#smda = { path = "../smda-rs" }
+smda = "0.2.5"
 thiserror = "1"
 walkdir = "2.3.2"
 yaml-rust = "0.4.5"
-goblin = { version = "0.5.2", features = ["alloc"] }
+goblin = { version = "0.5.3", features = ["alloc"] }
 maplit = "1"
 dnfile = { git = "https://github.com/marirs/dnfile-rs.git", branch = "master" }
 lazy_static = "1.4.0"
