@@ -73,7 +73,7 @@ impl FileCapabilities {
     }
 
     fn new(
-       #[cfg(feature = "properties")] extractor: &Box<dyn extractor::Extractor>,
+        #[cfg(feature = "properties")] extractor: &Box<dyn extractor::Extractor>,
     ) -> Result<FileCapabilities> {
         Ok(FileCapabilities {
             #[cfg(feature = "properties")]
