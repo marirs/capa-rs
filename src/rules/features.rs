@@ -1248,10 +1248,10 @@ impl FormatFeature {
     }
     pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
         match scope {
-            crate::rules::Scope::Function => Ok(false),
+            crate::rules::Scope::Function => Ok(true),
             crate::rules::Scope::File => Ok(true),
-            crate::rules::Scope::BasicBlock => Ok(false),
-            crate::rules::Scope::Instruction => Ok(false),
+            crate::rules::Scope::BasicBlock => Ok(true),
+            crate::rules::Scope::Instruction => Ok(true),
         }
     }
     pub fn evaluate(
