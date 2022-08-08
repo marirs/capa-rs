@@ -721,7 +721,7 @@ pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
     {
         let fname = entry.path().to_str().unwrap().to_string();
         if fname.ends_with(".yml") || fname.ends_with(".yaml") {
-            let mut rule = match Rule::from_yaml_file(&fname){
+            let mut rule = match Rule::from_yaml_file(&fname) {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("warn: rule {} error: {:?}", fname, e);
