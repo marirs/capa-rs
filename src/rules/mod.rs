@@ -149,6 +149,9 @@ impl Rule {
     fn parse_feature_type(key: &str) -> Result<RuleFeatureType> {
         match key {
             "api" => Ok(RuleFeatureType::Api),
+            "property/read"=>Ok(RuleFeatureType::PropretyRead),
+            "property/write" =>Ok(RuleFeatureType::PropretyWrite),
+            "namespace"=> Ok(RuleFeatureType::StringFactory),
             "string" => Ok(RuleFeatureType::StringFactory),
             "substring" => Ok(RuleFeatureType::Substring),
             "bytes" => Ok(RuleFeatureType::Bytes),
