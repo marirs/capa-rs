@@ -58,21 +58,33 @@ impl super::Function for Function {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DnMethod {
     name: String,
     namespace: String,
     class_name: String,
     token: u64,
+    access: Option<crate::rules::features::FeatureAccess>,
 }
 
 impl DnMethod {
-    pub fn new(token: u64, namespace: &str, class_name: &str, method_name: &str) -> Self {
+    pub fn new(
+        token: u64,
+        namespace: &str,
+        class_name: &str,
+        method_name: &str,
+        access: Option<crate::rules::features::FeatureAccess>,
+    ) -> Self {
         Self {
             token,
             namespace: namespace.to_string(),
             class_name: class_name.to_string(),
-            name: method_name.to_string(),
+            name: match method_name {
+                ".ctor" => "ctor".to_string(),
+                ".cctor" => "cctor".to_string(),
+                _ => method_name.to_string(),
+            },
+            access,
         }
     }
 }
@@ -81,6 +93,11 @@ impl std::fmt::Display for DnMethod {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}.{}::{}", self.namespace, self.class_name, self.name)
     }
+}
+
+enum Callee {
+    Str(String),
+    Method(DnMethod),
 }
 
 #[derive(Debug)]
@@ -184,6 +201,7 @@ impl super::Extractor for Extractor {
         let f: &Function = f.as_any().downcast_ref::<Function>().unwrap();
         let insn: &Instruction = insn.as_any().downcast_ref::<Instruction>().unwrap();
         let mut ss = self.extract_insn_api_features(&f.f, &insn.i)?;
+        ss.extend(self.extract_insn_propery_features(&f.f, &insn.i)?);
         ss.extend(self.extract_insn_number_features(&f.f, &insn.i)?);
         ss.extend(self.extract_insn_string_features(&f.f, &insn.i)?);
         ss.extend(self.extract_insn_namespace_features(&f.f, &insn.i)?);
@@ -308,7 +326,7 @@ impl Extractor {
         &self,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        for method in self.get_dotnet_managed_methods()? {
+        for (_, method) in self.get_dotnet_managed_methods()? {
             res.push((
                 crate::rules::features::Feature::FunctionName(
                     crate::rules::features::FunctionNameFeature::new(&method.to_string(), "")?,
@@ -319,30 +337,119 @@ impl Extractor {
         Ok(res)
     }
 
-    pub fn get_dotnet_managed_methods(&self) -> Result<Vec<DnMethod>> {
-        let mut res = vec![];
+    pub fn get_dotnet_managed_methods(&self) -> Result<HashMap<u64, DnMethod>> {
+        let mut res = HashMap::new();
         let typedef = self.pe.net()?.md_table("TypeDef")?;
         for rid in 0..typedef.row_count() {
             let row = typedef.row::<TypeDef>(rid)?;
             for metdef in &row.method_list {
                 let token = calculate_dotnet_token_value("MemberRef", rid + 1)?;
-                res.push(DnMethod::new(
+                res.insert(
                     token,
-                    &row.type_namespace,
-                    &row.type_name,
-                    &self
-                        .pe
-                        .net()?
-                        .resolve_coded_index::<MethodDef>(metdef)?
-                        .name,
-                ));
+                    DnMethod::new(
+                        token,
+                        &row.type_namespace,
+                        &row.type_name,
+                        &self
+                            .pe
+                            .net()?
+                            .resolve_coded_index::<MethodDef>(metdef)?
+                            .name,
+                        None,
+                    ),
+                );
             }
         }
         Ok(res)
     }
 
-    pub fn get_dotnet_managed_imports(&self) -> Result<Vec<(u64, String)>> {
-        let mut res = vec![];
+    pub fn get_dotnet_property_map(&self, property_row: &Property) -> Result<Option<TypeDef>> {
+        let property_map = self.pe.net()?.md_table("PropertyMap")?;
+        for rid in 0..property_map.row_count() {
+            let row = property_map.row::<PropertyMap>(rid)?;
+            for i in &row.property_list {
+                if i.name == property_row.name {
+                    return Ok(Some(
+                        self.pe
+                            .net()?
+                            .resolve_coded_index::<TypeDef>(&row.parent)?
+                            .clone(),
+                    ));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn get_dotnet_properties(&self) -> Result<HashMap<u64, DnMethod>> {
+        let mut res = HashMap::new();
+        let method_semantics = if let Ok(s) = self.pe.net()?.md_table("MethodSemantics") {
+            s
+        } else {
+            return Ok(res);
+        };
+        for rid in 0..method_semantics.row_count() {
+            let row = method_semantics.row::<MethodSemantics>(rid)?;
+            let typedef_row = match self.get_dotnet_property_map(
+                self.pe
+                    .net()?
+                    .resolve_coded_index::<Property>(&row.association)?,
+            )? {
+                Some(s) => s,
+                None => continue,
+            };
+            let token = calculate_dotnet_token_value("MethodSemantics", rid + 1)?;
+            let access = if row
+                .semantics
+                .contains(&enums::ClrMethodSemanticsAttr::Setter)
+            {
+                Some(crate::rules::features::FeatureAccess::Write)
+            } else if row
+                .semantics
+                .contains(&enums::ClrMethodSemanticsAttr::Getter)
+            {
+                Some(crate::rules::features::FeatureAccess::Read)
+            } else {
+                None
+            };
+            res.insert(
+                token,
+                DnMethod::new(
+                    token,
+                    &typedef_row.type_namespace,
+                    &typedef_row.type_name,
+                    &self
+                        .pe
+                        .net()?
+                        .resolve_coded_index::<Property>(&row.association)?
+                        .name,
+                    access,
+                ),
+            );
+        }
+        Ok(res)
+    }
+
+    /// get fields from TypeDef table
+    pub fn get_dotnet_fields(&self) -> Result<HashMap<u64, DnMethod>> {
+        let mut res = HashMap::new();
+        let type_defs = self.pe.net()?.md_table("TypeDef")?;
+        for rid in 0..type_defs.row_count() {
+            let row = type_defs.row::<TypeDef>(rid)?;
+            for index in &row.field_list {
+                let ss = self.pe.net()?.resolve_coded_index::<Field>(index)?;
+                let token = calculate_dotnet_token_value("TypeDef", rid + 1)?;
+                res.insert(
+                    token,
+                    DnMethod::new(token, &row.type_namespace, &row.type_name, &ss.name, None),
+                );
+            }
+        }
+        Ok(res)
+    }
+
+    pub fn get_dotnet_managed_imports(&self) -> Result<HashMap<u64, String>> {
+        let mut res = HashMap::new();
         let memref = self.pe.net()?.md_table("MemberRef")?;
         let typeref = self.pe.net()?.md_table("TypeRef")?;
         for rid in 0..memref.row_count() {
@@ -356,13 +463,13 @@ impl Extractor {
                 "{}.{}::{}",
                 typeref_row.type_namespace, typeref_row.type_name, row.name
             );
-            res.push((token, imp))
+            res.insert(token, imp);
         }
         Ok(res)
     }
 
-    pub fn get_dotnet_unmanaged_imports(&self) -> Result<Vec<(u64, String)>> {
-        let mut res = vec![];
+    pub fn get_dotnet_unmanaged_imports(&self) -> Result<HashMap<u64, String>> {
+        let mut res = HashMap::new();
         if let Ok(implmap) = self.pe.net()?.md_table("ImplMap") {
             for rid in 0..implmap.row_count() {
                 let row = implmap.row::<ImplMap>(rid)?;
@@ -379,7 +486,7 @@ impl Extractor {
                 if !dll.is_empty() && dll.contains('.') {
                     dll = dll.split('.').collect::<Vec<&str>>()[0].to_string();
                 }
-                res.push((token, format!("{}.{}", dll, symbol)));
+                res.insert(token, format!("{}.{}", dll, symbol));
             }
         }
         Ok(res)
@@ -400,6 +507,24 @@ impl Extractor {
         }
     }
 
+    fn get_callee(&self, token: u64) -> Result<Option<Callee>> {
+        // map dotnet token to un/managed method
+        match self.get_dotnet_managed_imports()?.get(&token) {
+            None => {
+                // we must check unmanaged imports before managed methods because we map forwarded managed methods
+                // to their unmanaged imports; we prefer a forwarded managed method be mapped to its unmanaged import for analysis
+                match self.get_dotnet_unmanaged_imports()?.get(&token) {
+                    None => match self.get_dotnet_managed_methods()?.get(&token) {
+                        None => Ok(None),
+                        Some(s) => Ok(Some(Callee::Method(s.clone()))),
+                    },
+                    Some(s) => Ok(Some(Callee::Str(s.clone()))),
+                }
+            }
+            Some(s) => Ok(Some(Callee::Str(s.clone()))),
+        }
+    }
+
     pub fn extract_insn_api_features(
         &self,
         _f: &cil::function::Function,
@@ -411,49 +536,197 @@ impl Extractor {
             OpCodeValue::Callvirt,
             OpCodeValue::Jmp,
             OpCodeValue::Calli,
+            OpCodeValue::Newobj,
         ]
         .contains(&insn.opcode.value)
         {
             return Ok(vec![]);
         }
-        let mut name = None;
-        let managed_imports = self.get_dotnet_managed_imports()?;
-        let unmanaged_imports = self.get_dotnet_unmanaged_imports()?;
-        for (token, imp) in managed_imports.iter().chain(unmanaged_imports.iter()) {
-            if let Ok(operand_value) = insn.operand.value() {
-                if *token == operand_value as u64 {
-                    name = Some(imp);
+
+        match self.get_callee(insn.operand.value()? as u64)? {
+            None => {}
+            Some(Callee::Str(s)) => {
+                let ss = s.split('.').collect::<Vec<&str>>();
+                for symbol_variant in crate::extractor::smda::generate_symbols(
+                    &Some(ss[0].to_string()),
+                    &Some(ss[1].to_string()),
+                )? {
+                    res.push((
+                        crate::rules::features::Feature::Api(
+                            crate::rules::features::ApiFeature::new(&symbol_variant, "")?,
+                        ),
+                        insn.offset as u64,
+                    ));
+                }
+            }
+            Some(Callee::Method(m)) => {
+                if m.name.starts_with("get_") || m.name.starts_with("set_") {
+                    let row = resolve_dotnet_token(
+                        &self.pe,
+                        &cil::instruction::Operand::Token(clr::token::Token::new(
+                            insn.operand.value()?,
+                        )),
+                    )?;
+                    if let Some(_) = row.downcast_ref::<MethodDef>() {
+                        if let Some(_) = self
+                            .get_dotnet_properties()?
+                            .get(&(insn.operand.value()? as u64))
+                        {
+                            return Ok(res);
+                        }
+                    } else if let Some(_) = row.downcast_ref::<MemberRef>() {
+                        return Ok(res);
+                    }
+                    res.push((
+                        crate::rules::features::Feature::Api(
+                            crate::rules::features::ApiFeature::new(&m.to_string(), "")?,
+                        ),
+                        insn.offset as u64,
+                    ));
                 }
             }
         }
-        let name = match name {
-            None => return Ok(vec![]),
-            Some(s) => s,
-        };
+        Ok(res)
+    }
 
-        if name.contains("::") {
-            res.push((
-                crate::rules::features::Feature::Api(crate::rules::features::ApiFeature::new(
-                    name, "",
-                )?),
-                insn.offset as u64,
-            ));
-        } else {
-            let ss = name.split('.').collect::<Vec<&str>>();
-            for symbol_variant in crate::extractor::smda::generate_symbols(
-                &Some(ss[0].to_string()),
-                &Some(ss[1].to_string()),
-            )? {
-                res.push((
-                    crate::rules::features::Feature::Api(crate::rules::features::ApiFeature::new(
-                        &symbol_variant,
-                        "",
-                    )?),
+    /// parse instruction property features
+    pub fn extract_insn_propery_features(
+        &self,
+        _f: &cil::function::Function,
+        insn: &cil::instruction::Instruction,
+    ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+        if vec![
+            OpCodeValue::Call,
+            OpCodeValue::Callvirt,
+            OpCodeValue::Jmp,
+            OpCodeValue::Calli,
+        ]
+        .contains(&insn.opcode.value)
+        {
+            let operand = resolve_dotnet_token(
+                &self.pe,
+                &cil::instruction::Operand::Token(clr::token::Token::new(insn.operand.value()?)),
+            )?;
+            if let Some(_operand) = operand.downcast_ref::<MethodDef>() {
+                // check if the method belongs to the MethodDef table and whether it is used to access a property
+                if let Some(prop) = self
+                    .get_dotnet_properties()?
+                    .get(&(insn.operand.value()? as u64))
+                {
+                    return Ok(vec![(
+                        crate::rules::features::Feature::Property(
+                            crate::rules::features::PropertyFeature::new(
+                                &prop.to_string(),
+                                prop.access.clone(),
+                                "",
+                            )?,
+                        ),
+                        insn.offset as u64,
+                    )]);
+                }
+            } else if let Some(operand) = operand.downcast_ref::<MemberRef>() {
+                if !operand.name.starts_with("get_") && !operand.name.starts_with("set_") {
+                    return Ok(vec![]);
+                }
+                // if the method belongs to the MemberRef table, we
+                // assume it is used to access a property
+                let (operand_class_type_namespace, operand_class_type_name) =
+                    match operand.class.table() {
+                        "TypeRef" => {
+                            let rr = self
+                                .pe
+                                .net()?
+                                .resolve_coded_index::<TypeRef>(&operand.class)?;
+                            (rr.type_namespace.clone(), rr.type_name.clone())
+                        }
+                        "TypeDef" => {
+                            let rr = self
+                                .pe
+                                .net()?
+                                .resolve_coded_index::<TypeDef>(&operand.class)?;
+                            (rr.type_namespace.clone(), rr.type_name.clone())
+                        }
+                        _ => {
+                            return Ok(vec![]);
+                        }
+                    };
+                return Ok(vec![(
+                    crate::rules::features::Feature::Property(
+                        crate::rules::features::PropertyFeature::new(
+                            &format!(
+                                "{}.{}::{}",
+                                operand_class_type_namespace,
+                                operand_class_type_name,
+                                &operand.name[4..]
+                            ),
+                            if operand.name.starts_with("get_") {
+                                Some(crate::rules::features::FeatureAccess::Read)
+                            } else if operand.name.starts_with("set_") {
+                                Some(crate::rules::features::FeatureAccess::Write)
+                            } else {
+                                None
+                            },
+                            "",
+                        )?,
+                    ),
                     insn.offset as u64,
-                ));
+                )]);
+            }
+        } else if vec![
+            OpCodeValue::Ldfld,
+            OpCodeValue::Ldflda,
+            OpCodeValue::Ldsfld,
+            OpCodeValue::Ldsflda,
+        ]
+        .contains(&insn.opcode.value)
+        {
+            let operand = resolve_dotnet_token(
+                &self.pe,
+                &cil::instruction::Operand::Token(clr::token::Token::new(insn.operand.value()?)),
+            )?;
+            if let Some(_operand) = operand.downcast_ref::<Field>() {
+                // determine whether the operand is a field by checking if it belongs to the Field table
+                if let Some(field) = self
+                    .get_dotnet_fields()?
+                    .get(&(insn.operand.value()? as u64))
+                {
+                    return Ok(vec![(
+                        crate::rules::features::Feature::Property(
+                            crate::rules::features::PropertyFeature::new(
+                                &field.to_string(),
+                                Some(crate::rules::features::FeatureAccess::Read),
+                                "",
+                            )?,
+                        ),
+                        insn.offset as u64,
+                    )]);
+                }
+            }
+        } else if vec![OpCodeValue::Stfld, OpCodeValue::Stsfld].contains(&insn.opcode.value) {
+            let operand = resolve_dotnet_token(
+                &self.pe,
+                &cil::instruction::Operand::Token(clr::token::Token::new(insn.operand.value()?)),
+            )?;
+            if let Some(_operand) = operand.downcast_ref::<Field>() {
+                // determine whether the operand is a field by checking if it belongs to the Field table
+                if let Some(field) = self
+                    .get_dotnet_fields()?
+                    .get(&(insn.operand.value()? as u64))
+                {
+                    return Ok(vec![(
+                        crate::rules::features::Feature::Property(
+                            crate::rules::features::PropertyFeature::new(
+                                &field.to_string(),
+                                Some(crate::rules::features::FeatureAccess::Write),
+                                "",
+                            )?,
+                        ),
+                        insn.offset as u64,
+                    )]);
+                }
             }
         }
-        Ok(res)
+        Ok(vec![])
     }
 
     pub fn extract_insn_number_features(
@@ -515,17 +788,24 @@ impl Extractor {
             OpCodeValue::Callvirt,
             OpCodeValue::Jmp,
             OpCodeValue::Calli,
+            OpCodeValue::Ldfld,
+            OpCodeValue::Ldflda,
+            OpCodeValue::Ldsfld,
+            OpCodeValue::Ldsflda,
+            OpCodeValue::Stfld,
+            OpCodeValue::Stsfld,
+            OpCodeValue::Newobj,
         ]
         .contains(&insn.opcode.value)
         {
             return Ok(vec![]);
         }
         let mut res = vec![];
-        let row = resolve_dotnet_token(
+        let operand = resolve_dotnet_token(
             &self.pe,
             &cil::instruction::Operand::Token(clr::token::Token::new(insn.operand.value()?)),
         )?;
-        if let Some(s) = row.downcast_ref::<MemberRef>() {
+        if let Some(s) = operand.downcast_ref::<MemberRef>() {
             if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeDef>(&s.class) {
                 res.push((
                     crate::rules::features::Feature::Namespace(
@@ -537,6 +817,27 @@ impl Extractor {
                 res.push((
                     crate::rules::features::Feature::Namespace(
                         crate::rules::features::NamespaceFeature::new(&ss.type_namespace, "")?,
+                    ),
+                    insn.offset as u64,
+                ));
+            }
+        } else if let Some(_) = operand.downcast_ref::<MethodDef>() {
+            if let Some(Callee::Method(dm)) = self.get_callee(insn.operand.value()? as u64)? {
+                res.push((
+                    crate::rules::features::Feature::Namespace(
+                        crate::rules::features::NamespaceFeature::new(&dm.namespace, "")?,
+                    ),
+                    insn.offset as u64,
+                ));
+            }
+        } else if let Some(_) = operand.downcast_ref::<Field>() {
+            if let Some(field) = self
+                .get_dotnet_fields()?
+                .get(&(insn.operand.value()? as u64))
+            {
+                res.push((
+                    crate::rules::features::Feature::Namespace(
+                        crate::rules::features::NamespaceFeature::new(&field.namespace, "")?,
                     ),
                     insn.offset as u64,
                 ));
@@ -556,17 +857,24 @@ impl Extractor {
             OpCodeValue::Callvirt,
             OpCodeValue::Jmp,
             OpCodeValue::Calli,
+            OpCodeValue::Ldfld,
+            OpCodeValue::Ldflda,
+            OpCodeValue::Ldsfld,
+            OpCodeValue::Ldsflda,
+            OpCodeValue::Stfld,
+            OpCodeValue::Stsfld,
+            OpCodeValue::Newobj,
         ]
         .contains(&insn.opcode.value)
         {
             return Ok(vec![]);
         }
         let mut res = vec![];
-        let row = resolve_dotnet_token(
+        let operand = resolve_dotnet_token(
             &self.pe,
             &cil::instruction::Operand::Token(clr::token::Token::new(insn.operand.value()?)),
         )?;
-        if let Some(s) = row.downcast_ref::<MemberRef>() {
+        if let Some(s) = operand.downcast_ref::<MemberRef>() {
             if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeDef>(&s.class) {
                 res.push((
                     crate::rules::features::Feature::Class(
@@ -582,6 +890,33 @@ impl Extractor {
                     crate::rules::features::Feature::Class(
                         crate::rules::features::ClassFeature::new(
                             &format!("{}.{}", ss.type_namespace, ss.type_name),
+                            "",
+                        )?,
+                    ),
+                    insn.offset as u64,
+                ));
+            }
+        } else if let Some(_) = operand.downcast_ref::<MethodDef>() {
+            if let Some(Callee::Method(dm)) = self.get_callee(insn.operand.value()? as u64)? {
+                res.push((
+                    crate::rules::features::Feature::Class(
+                        crate::rules::features::ClassFeature::new(
+                            &format!("{}.{}", dm.namespace, dm.class_name),
+                            "",
+                        )?,
+                    ),
+                    insn.offset as u64,
+                ));
+            }
+        } else if let Some(_) = operand.downcast_ref::<Field>() {
+            if let Some(field) = self
+                .get_dotnet_fields()?
+                .get(&(insn.operand.value()? as u64))
+            {
+                res.push((
+                    crate::rules::features::Feature::Class(
+                        crate::rules::features::ClassFeature::new(
+                            &format!("{}.{}", field.namespace, field.class_name),
                             "",
                         )?,
                     ),

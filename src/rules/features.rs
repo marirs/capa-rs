@@ -1,5 +1,11 @@
 use crate::{rules::Value, Error, Result};
 
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
+pub enum FeatureAccess {
+    Read,
+    Write,
+}
+
 #[derive(Debug)]
 pub enum RuleFeatureType {
     PropretyRead,
@@ -31,8 +37,7 @@ pub enum RuleFeatureType {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Feature {
-    PropretyRead(PropretyReadFeature),
-    PropretyWrite(PropretyWriteFeature),
+    Property(PropertyFeature),
     Api(ApiFeature),
     String(StringFeature),
     Regex(RegexFeature),
@@ -66,13 +71,21 @@ impl Feature {
                 &value.get_str()?,
                 description,
             )?)),
-            RuleFeatureType::PropretyRead => Ok(Feature::PropretyRead(PropretyReadFeature::new(
+            //            RuleFeatureType::Property => Ok(Feature::Property(PropertyFeature::new(
+            //                &value.get_str()?,
+            //                None,
+            //                description,
+            //            )?)),
+            RuleFeatureType::PropretyRead => Ok(Feature::Property(PropertyFeature::new(
                 &value.get_str()?,
+                Some(FeatureAccess::Read),
                 description,
             )?)),
-            RuleFeatureType::PropretyWrite => Ok(Feature::PropretyWrite(
-                PropretyWriteFeature::new(&value.get_str()?, description)?,
-            )),
+            RuleFeatureType::PropretyWrite => Ok(Feature::Property(PropertyFeature::new(
+                &value.get_str()?,
+                Some(FeatureAccess::Write),
+                description,
+            )?)),
             RuleFeatureType::StringFactory => {
                 let vv = value.get_str()?;
                 if vv.starts_with('/') && (vv.ends_with('/') || vv.ends_with("/i")) {
@@ -169,8 +182,7 @@ impl Feature {
 
     pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
         match self {
-            Feature::PropretyRead(a) => a.is_supported_in_scope(scope),
-            Feature::PropretyWrite(a) => a.is_supported_in_scope(scope),
+            Feature::Property(a) => a.is_supported_in_scope(scope),
             Feature::Api(a) => a.is_supported_in_scope(scope),
             Feature::Regex(a) => a.is_supported_in_scope(scope),
             Feature::String(a) => a.is_supported_in_scope(scope),
@@ -201,8 +213,7 @@ impl Feature {
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
         match self {
-            Feature::PropretyRead(a) => a.evaluate(features),
-            Feature::PropretyWrite(a) => a.evaluate(features),
+            Feature::Property(a) => a.evaluate(features),
             Feature::Api(a) => a.evaluate(features),
             Feature::String(a) => a.evaluate(features),
             Feature::Regex(a) => a.evaluate(features),
@@ -230,9 +241,7 @@ impl Feature {
 
     pub fn get_value(&self) -> Result<String> {
         match self {
-            Feature::PropretyRead(a) => Ok(a.value.clone()),
-            Feature::PropretyWrite(a) => Ok(a.value.clone()),
-
+            Feature::Property(a) => Ok(a.value.clone()),
             Feature::Api(a) => Ok(a.value.clone()),
             Feature::String(a) => Ok(a.value.clone()),
             Feature::Regex(a) => Ok(a.value.clone()),
@@ -698,15 +707,17 @@ impl ApiFeature {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct PropretyReadFeature {
+pub struct PropertyFeature {
     value: String,
+    access: Option<FeatureAccess>,
     description: String,
 }
 
-impl PropretyReadFeature {
-    pub fn new(value: &str, description: &str) -> Result<PropretyReadFeature> {
-        Ok(PropretyReadFeature {
+impl PropertyFeature {
+    pub fn new(value: &str, access: Option<FeatureAccess>, description: &str) -> Result<Self> {
+        Ok(Self {
             value: value.to_string(),
+            access,
             description: description.to_string(),
         })
     }
@@ -722,43 +733,8 @@ impl PropretyReadFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::PropretyRead(self.clone())) {
-            return Ok((true, features[&Feature::PropretyRead(self.clone())].clone()));
-        }
-        Ok((false, vec![]))
-    }
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct PropretyWriteFeature {
-    value: String,
-    description: String,
-}
-
-impl PropretyWriteFeature {
-    pub fn new(value: &str, description: &str) -> Result<PropretyWriteFeature> {
-        Ok(PropretyWriteFeature {
-            value: value.to_string(),
-            description: description.to_string(),
-        })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(false),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
-    }
-    pub fn evaluate(
-        &self,
-        features: &std::collections::HashMap<Feature, Vec<u64>>,
-    ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::PropretyWrite(self.clone())) {
-            return Ok((
-                true,
-                features[&Feature::PropretyWrite(self.clone())].clone(),
-            ));
+        if features.contains_key(&Feature::Property(self.clone())) {
+            return Ok((true, features[&Feature::Property(self.clone())].clone()));
         }
         Ok((false, vec![]))
     }
