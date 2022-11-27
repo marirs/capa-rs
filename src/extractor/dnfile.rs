@@ -567,14 +567,14 @@ impl Extractor {
                             insn.operand.value()?,
                         )),
                     )?;
-                    if let Some(_) = row.downcast_ref::<MethodDef>() {
-                        if let Some(_) = self
+                    if row.downcast_ref::<MethodDef>().is_some() {
+                        if self
                             .get_dotnet_properties()?
-                            .get(&(insn.operand.value()? as u64))
+                            .get(&(insn.operand.value()? as u64)).is_some()
                         {
                             return Ok(res);
                         }
-                    } else if let Some(_) = row.downcast_ref::<MemberRef>() {
+                    } else if row.downcast_ref::<MemberRef>().is_some() {
                         return Ok(res);
                     }
                     res.push((
@@ -821,7 +821,7 @@ impl Extractor {
                     insn.offset as u64,
                 ));
             }
-        } else if let Some(_) = operand.downcast_ref::<MethodDef>() {
+        } else if operand.downcast_ref::<MethodDef>().is_some() {
             if let Some(Callee::Method(dm)) = self.get_callee(insn.operand.value()? as u64)? {
                 res.push((
                     crate::rules::features::Feature::Namespace(
@@ -830,7 +830,7 @@ impl Extractor {
                     insn.offset as u64,
                 ));
             }
-        } else if let Some(_) = operand.downcast_ref::<Field>() {
+        } else if operand.downcast_ref::<Field>().is_some() {
             if let Some(field) = self
                 .get_dotnet_fields()?
                 .get(&(insn.operand.value()? as u64))
@@ -896,7 +896,7 @@ impl Extractor {
                     insn.offset as u64,
                 ));
             }
-        } else if let Some(_) = operand.downcast_ref::<MethodDef>() {
+        } else if operand.downcast_ref::<MethodDef>().is_some() {
             if let Some(Callee::Method(dm)) = self.get_callee(insn.operand.value()? as u64)? {
                 res.push((
                     crate::rules::features::Feature::Class(
@@ -908,7 +908,7 @@ impl Extractor {
                     insn.offset as u64,
                 ));
             }
-        } else if let Some(_) = operand.downcast_ref::<Field>() {
+        } else if operand.downcast_ref::<Field>().is_some() {
             if let Some(field) = self
                 .get_dotnet_fields()?
                 .get(&(insn.operand.value()? as u64))
@@ -963,7 +963,7 @@ pub fn calculate_dotnet_token_value(table: &'static str, rid: usize) -> Result<u
 }
 
 pub fn is_dotnet_mixed_mode(pe: &dnfile::DnPe) -> Result<bool> {
-    return Ok(!pe.net()?.flags.contains(&dnfile::ClrHeaderFlags::IlOnly));
+    Ok(!pe.net()?.flags.contains(&dnfile::ClrHeaderFlags::IlOnly))
 }
 
 ///map generic token to string or table row
@@ -983,7 +983,7 @@ pub fn resolve_dotnet_token<'a>(
         let table = pe.net()?.md_table_by_index(&t.table())?;
         return Ok(table.get_row(t.rid() - 1)?.get_row().as_any());
     }
-    return Err(crate::Error::InvalidToken(format!("{:?}", token)));
+    Err(crate::Error::InvalidToken(format!("{:?}", token)))
 }
 
 ///read user string from #US stream
