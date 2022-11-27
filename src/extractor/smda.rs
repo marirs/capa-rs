@@ -686,7 +686,7 @@ impl Extractor {
                         number *= -1;
                     }
                 } else if let Some(n) = number_int {
-                    number = (&n["num"]).parse::<i128>()?;
+                    number = (n["num"]).parse::<i128>()?;
                     if &n["num"] == "-" {
                         number *= -1;
                     }
