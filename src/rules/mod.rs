@@ -182,12 +182,12 @@ impl Rule {
                 }
                 if key.starts_with("operand[") && key.ends_with("].number") {
                     let index =
-                        (&key["operand[".len()..key.len() - "].number".len()]).parse::<usize>()?;
+                        (key["operand[".len()..key.len() - "].number".len()]).parse::<usize>()?;
                     return Ok(RuleFeatureType::OperandNumber(index));
                 }
                 if key.starts_with("operand[") && key.ends_with("].offset") {
                     let index =
-                        (&key["operand[".len()..key.len() - "].offset".len()]).parse::<usize>()?;
+                        (key["operand[".len()..key.len() - "].offset".len()]).parse::<usize>()?;
                     return Ok(RuleFeatureType::OperandOffset(index));
                 }
                 Err(Error::InvalidRule(line!(), key.to_string()))
@@ -609,7 +609,7 @@ impl Rule {
                                     //     10,
                                     // )?;
                                     let min =
-                                        (&val[..val.len() - " or more".len()]).parse::<i64>()?;
+                                        (val[..val.len() - " or more".len()]).parse::<i64>()?;
                                     let max = 0xFFFFFFFF_u32;
                                     return Ok(StatementElement::Statement(Box::new(
                                         Statement::Range(RangeStatement::new(
@@ -622,7 +622,7 @@ impl Rule {
                                 } else if val.ends_with(" or fewer") {
                                     let min = 0_u32;
                                     let max =
-                                        (&val[..val.len() - " or fewer".len()]).parse::<i64>()?;
+                                        (val[..val.len() - " or fewer".len()]).parse::<i64>()?;
                                     // let max = i64::from_str_radix(
                                     //     &val[..val.len() - " or fewer".len()],
                                     //     10,
