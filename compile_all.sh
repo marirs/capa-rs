@@ -12,7 +12,9 @@ cargo b --release --example capa_cli --target aarch64-unknown-linux-gnu
 cargo b --release --example capa_cli --target x86_64-unknown-linux-gnu
 
 # remove existing files
-rm -f tmp/*
+rm -rf tmp
+# make the folder again
+md -r tmp
 
 # copy files to the tmp folder
 # win
