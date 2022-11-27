@@ -570,7 +570,8 @@ impl Extractor {
                     if row.downcast_ref::<MethodDef>().is_some() {
                         if self
                             .get_dotnet_properties()?
-                            .get(&(insn.operand.value()? as u64)).is_some()
+                            .get(&(insn.operand.value()? as u64))
+                            .is_some()
                         {
                             return Ok(res);
                         }
