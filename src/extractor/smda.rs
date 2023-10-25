@@ -12,6 +12,9 @@ use smda::{
 };
 use std::{collections::HashMap, convert::TryInto};
 
+//use super::Extractor;
+use crate::extractor::Extractor as _;
+
 #[derive(Debug, Clone)]
 struct InstructionS {
     i: Instruction,
@@ -131,8 +134,7 @@ impl super::Extractor for Extractor {
         &self,
         f: &Box<dyn super::Function>,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-        let mut res = vec![];
-        //extract function calls to
+        let mut res = vec![]; //extract function calls to
         for inref in f.inrefs() {
             res.push((
                 crate::rules::features::Feature::Characteristic(
@@ -310,18 +312,6 @@ impl Extractor {
         Ok(res)
     }
 
-    //    pub fn extract_file_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-    //        let mut res = vec![];
-    //        //        res.extend(self.extract_file_embedded_pe()?);
-    //        res.extend(self.extract_file_export_names()?);
-    //        res.extend(self.extract_file_import_names()?);
-    //        res.extend(self.extract_file_section_names()?);
-    //        res.extend(self.extract_file_strings()?);
-    //        //        res.extend(self.extract_file_function_names(pbytes)?);
-    //        res.extend(self.extract_file_format()?);
-    //        Ok(res)
-    //    }
-
     fn extract_file_format(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         res.push((
@@ -368,13 +358,34 @@ impl Extractor {
 
     pub fn extract_file_export_names(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        for (e, o) in &self.report.exports {
-            res.push((
-                crate::rules::features::Feature::Export(
-                    crate::rules::features::ExportFeature::new(e, "")?,
-                ),
-                *o as u64,
-            ));
+        for (e, o, ree) in &self.report.exports {
+            match ree {
+                None => {
+                    res.push((
+                        crate::rules::features::Feature::Export(
+                            crate::rules::features::ExportFeature::new(e, "")?,
+                        ),
+                        *o as u64 - self.get_base_address()?,
+                    ));
+                }
+                Some(re) => {
+                    res.push((
+                        crate::rules::features::Feature::Export(
+                            crate::rules::features::ExportFeature::new(re, "")?,
+                        ),
+                        *o as u64 - self.get_base_address()?,
+                    ));
+                    res.push((
+                        crate::rules::features::Feature::Characteristic(
+                            crate::rules::features::CharacteristicFeature::new(
+                                "forwarded export",
+                                "",
+                            )?,
+                        ),
+                        *o as u64 - self.get_base_address()?,
+                    ));
+                }
+            }
         }
         Ok(res)
     }

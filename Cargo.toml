@@ -18,7 +18,7 @@ pdb = "0.8.0"
 petgraph = "0.6.2"
 regex = "1.5"
 serde = { version = "1", features = ["derive"] }
-smda = "0.2.5"
+smda = { git = "https://github.com/marirs/smda-rs.git" }
 thiserror = "1"
 walkdir = "2.3.2"
 yaml-rust = "0.4.5"
@@ -30,7 +30,7 @@ lazy_static = "1.4.0"
 [dev-dependencies]
 clap = { version = "4.0.27", features = ["cargo", "derive"] }
 serde_json = "1"
-prettytable-rs = "0.9.0"
+prettytable-rs = "0.10.0"
 
 [lib]
 name = "capa"

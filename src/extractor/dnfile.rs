@@ -7,7 +7,10 @@ use dnfile::{
     stream::meta_data_tables::mdtables::{codedindex::*, *},
     DnPe,
 };
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, RwLock},
+};
 
 use crate::extractor::Extractor as BaseExtractor;
 
@@ -31,6 +34,8 @@ impl super::Instruction for Instruction {
 #[derive(Debug, Clone)]
 struct Function {
     f: cil::function::Function,
+    calls_to: HashSet<u64>,
+    calls_from: HashSet<u64>,
 }
 
 impl super::Function for Function {
@@ -102,6 +107,8 @@ enum Callee {
 
 #[derive(Debug)]
 pub struct Extractor {
+    properties_cache: Arc<RwLock<Option<HashMap<u64, DnMethod>>>>,
+    fields_cache: Arc<RwLock<Option<HashMap<u64, DnMethod>>>>,
     pe: DnPe,
 }
 
@@ -147,7 +154,6 @@ impl super::Extractor for Extractor {
     fn extract_file_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut ss = self.extract_file_import_names()?;
         ss.extend(self.extract_file_function_names()?);
-        //ss.extend(self.extract_file_string()?);
         ss.extend(self.extract_file_format()?);
         ss.extend(self.extract_file_mixed_mode_characteristic_features()?);
         ss.extend(self.extract_file_namespace_and_class_features()?);
@@ -155,19 +161,62 @@ impl super::Extractor for Extractor {
     }
 
     fn get_functions(&self) -> Result<std::collections::HashMap<u64, Box<dyn super::Function>>> {
-        let mut res: std::collections::HashMap<u64, Box<dyn super::Function>> =
+        let mut methods: std::collections::HashMap<u64, Function> =
             std::collections::HashMap::new();
+        let mut calls_to_map = HashMap::new();
         for f in self.pe.net()?.functions() {
-            res.insert(f.offset as u64, Box::new(Function { f: f.clone() }));
+            let mut calls_from = HashSet::new();
+            for insn in &f.instructions {
+                if ![
+                    OpCodeValue::Call,
+                    OpCodeValue::Callvirt,
+                    OpCodeValue::Jmp,
+                    OpCodeValue::Newobj,
+                ]
+                .contains(&insn.opcode.value)
+                {
+                    continue;
+                }
+                let address = insn.operand.value()?;
+                let ee = calls_to_map.entry(address as u64).or_insert(HashSet::new());
+                ee.insert(f.offset as u64);
+                calls_from.insert(address as u64);
+            }
+            methods.insert(
+                f.offset as u64,
+                Function {
+                    f: f.clone(),
+                    calls_to: HashSet::new(),
+                    calls_from,
+                },
+            );
         }
-        Ok(res)
+        for (a, calls_from) in calls_to_map.into_iter() {
+            if let Some(f) = methods.get_mut(&a) {
+                f.calls_from = calls_from;
+            }
+        }
+        Ok(methods
+            .into_iter()
+            .map(|(a, b)| (a, Box::new(b) as Box<dyn super::Function>))
+            .collect::<HashMap<u64, Box<dyn super::Function>>>())
     }
 
     fn extract_function_features(
         &self,
-        _f: &Box<dyn super::Function>,
+        f: &Box<dyn super::Function>,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-        Ok(vec![])
+        let f: &Function = f.as_any().downcast_ref::<Function>().unwrap();
+        Ok([
+            self.extract_function_call_to_features(&f)?,
+            self.extract_function_call_from_features(&f)?,
+            self.extract_recurcive_call_features(&f)?,
+        ]
+        .into_iter()
+        .fold(Vec::new(), |mut acc, f| {
+            acc.extend(f);
+            acc
+        }))
     }
 
     fn get_basic_blocks(
@@ -215,6 +264,8 @@ impl Extractor {
     pub fn new(file_path: &str) -> Result<Extractor> {
         let res = Extractor {
             pe: dnfile::DnPe::new(file_path)?,
+            fields_cache: Arc::new(RwLock::new(None)),
+            properties_cache: Arc::new(RwLock::new(None)),
         };
         Ok(res)
     }
@@ -381,6 +432,13 @@ impl Extractor {
         Ok(None)
     }
 
+    pub fn get_properties(&self) -> Result<&RwLock<Option<HashMap<u64, DnMethod>>>> {
+        if let None = *self.properties_cache.read().unwrap() {
+            *self.properties_cache.write().unwrap() = Some(self.get_dotnet_properties()?);
+        }
+        Ok(&self.properties_cache)
+    }
+
     pub fn get_dotnet_properties(&self) -> Result<HashMap<u64, DnMethod>> {
         let mut res = HashMap::new();
         let method_semantics = if let Ok(s) = self.pe.net()?.md_table("MethodSemantics") {
@@ -428,6 +486,13 @@ impl Extractor {
             );
         }
         Ok(res)
+    }
+
+    pub fn get_fields(&self) -> Result<&RwLock<Option<HashMap<u64, DnMethod>>>> {
+        if let None = *self.fields_cache.read().unwrap() {
+            *self.fields_cache.write().unwrap() = Some(self.get_dotnet_fields()?);
+        }
+        Ok(&self.fields_cache)
     }
 
     /// get fields from TypeDef table
@@ -507,6 +572,57 @@ impl Extractor {
         }
     }
 
+    fn extract_function_call_to_features(
+        &self,
+        f: &Function,
+    ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+        Ok(f.calls_to
+            .iter()
+            .map(|a| {
+                (
+                    crate::rules::features::Feature::Characteristic(
+                        crate::rules::features::CharacteristicFeature::new("calls to", "").unwrap(),
+                    ),
+                    *a,
+                )
+            })
+            .collect())
+    }
+
+    fn extract_function_call_from_features(
+        &self,
+        f: &Function,
+    ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+        Ok(f.calls_to
+            .iter()
+            .map(|a| {
+                (
+                    crate::rules::features::Feature::Characteristic(
+                        crate::rules::features::CharacteristicFeature::new("calls from", "")
+                            .unwrap(),
+                    ),
+                    *a,
+                )
+            })
+            .collect())
+    }
+
+    fn extract_recurcive_call_features(
+        &self,
+        f: &Function,
+    ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+        if f.calls_to.contains(&(f.f.offset as u64)) {
+            Ok(vec![(
+                crate::rules::features::Feature::Characteristic(
+                    crate::rules::features::CharacteristicFeature::new("recursive call", "")?,
+                ),
+                f.f.offset as u64,
+            )])
+        } else {
+            Ok(vec![])
+        }
+    }
+
     fn get_callee(&self, token: u64) -> Result<Option<Callee>> {
         // map dotnet token to un/managed method
         match self.get_dotnet_managed_imports()?.get(&token) {
@@ -569,7 +685,11 @@ impl Extractor {
                     )?;
                     if row.downcast_ref::<MethodDef>().is_some() {
                         if self
-                            .get_dotnet_properties()?
+                            .get_properties()?
+                            .read()
+                            .unwrap()
+                            .as_ref()
+                            .unwrap()
                             .get(&(insn.operand.value()? as u64))
                             .is_some()
                         {
@@ -611,7 +731,11 @@ impl Extractor {
             if let Some(_operand) = operand.downcast_ref::<MethodDef>() {
                 // check if the method belongs to the MethodDef table and whether it is used to access a property
                 if let Some(prop) = self
-                    .get_dotnet_properties()?
+                    .get_properties()?
+                    .read()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
                     .get(&(insn.operand.value()? as u64))
                 {
                     return Ok(vec![(
@@ -688,7 +812,11 @@ impl Extractor {
             if let Some(_operand) = operand.downcast_ref::<Field>() {
                 // determine whether the operand is a field by checking if it belongs to the Field table
                 if let Some(field) = self
-                    .get_dotnet_fields()?
+                    .get_fields()?
+                    .read()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
                     .get(&(insn.operand.value()? as u64))
                 {
                     return Ok(vec![(
@@ -711,7 +839,11 @@ impl Extractor {
             if let Some(_operand) = operand.downcast_ref::<Field>() {
                 // determine whether the operand is a field by checking if it belongs to the Field table
                 if let Some(field) = self
-                    .get_dotnet_fields()?
+                    .get_fields()?
+                    .read()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
                     .get(&(insn.operand.value()? as u64))
                 {
                     return Ok(vec![(
@@ -833,7 +965,11 @@ impl Extractor {
             }
         } else if operand.downcast_ref::<Field>().is_some() {
             if let Some(field) = self
-                .get_dotnet_fields()?
+                .get_fields()?
+                .read()
+                .unwrap()
+                .as_ref()
+                .unwrap()
                 .get(&(insn.operand.value()? as u64))
             {
                 res.push((
@@ -911,7 +1047,11 @@ impl Extractor {
             }
         } else if operand.downcast_ref::<Field>().is_some() {
             if let Some(field) = self
-                .get_dotnet_fields()?
+                .get_fields()?
+                .read()
+                .unwrap()
+                .as_ref()
+                .unwrap()
                 .get(&(insn.operand.value()? as u64))
             {
                 res.push((

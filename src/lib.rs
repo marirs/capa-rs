@@ -194,6 +194,7 @@ impl FileCapabilities {
             if addr == &0 {
                 continue;
             }
+            eprintln!("{}, {}", arrd, count);
             let mut fc = FunctionCapabilities {
                 address: *addr as usize,
                 features: *count,

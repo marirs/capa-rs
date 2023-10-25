@@ -808,6 +808,7 @@ impl CharacteristicFeature {
             crate::rules::Scope::File => match self.value.as_str() {
                 "embedded pe" => Ok(true),
                 "mixed mode" => Ok(true),
+                "forwarded export" => Ok(true),
                 _ => Ok(false),
             },
             crate::rules::Scope::BasicBlock => match self.value.as_str() {
