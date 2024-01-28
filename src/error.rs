@@ -39,6 +39,12 @@ pub enum Error {
     JsonFormatError(&'static str, u32),
     #[error("invalid rule: {0} - {1}")]
     InvalidRule(u32, String),
+    #[error("invalid scope: {0} - {1}")]
+    InvalidScope(u32, String),
+    #[error("invalid static scope: {0}")]
+    InvalidStaticScope(u32),
+    #[error("invalid dynamic scope: {0}")]
+    InvalidDynamicScope(u32),
     #[error("{0}")]
     InvalidRuleFile(String),
     #[error("operand error")]

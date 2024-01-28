@@ -1,4 +1,11 @@
+use std::{
+    collections::HashSet,
+    hash::{Hash, Hasher},
+};
+
 use crate::{rules::Value, Error, Result};
+
+use super::{Scope, Scopes};
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum FeatureAccess {
@@ -33,6 +40,20 @@ pub enum RuleFeatureType {
     Class,
     OperandNumber(usize),
     OperandOffset(usize),
+}
+
+pub trait FeatureT {
+    fn scopes(&self) -> &HashSet<Scope>;
+
+    fn is_supported_in_scope(&self, scopes: &Scopes) -> Result<bool> {
+        if self.scopes().contains(&scopes.r#static.scope) {
+            return Ok(true);
+        }
+        if self.scopes().contains(&scopes.dynamic.scope) {
+            return Ok(true);
+        }
+        Ok(true)
+    }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -180,31 +201,31 @@ impl Feature {
         }
     }
 
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
+    pub fn is_supported_in_scope(&self, scopes: &crate::rules::Scopes) -> Result<bool> {
         match self {
-            Feature::Property(a) => a.is_supported_in_scope(scope),
-            Feature::Api(a) => a.is_supported_in_scope(scope),
-            Feature::Regex(a) => a.is_supported_in_scope(scope),
-            Feature::String(a) => a.is_supported_in_scope(scope),
-            Feature::Substring(a) => a.is_supported_in_scope(scope),
-            Feature::Bytes(a) => a.is_supported_in_scope(scope),
-            Feature::Number(a) => a.is_supported_in_scope(scope),
-            Feature::Offset(a) => a.is_supported_in_scope(scope),
-            Feature::Mnemonic(a) => a.is_supported_in_scope(scope),
-            Feature::BasicBlock(a) => a.is_supported_in_scope(scope),
-            Feature::Characteristic(a) => a.is_supported_in_scope(scope),
-            Feature::Export(a) => a.is_supported_in_scope(scope),
-            Feature::Import(a) => a.is_supported_in_scope(scope),
-            Feature::Section(a) => a.is_supported_in_scope(scope),
-            Feature::MatchedRule(a) => a.is_supported_in_scope(scope),
-            Feature::FunctionName(a) => a.is_supported_in_scope(scope),
-            Feature::Os(a) => a.is_supported_in_scope(scope),
-            Feature::Format(a) => a.is_supported_in_scope(scope),
-            Feature::Arch(a) => a.is_supported_in_scope(scope),
-            Feature::Namespace(a) => a.is_supported_in_scope(scope),
-            Feature::Class(a) => a.is_supported_in_scope(scope),
-            Feature::OperandNumber(a) => a.is_supported_in_scope(scope),
-            Feature::OperandOffset(a) => a.is_supported_in_scope(scope),
+            Feature::Property(a) => a.is_supported_in_scope(&scopes),
+            Feature::Api(a) => a.is_supported_in_scope(&scopes),
+            Feature::Regex(a) => a.is_supported_in_scope(&scopes),
+            Feature::String(a) => a.is_supported_in_scope(&scopes),
+            Feature::Substring(a) => a.is_supported_in_scope(&scopes),
+            Feature::Bytes(a) => a.is_supported_in_scope(&scopes),
+            Feature::Number(a) => a.is_supported_in_scope(&scopes),
+            Feature::Offset(a) => a.is_supported_in_scope(&scopes),
+            Feature::Mnemonic(a) => a.is_supported_in_scope(&scopes),
+            Feature::BasicBlock(a) => a.is_supported_in_scope(&scopes),
+            Feature::Characteristic(a) => a.is_supported_in_scope(&scopes),
+            Feature::Export(a) => a.is_supported_in_scope(&scopes),
+            Feature::Import(a) => a.is_supported_in_scope(&scopes),
+            Feature::Section(a) => a.is_supported_in_scope(&scopes),
+            Feature::MatchedRule(a) => a.is_supported_in_scope(&scopes),
+            Feature::FunctionName(a) => a.is_supported_in_scope(&scopes),
+            Feature::Os(a) => a.is_supported_in_scope(&scopes),
+            Feature::Format(a) => a.is_supported_in_scope(&scopes),
+            Feature::Arch(a) => a.is_supported_in_scope(&scopes),
+            Feature::Namespace(a) => a.is_supported_in_scope(&scopes),
+            Feature::Class(a) => a.is_supported_in_scope(&scopes),
+            Feature::OperandNumber(a) => a.is_supported_in_scope(&scopes),
+            Feature::OperandOffset(a) => a.is_supported_in_scope(&scopes),
         }
     }
 
@@ -268,28 +289,41 @@ impl Feature {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct FunctionNameFeature {
     value: String,
-    description: String,
+    _description: String,
+    scopes: HashSet<Scope>,
+}
+
+impl Hash for FunctionNameFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        "function_name_feature".hash(state);
+        self.value.hash(state);
+    }
+}
+
+impl PartialEq for FunctionNameFeature {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl FeatureT for FunctionNameFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
 }
 
 impl FunctionNameFeature {
     pub fn new(value: &str, description: &str) -> Result<FunctionNameFeature> {
         Ok(FunctionNameFeature {
             value: value.to_string(),
-            description: description.to_string(),
+            _description: description.to_string(),
+            scopes: maplit::hashset!(Scope::File),
         })
     }
 
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(false),
-            crate::rules::Scope::File => Ok(true),
-            crate::rules::Scope::BasicBlock => Ok(false),
-            crate::rules::Scope::Instruction => Ok(false),
-        }
-    }
     pub fn evaluate(
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
@@ -301,26 +335,39 @@ impl FunctionNameFeature {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct SectionFeature {
     value: String,
-    description: String,
+    _description: String,
+    scopes: HashSet<Scope>,
+}
+
+impl Hash for SectionFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        "section_feature".hash(state);
+        self.value.hash(state);
+    }
+}
+
+impl PartialEq for SectionFeature {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl FeatureT for SectionFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
 }
 
 impl SectionFeature {
     pub fn new(value: &str, description: &str) -> Result<SectionFeature> {
         Ok(SectionFeature {
             value: value.to_string(),
-            description: description.to_string(),
+            _description: description.to_string(),
+            scopes: maplit::hashset!(Scope::File),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(false),
-            crate::rules::Scope::File => Ok(true),
-            crate::rules::Scope::BasicBlock => Ok(false),
-            crate::rules::Scope::Instruction => Ok(false),
-        }
     }
     pub fn evaluate(
         &self,
@@ -333,26 +380,39 @@ impl SectionFeature {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct ImportFeature {
     value: String,
-    description: String,
+    _description: String,
+    scopes: HashSet<Scope>,
+}
+
+impl Hash for ImportFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        "import_feature".hash(state);
+        self.value.hash(state);
+    }
+}
+
+impl PartialEq for ImportFeature {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl FeatureT for ImportFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
 }
 
 impl ImportFeature {
     pub fn new(value: &str, description: &str) -> Result<ImportFeature> {
         Ok(ImportFeature {
             value: value.to_string(),
-            description: description.to_string(),
+            _description: description.to_string(),
+            scopes: maplit::hashset!(Scope::File),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(false),
-            crate::rules::Scope::File => Ok(true),
-            crate::rules::Scope::BasicBlock => Ok(false),
-            crate::rules::Scope::Instruction => Ok(false),
-        }
     }
     pub fn evaluate(
         &self,
@@ -365,26 +425,39 @@ impl ImportFeature {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct ExportFeature {
     value: String,
-    description: String,
+    _description: String,
+    scopes: HashSet<Scope>,
+}
+
+impl Hash for ExportFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        "export_feature".hash(state);
+        self.value.hash(state);
+    }
+}
+
+impl PartialEq for ExportFeature {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl FeatureT for ExportFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
 }
 
 impl ExportFeature {
     pub fn new(value: &str, description: &str) -> Result<ExportFeature> {
         Ok(ExportFeature {
             value: value.to_string(),
-            description: description.to_string(),
+            _description: description.to_string(),
+            scopes: maplit::hashset!(Scope::File),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(false),
-            crate::rules::Scope::File => Ok(true),
-            crate::rules::Scope::BasicBlock => Ok(false),
-            crate::rules::Scope::Instruction => Ok(false),
-        }
     }
     pub fn evaluate(
         &self,
@@ -397,20 +470,34 @@ impl ExportFeature {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct BasicBlockFeature {}
+#[derive(Debug, Clone, Eq)]
+pub struct BasicBlockFeature {
+    scopes: HashSet<Scope>,
+}
+
+impl Hash for BasicBlockFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        "basic_block_feature".hash(state);
+    }
+}
+
+impl PartialEq for BasicBlockFeature {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl FeatureT for BasicBlockFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
+}
 
 impl BasicBlockFeature {
     pub fn new() -> Result<BasicBlockFeature> {
-        Ok(BasicBlockFeature {})
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(false),
-            crate::rules::Scope::BasicBlock => Ok(false),
-            crate::rules::Scope::Instruction => Ok(false),
-        }
+        Ok(BasicBlockFeature {
+            scopes: maplit::hashset!(Scope::Function),
+        })
     }
     pub fn evaluate(
         &self,
@@ -423,10 +510,11 @@ impl BasicBlockFeature {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 pub struct MnemonicFeature {
     value: String,
     _description: String,
+    scopes: HashSet<Scope>,
 }
 
 impl MnemonicFeature {
@@ -434,15 +522,8 @@ impl MnemonicFeature {
         Ok(MnemonicFeature {
             value: value.to_string(),
             _description: description.to_string(),
+            scopes: maplit::hashset!(Scope::Instruction, Scope::BasicBlock),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(false),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -468,13 +549,18 @@ impl PartialEq for MnemonicFeature {
     }
 }
 
-impl Eq for MnemonicFeature {}
+impl FeatureT for MnemonicFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
+}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 pub struct OffsetFeature {
     _bits: u32,
     value: i128,
     _description: String,
+    scopes: HashSet<Scope>,
 }
 
 impl OffsetFeature {
@@ -483,15 +569,8 @@ impl OffsetFeature {
             _bits: bitness,
             value: *value,
             _description: description.to_string(),
+            scopes: maplit::hashset!(Scope::Function, Scope::Instruction, Scope::BasicBlock),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(false),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -517,13 +596,18 @@ impl PartialEq for OffsetFeature {
     }
 }
 
-impl Eq for OffsetFeature {}
+impl FeatureT for OffsetFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
+}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 pub struct OperandOffsetFeature {
     index: usize,
     value: i128,
     _description: String,
+    scopes: HashSet<Scope>,
 }
 
 impl OperandOffsetFeature {
@@ -532,15 +616,8 @@ impl OperandOffsetFeature {
             index: *index,
             value: *value,
             _description: description.to_string(),
+            scopes: maplit::hashset!(Scope::Function, Scope::Instruction, Scope::BasicBlock),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(false),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -570,13 +647,18 @@ impl PartialEq for OperandOffsetFeature {
     }
 }
 
-impl Eq for OperandOffsetFeature {}
+impl FeatureT for OperandOffsetFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
+}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 pub struct NumberFeature {
     _bits: u32,
     value: i128,
     _description: String,
+    scopes: HashSet<Scope>,
 }
 
 impl NumberFeature {
@@ -585,15 +667,15 @@ impl NumberFeature {
             _bits: bitness,
             value: *value,
             _description: description.to_string(),
+            scopes: maplit::hashset!(
+                Scope::Function,
+                Scope::Instruction,
+                Scope::BasicBlock,
+                Scope::Call,
+                Scope::Thread,
+                Scope::Process
+            ),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(false),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -619,13 +701,18 @@ impl PartialEq for NumberFeature {
     }
 }
 
-impl Eq for NumberFeature {}
+impl FeatureT for NumberFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
+}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 pub struct OperandNumberFeature {
     index: usize,
     value: i128,
     _description: String,
+    scopes: HashSet<Scope>,
 }
 
 impl OperandNumberFeature {
@@ -634,15 +721,8 @@ impl OperandNumberFeature {
             index: *index,
             value: *value,
             _description: description.to_string(),
+            scopes: maplit::hashset!(Scope::Function, Scope::Instruction, Scope::BasicBlock),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(false),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -672,28 +752,52 @@ impl PartialEq for OperandNumberFeature {
     }
 }
 
-impl Eq for OperandNumberFeature {}
+impl FeatureT for OperandNumberFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
+}
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct ApiFeature {
     value: String,
-    description: String,
+    _description: String,
+    scopes: HashSet<Scope>,
+}
+
+impl Hash for ApiFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        "api_feature".hash(state);
+        self.value.hash(state);
+    }
+}
+
+impl PartialEq for ApiFeature {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl FeatureT for ApiFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
 }
 
 impl ApiFeature {
     pub fn new(value: &str, description: &str) -> Result<ApiFeature> {
         Ok(ApiFeature {
             value: value.to_string(),
-            description: description.to_string(),
+            _description: description.to_string(),
+            scopes: maplit::hashset!(
+                Scope::Function,
+                Scope::Instruction,
+                Scope::BasicBlock,
+                Scope::Call,
+                Scope::Thread,
+                Scope::Process
+            ),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(false),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -706,11 +810,32 @@ impl ApiFeature {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct PropertyFeature {
     value: String,
     access: Option<FeatureAccess>,
-    description: String,
+    _description: String,
+    scopes: HashSet<Scope>,
+}
+
+impl Hash for PropertyFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        "property_feature".hash(state);
+        self.value.hash(state);
+        self.access.hash(state);
+    }
+}
+
+impl PartialEq for PropertyFeature {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value && self.access == other.access
+    }
+}
+
+impl FeatureT for PropertyFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
 }
 
 impl PropertyFeature {
@@ -718,16 +843,9 @@ impl PropertyFeature {
         Ok(Self {
             value: value.to_string(),
             access,
-            description: description.to_string(),
+            _description: description.to_string(),
+            scopes: maplit::hashset!(Scope::Function, Scope::Instruction, Scope::BasicBlock),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(false),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -740,26 +858,47 @@ impl PropertyFeature {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct MatchedRuleFeature {
     pub value: String,
-    description: String,
+    _description: String,
+    scopes: HashSet<Scope>,
+}
+
+impl Hash for MatchedRuleFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        "matched_rule_feature".hash(state);
+        self.value.hash(state);
+    }
+}
+
+impl PartialEq for MatchedRuleFeature {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl FeatureT for MatchedRuleFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
 }
 
 impl MatchedRuleFeature {
     pub fn new(value: &str, description: &str) -> Result<MatchedRuleFeature> {
         Ok(MatchedRuleFeature {
             value: value.to_string(),
-            description: description.to_string(),
+            _description: description.to_string(),
+            scopes: maplit::hashset!(
+                Scope::Function,
+                Scope::Instruction,
+                Scope::BasicBlock,
+                Scope::Call,
+                Scope::Thread,
+                Scope::Process,
+                Scope::File
+            ),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(true),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -772,71 +911,74 @@ impl MatchedRuleFeature {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct CharacteristicFeature {
     value: String,
-    description: String,
+    _description: String,
+    scopes: HashSet<Scope>,
+}
+
+impl Hash for CharacteristicFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        "characteristic_feature".hash(state);
+        self.value.hash(state);
+    }
+}
+
+impl PartialEq for CharacteristicFeature {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl FeatureT for CharacteristicFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
 }
 
 impl CharacteristicFeature {
     pub fn new(value: &str, description: &str) -> Result<CharacteristicFeature> {
         Ok(CharacteristicFeature {
             value: value.to_string(),
-            description: description.to_string(),
+            _description: description.to_string(),
+            scopes: match value {
+                "calls from" => maplit::hashset!(Scope::Function),
+                "calls to" => maplit::hashset!(Scope::Function),
+                "loop" => maplit::hashset!(Scope::Function),
+                "recursive call" => maplit::hashset!(Scope::Function),
+                "nzxor" => maplit::hashset!(Scope::Function, Scope::BasicBlock, Scope::Instruction),
+                "peb access" => {
+                    maplit::hashset!(Scope::Function, Scope::BasicBlock, Scope::Instruction)
+                }
+                "fs access" => {
+                    maplit::hashset!(Scope::Function, Scope::BasicBlock, Scope::Instruction)
+                }
+                "gs access" => {
+                    maplit::hashset!(Scope::Function, Scope::BasicBlock, Scope::Instruction)
+                }
+                "cross section flow" => {
+                    maplit::hashset!(Scope::Function, Scope::BasicBlock, Scope::Instruction)
+                }
+                "tight loop" => maplit::hashset!(Scope::Function, Scope::BasicBlock),
+                "stack string" => maplit::hashset!(Scope::Function, Scope::BasicBlock),
+                "indirect call" => {
+                    maplit::hashset!(Scope::Function, Scope::BasicBlock, Scope::Instruction)
+                }
+                "call $+5" => {
+                    maplit::hashset!(Scope::Function, Scope::BasicBlock, Scope::Instruction)
+                }
+                "unmanaged call" => {
+                    maplit::hashset!(Scope::Function, Scope::BasicBlock, Scope::Instruction)
+                }
+                "embedded pe" => maplit::hashset!(Scope::File),
+                "mixed mode" => maplit::hashset!(Scope::File),
+                "forwarded export" => maplit::hashset!(Scope::File),
+                _ => maplit::hashset!(),
+            },
         })
     }
 
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => match self.value.as_str() {
-                "calls from" => Ok(true),
-                "calls to" => Ok(true),
-                "loop" => Ok(true),
-                "recursive call" => Ok(true),
-                "nzxor" => Ok(true),
-                "peb access" => Ok(true),
-                "fs access" => Ok(true),
-                "gs access" => Ok(true),
-                "cross section flow" => Ok(true),
-                "tight loop" => Ok(true),
-                "stack string" => Ok(true),
-                "indirect call" => Ok(true),
-                "call $+5" => Ok(true),
-                "unmanaged call" => Ok(true),
-                _ => Ok(false),
-            },
-            crate::rules::Scope::File => match self.value.as_str() {
-                "embedded pe" => Ok(true),
-                "mixed mode" => Ok(true),
-                "forwarded export" => Ok(true),
-                _ => Ok(false),
-            },
-            crate::rules::Scope::BasicBlock => match self.value.as_str() {
-                "nzxor" => Ok(true),
-                "peb access" => Ok(true),
-                "fs access" => Ok(true),
-                "gs access" => Ok(true),
-                "cross section flow" => Ok(true),
-                "tight loop" => Ok(true),
-                "stack string" => Ok(true),
-                "indirect call" => Ok(true),
-                "call $+5" => Ok(true),
-                "unmanaged call" => Ok(true),
-                _ => Ok(false),
-            },
-            crate::rules::Scope::Instruction => match self.value.as_str() {
-                "nzxor" => Ok(true),
-                "peb access" => Ok(true),
-                "fs access" => Ok(true),
-                "gs access" => Ok(true),
-                "cross section flow" => Ok(true),
-                "indirect call" => Ok(true),
-                "call $+5" => Ok(true),
-                "unmanaged call" => Ok(true),
-                _ => Ok(false),
-            },
-        }
-    }
     pub fn evaluate(
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
@@ -851,27 +993,47 @@ impl CharacteristicFeature {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct StringFeature {
     value: String,
-    description: String,
+    _description: String,
+    scopes: HashSet<Scope>,
+}
+
+impl Hash for StringFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        "string_feature".hash(state);
+        self.value.hash(state);
+    }
+}
+
+impl PartialEq for StringFeature {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl FeatureT for StringFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
 }
 
 impl StringFeature {
     pub fn new(value: &str, description: &str) -> Result<StringFeature> {
         Ok(StringFeature {
             value: value.to_string(),
-            description: description.to_string(),
+            _description: description.to_string(),
+            scopes: maplit::hashset!(
+                Scope::Function,
+                Scope::Instruction,
+                Scope::BasicBlock,
+                Scope::File,
+                Scope::Call,
+                Scope::Thread,
+                Scope::Process
+            ),
         })
-    }
-
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(true),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -884,26 +1046,47 @@ impl StringFeature {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct SubstringFeature {
     value: String,
-    description: String,
+    _description: String,
+    scopes: HashSet<Scope>,
+}
+
+impl Hash for SubstringFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        "substring_feature".hash(state);
+        self.value.hash(state);
+    }
+}
+
+impl PartialEq for SubstringFeature {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl FeatureT for SubstringFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
 }
 
 impl SubstringFeature {
     pub fn new(value: &str, description: &str) -> Result<SubstringFeature> {
         Ok(SubstringFeature {
             value: value.to_string(),
-            description: description.to_string(),
+            _description: description.to_string(),
+            scopes: maplit::hashset!(
+                Scope::Function,
+                Scope::Instruction,
+                Scope::BasicBlock,
+                Scope::File,
+                Scope::Call,
+                Scope::Thread,
+                Scope::Process
+            ),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(true),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -953,6 +1136,7 @@ pub struct RegexFeature {
     value: String,
     _description: String,
     re: regex::bytes::Regex,
+    scopes: HashSet<Scope>,
 }
 
 impl RegexFeature {
@@ -976,15 +1160,16 @@ impl RegexFeature {
             value: value.to_string(),
             _description: description.to_string(),
             re: rr,
+            scopes: maplit::hashset!(
+                Scope::Function,
+                Scope::Instruction,
+                Scope::BasicBlock,
+                Scope::File,
+                Scope::Call,
+                Scope::Thread,
+                Scope::Process
+            ),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(true),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -1022,6 +1207,12 @@ impl PartialEq for RegexFeature {
 
 impl Eq for RegexFeature {}
 
+impl FeatureT for RegexFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
+}
+
 // #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 // pub struct StringFactoryFeature{
 //     value: String,
@@ -1056,10 +1247,11 @@ impl Eq for RegexFeature {}
 // //     }
 // // }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 pub struct BytesFeature {
     value: Vec<u8>,
     _description: String,
+    scopes: HashSet<Scope>,
 }
 
 impl BytesFeature {
@@ -1067,15 +1259,8 @@ impl BytesFeature {
         Ok(BytesFeature {
             value: value.to_owned(),
             _description: description.to_string(),
+            scopes: maplit::hashset!(Scope::Function, Scope::Instruction, Scope::BasicBlock,),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(false),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -1107,12 +1292,17 @@ impl PartialEq for BytesFeature {
     }
 }
 
-impl Eq for BytesFeature {}
+impl FeatureT for BytesFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
+}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 pub struct ArchFeature {
     value: String,
     _description: String,
+    scopes: HashSet<Scope>,
 }
 
 impl ArchFeature {
@@ -1120,15 +1310,17 @@ impl ArchFeature {
         Ok(ArchFeature {
             value: value.to_string(),
             _description: description.to_string(),
+            scopes: maplit::hashset!(
+                Scope::Function,
+                Scope::Instruction,
+                Scope::BasicBlock,
+                Scope::File,
+                Scope::Call,
+                Scope::Thread,
+                Scope::Process,
+                Scope::Global
+            ),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(true),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -1154,12 +1346,17 @@ impl PartialEq for ArchFeature {
     }
 }
 
-impl Eq for ArchFeature {}
+impl FeatureT for ArchFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
+}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 pub struct NamespaceFeature {
     value: String,
     _description: String,
+    scopes: HashSet<Scope>,
 }
 
 impl NamespaceFeature {
@@ -1167,15 +1364,13 @@ impl NamespaceFeature {
         Ok(Self {
             value: value.to_string(),
             _description: description.to_string(),
+            scopes: maplit::hashset!(
+                Scope::Function,
+                Scope::Instruction,
+                Scope::BasicBlock,
+                Scope::File
+            ),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(true),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -1201,12 +1396,17 @@ impl PartialEq for NamespaceFeature {
     }
 }
 
-impl Eq for NamespaceFeature {}
+impl FeatureT for NamespaceFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
+}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 pub struct ClassFeature {
     value: String,
     _description: String,
+    scopes: HashSet<Scope>,
 }
 
 impl ClassFeature {
@@ -1214,15 +1414,13 @@ impl ClassFeature {
         Ok(Self {
             value: value.to_string(),
             _description: description.to_string(),
+            scopes: maplit::hashset!(
+                Scope::Function,
+                Scope::Instruction,
+                Scope::BasicBlock,
+                Scope::File
+            ),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(true),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -1248,12 +1446,17 @@ impl PartialEq for ClassFeature {
     }
 }
 
-impl Eq for ClassFeature {}
+impl FeatureT for ClassFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
+}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 pub struct OsFeature {
     value: String,
     _description: String,
+    scopes: HashSet<Scope>,
 }
 
 impl OsFeature {
@@ -1261,15 +1464,17 @@ impl OsFeature {
         Ok(OsFeature {
             value: value.to_string(),
             _description: description.to_string(),
+            scopes: maplit::hashset!(
+                Scope::Function,
+                Scope::Instruction,
+                Scope::BasicBlock,
+                Scope::File,
+                Scope::Call,
+                Scope::Thread,
+                Scope::Process,
+                Scope::Global
+            ),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(true),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -1295,12 +1500,17 @@ impl PartialEq for OsFeature {
     }
 }
 
-impl Eq for OsFeature {}
+impl FeatureT for OsFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
+}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 pub struct FormatFeature {
     value: String,
     _description: String,
+    scopes: HashSet<Scope>,
 }
 
 impl FormatFeature {
@@ -1308,15 +1518,17 @@ impl FormatFeature {
         Ok(FormatFeature {
             value: value.to_string(),
             _description: description.to_string(),
+            scopes: maplit::hashset!(
+                Scope::Function,
+                Scope::Instruction,
+                Scope::BasicBlock,
+                Scope::File,
+                Scope::Call,
+                Scope::Thread,
+                Scope::Process,
+                Scope::Global
+            ),
         })
-    }
-    pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool> {
-        match scope {
-            crate::rules::Scope::Function => Ok(true),
-            crate::rules::Scope::File => Ok(true),
-            crate::rules::Scope::BasicBlock => Ok(true),
-            crate::rules::Scope::Instruction => Ok(true),
-        }
     }
     pub fn evaluate(
         &self,
@@ -1342,4 +1554,8 @@ impl PartialEq for FormatFeature {
     }
 }
 
-impl Eq for FormatFeature {}
+impl FeatureT for FormatFeature {
+    fn scopes(&self) -> &HashSet<Scope> {
+        &self.scopes
+    }
+}

@@ -54,16 +54,102 @@ impl Value {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Scope {
+    None,
+    Global,
     Function,
     File,
     BasicBlock,
     Instruction,
+    Process,
+    Thread,
+    Call,
+}
+
+impl TryFrom<&Yaml> for Scope {
+    type Error = Error;
+    fn try_from(value: &Yaml) -> std::result::Result<Self, Self::Error> {
+        Ok(match value.as_str() {
+            Some("global") => Scope::Global,
+            Some("function") => Scope::Function,
+            Some("file") => Scope::File,
+            Some("basic block") => Scope::BasicBlock,
+            Some("instruction") => Scope::Instruction,
+            Some("process") => Scope::Process,
+            Some("thread") => Scope::Thread,
+            Some("call") => Scope::Call,
+            Some("unsupported") => Scope::None,
+            Some(_) => {
+                return Err(Error::InvalidScope(
+                    line!(),
+                    value.as_str().unwrap().to_string(),
+                ))
+            }
+            None => Scope::None,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct StaticScope {
+    scope: Scope,
+}
+
+impl TryFrom<&Yaml> for StaticScope {
+    type Error = Error;
+    fn try_from(value: &Yaml) -> std::result::Result<Self, Self::Error> {
+        let scope = Scope::try_from(value)?;
+        match scope {
+            Scope::None
+            | Scope::File
+            | Scope::Global
+            | Scope::Function
+            | Scope::BasicBlock
+            | Scope::Instruction => Ok(Self { scope }),
+            _ => Err(Error::InvalidStaticScope(line!())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct DynamicScope {
+    scope: Scope,
+}
+
+impl TryFrom<&Yaml> for DynamicScope {
+    type Error = Error;
+    fn try_from(value: &Yaml) -> std::result::Result<Self, Self::Error> {
+        let scope = Scope::try_from(value)?;
+        match scope {
+            Scope::None
+            | Scope::File
+            | Scope::Global
+            | Scope::Process
+            | Scope::Thread
+            | Scope::Call => Ok(Self { scope }),
+            _ => Err(Error::InvalidDynamicScope(line!())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct Scopes {
+    r#static: StaticScope,
+    dynamic: DynamicScope,
+}
+
+impl Scopes {
+    pub fn try_from_dict(dict: &Yaml) -> Result<Self> {
+        Ok(Scopes {
+            r#static: StaticScope::try_from(&dict["static"])?,
+            dynamic: DynamicScope::try_from(&dict["dynamic"])?,
+        })
+    }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct Rule {
     pub name: String,
-    scope: Scope,
+    scopes: Scopes,
     statement: StatementElement,
     pub meta: Hash,
     definition: String,
@@ -284,17 +370,7 @@ impl Rule {
             .ok_or_else(|| Error::InvalidRule(line!(), definition.to_string()))?;
         //if scope is not specified, default to function scope.
         //this is probably the mode that rule authors will start with.
-        let scope = match &meta["scope"] {
-            Yaml::String(s) => match s.as_str() {
-                "function" => Scope::Function,
-                "file" => Scope::File,
-                "basic block" => Scope::BasicBlock,
-                "instruction" => Scope::Instruction,
-                _ => return Err(Error::InvalidRule(line!(), definition.to_string())),
-            },
-            Yaml::Null => Scope::Function,
-            _ => return Err(Error::InvalidRule(line!(), definition.to_string())),
-        };
+        let scopes = Scopes::try_from_dict(&meta["scopes"])?;
         let statements = d["rule"]["features"]
             .as_vec()
             .ok_or_else(|| Error::InvalidRule(line!(), definition.to_string()))?;
@@ -319,8 +395,8 @@ impl Rule {
         }
         Rule::new(
             name,
-            &scope,
-            Rule::build_statements(&statements[0], &scope)?,
+            &scopes,
+            Rule::build_statements(&statements[0], &scopes)?,
             &meta
                 .as_hash()
                 .ok_or_else(|| Error::InvalidRule(line!(), definition.to_string()))?
@@ -331,21 +407,21 @@ impl Rule {
 
     pub fn new(
         name: &str,
-        scope: &Scope,
+        scopes: &Scopes,
         statement: StatementElement,
         meta: &Hash,
         definition: &str,
     ) -> Result<Rule> {
         Ok(Rule {
             name: name.to_string(),
-            scope: scope.clone(),
+            scopes: scopes.clone(),
             statement,
             meta: meta.clone(),
             definition: definition.to_string(),
         })
     }
 
-    pub fn build_statements(dd: &Yaml, scope: &Scope) -> Result<StatementElement> {
+    pub fn build_statements(dd: &Yaml, scopes: &Scopes) -> Result<StatementElement> {
         let d = dd
             .as_hash()
             .ok_or_else(|| Error::InvalidRule(line!(), "statement need to be hash".to_string()))?;
@@ -370,7 +446,7 @@ impl Rule {
                         .as_vec()
                         .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                     for vv in val {
-                        let p = Rule::build_statements(vv, scope)?;
+                        let p = Rule::build_statements(vv, scopes)?;
                         match p {
                             StatementElement::Description(s) => description = s.value,
                             _ => params.push(p),
@@ -387,7 +463,7 @@ impl Rule {
                         .as_vec()
                         .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                     for vv in val {
-                        let p = Rule::build_statements(vv, scope)?;
+                        let p = Rule::build_statements(vv, scopes)?;
                         match p {
                             StatementElement::Description(s) => description = s.value,
                             _ => params.push(p),
@@ -404,7 +480,7 @@ impl Rule {
                         .as_vec()
                         .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                     for vv in val {
-                        let p = Rule::build_statements(vv, scope)?;
+                        let p = Rule::build_statements(vv, scopes)?;
                         match p {
                             StatementElement::Description(s) => description = s.value,
                             _ => params.push(p),
@@ -421,7 +497,7 @@ impl Rule {
                         .as_vec()
                         .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                     for vv in val {
-                        let p = Rule::build_statements(vv, scope)?;
+                        let p = Rule::build_statements(vv, scopes)?;
                         match p {
                             StatementElement::Description(s) => description = s.value,
                             _ => params.push(p),
@@ -431,15 +507,144 @@ impl Rule {
                         SomeStatement::new(0, params, &description)?,
                     ))));
                 }
-                "function" => {
-                    if let Scope::File = scope {
+                "process" => {
+                    if [Scope::File].contains(&scopes.r#static.scope)
+                        || [Scope::File].contains(&scopes.dynamic.scope)
+                    {
                         let mut params = vec![];
                         let mut description = "".to_string();
                         let val = vval
                             .as_vec()
                             .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                         for vv in val {
-                            let p = Rule::build_statements(vv, &Scope::Function)?;
+                            let p = Rule::build_statements(
+                                vv,
+                                &Scopes {
+                                    r#static: StaticScope {
+                                        scope: Scope::Process,
+                                    },
+                                    dynamic: DynamicScope { scope: Scope::None },
+                                },
+                            )?;
+                            match p {
+                                StatementElement::Description(s) => description = s.value,
+                                _ => params.push(p),
+                            }
+                        }
+                        if params.len() != 1 {
+                            return Err(Error::InvalidRule(
+                                line!(),
+                                format!("{:?}: {:?}", key, vval),
+                            ));
+                        }
+                        return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
+                            SubscopeStatement::new(
+                                Scope::Process,
+                                params[0].clone(),
+                                &description,
+                            )?,
+                        ))));
+                    }
+                    return Err(Error::InvalidRule(
+                        line!(),
+                        format!("{:?}: {:?}", key, vval),
+                    ));
+                }
+                "thread" => {
+                    if [Scope::File, Scope::Process].contains(&scopes.r#static.scope)
+                        || [Scope::File, Scope::Process].contains(&scopes.dynamic.scope)
+                    {
+                        let mut params = vec![];
+                        let mut description = "".to_string();
+                        let val = vval
+                            .as_vec()
+                            .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+                        for vv in val {
+                            let p = Rule::build_statements(
+                                vv,
+                                &Scopes {
+                                    r#static: StaticScope {
+                                        scope: Scope::Thread,
+                                    },
+                                    dynamic: DynamicScope { scope: Scope::None },
+                                },
+                            )?;
+                            match p {
+                                StatementElement::Description(s) => description = s.value,
+                                _ => params.push(p),
+                            }
+                        }
+                        if params.len() != 1 {
+                            return Err(Error::InvalidRule(
+                                line!(),
+                                format!("{:?}: {:?}", key, vval),
+                            ));
+                        }
+                        return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
+                            SubscopeStatement::new(Scope::Thread, params[0].clone(), &description)?,
+                        ))));
+                    }
+                    return Err(Error::InvalidRule(
+                        line!(),
+                        format!("{:?}: {:?}", key, vval),
+                    ));
+                }
+                "call" => {
+                    if [Scope::File, Scope::Process, Scope::Thread].contains(&scopes.r#static.scope)
+                        || [Scope::File, Scope::Process, Scope::Thread]
+                            .contains(&scopes.dynamic.scope)
+                    {
+                        let mut params = vec![];
+                        let mut description = "".to_string();
+                        let val = vval
+                            .as_vec()
+                            .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+                        for vv in val {
+                            let p = Rule::build_statements(
+                                vv,
+                                &Scopes {
+                                    r#static: StaticScope { scope: Scope::Call },
+                                    dynamic: DynamicScope { scope: Scope::None },
+                                },
+                            )?;
+                            match p {
+                                StatementElement::Description(s) => description = s.value,
+                                _ => params.push(p),
+                            }
+                        }
+                        if params.len() != 1 {
+                            return Err(Error::InvalidRule(
+                                line!(),
+                                format!("{:?}: {:?}", key, vval),
+                            ));
+                        }
+                        return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
+                            SubscopeStatement::new(Scope::Call, params[0].clone(), &description)?,
+                        ))));
+                    }
+                    return Err(Error::InvalidRule(
+                        line!(),
+                        format!("{:?}: {:?}", key, vval),
+                    ));
+                }
+
+                "function" => {
+                    if Scope::File == scopes.r#static.scope || Scope::File == scopes.dynamic.scope {
+                        let mut params = vec![];
+                        let mut description = "".to_string();
+                        let val = vval
+                            .as_vec()
+                            .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+                        for vv in val {
+                            let p = Rule::build_statements(
+                                vv,
+                                &Scopes {
+                                    r#static: StaticScope {
+                                        scope: Scope::Function,
+                                    },
+                                    dynamic: DynamicScope { scope: Scope::None },
+                                },
+                            )?;
                             match p {
                                 StatementElement::Description(s) => description = s.value,
                                 _ => params.push(p),
@@ -465,14 +670,16 @@ impl Rule {
                     ));
                 }
                 "basic block" => {
-                    if let Scope::Function = scope {
+                    if Scope::Function == scopes.r#static.scope
+                        || Scope::Function == scopes.dynamic.scope
+                    {
                         let mut params = vec![];
                         let mut description = "".to_string();
                         let val = vval
                             .as_vec()
                             .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                         for vv in val {
-                            let p = Rule::build_statements(vv, scope)?;
+                            let p = Rule::build_statements(vv, scopes)?;
                             match p {
                                 StatementElement::Description(s) => description = s.value,
                                 _ => params.push(p),
@@ -498,14 +705,16 @@ impl Rule {
                     ));
                 }
                 "instruction" => {
-                    if let Scope::BasicBlock | Scope::Function = scope {
+                    if [Scope::BasicBlock, Scope::Function].contains(&scopes.r#static.scope)
+                        || [Scope::BasicBlock, Scope::Function].contains(&scopes.dynamic.scope)
+                    {
                         let mut params = vec![];
                         let mut description = "".to_string();
                         let val = vval
                             .as_vec()
                             .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                         for vv in val {
-                            let p = Rule::build_statements(vv, scope)?;
+                            let p = Rule::build_statements(vv, scopes)?;
                             match p {
                                 StatementElement::Description(s) => description = s.value,
                                 _ => params.push(p),
@@ -527,7 +736,7 @@ impl Rule {
                     }
                     return Err(Error::InvalidRule(
                         line!(),
-                        format!("{:?},  {:?}: {:?}", scope, key, vval),
+                        format!("{:?},  {:?}: {:?}", scopes, key, vval),
                     ));
                 }
                 _ => {
@@ -546,7 +755,7 @@ impl Rule {
                             .as_vec()
                             .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                         for vv in val {
-                            let p = Rule::build_statements(vv, scope)?;
+                            let p = Rule::build_statements(vv, scopes)?;
                             match p {
                                 StatementElement::Description(s) => description = s.value,
                                 _ => params.push(p),
@@ -587,7 +796,7 @@ impl Rule {
                             //TODO: what about embedded newlines?
                             Feature::new(feature_type, &Value::Str(arg.to_string()), "")?
                         };
-                        Rule::ensure_feature_valid_for_scope(scope, &feature)?;
+                        Rule::ensure_feature_valid_for_scope(scopes, &feature)?;
                         //let val =
                         // vval.as_str().ok_or(Error::InvalidRule(line!(),
                         // format!("{:?} must be string", vval)))?;
@@ -676,7 +885,7 @@ impl Rule {
                             _ => "".to_string(),
                         };
                         let feature = Feature::new(feature_type, &value, &d)?;
-                        Rule::ensure_feature_valid_for_scope(scope, &feature)?;
+                        Rule::ensure_feature_valid_for_scope(scopes, &feature)?;
                         return Ok(StatementElement::Feature(Box::new(feature)));
                     }
                 }
@@ -685,13 +894,13 @@ impl Rule {
         Err(Error::InvalidRule(line!(), "finish".to_string()))
     }
 
-    pub fn ensure_feature_valid_for_scope(scope: &Scope, feature: &Feature) -> Result<()> {
-        if feature.is_supported_in_scope(scope)? {
+    pub fn ensure_feature_valid_for_scope(scopes: &Scopes, feature: &Feature) -> Result<()> {
+        if feature.is_supported_in_scope(scopes)? {
             return Ok(());
         }
         Err(Error::InvalidRule(
             line!(),
-            format!("{:?} not suported in scope {:?}", feature, scope),
+            format!("{:?} not suported in scope {:?}", feature, scopes),
         ))
     }
 
@@ -833,7 +1042,7 @@ pub fn get_rules_and_dependencies<'a>(rules: &'a [Rule], rule_name: &str) -> Res
 pub fn get_rules_with_scope<'a>(rules: Vec<&'a Rule>, scope: &Scope) -> Result<Vec<&'a Rule>> {
     let mut res = vec![];
     for rule in rules {
-        if &rule.scope == scope {
+        if &rule.scopes.r#static.scope == scope || &rule.scopes.dynamic.scope == scope {
             res.push(rule);
         }
     }
