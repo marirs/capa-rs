@@ -8,6 +8,24 @@ use crate::{rules::Value, Error, Result};
 use super::{Scope, Scopes};
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
+pub enum ComType {
+    Class,
+    Interface,
+}
+
+impl TryInto<ComType> for &str {
+    type Error = Error;
+
+    fn try_into(self) -> std::result::Result<ComType, Self::Error> {
+        match self {
+            "class" => Ok(ComType::Class),
+            "interface" => Ok(ComType::Interface),
+            _ => Err(Error::UndefinedComType(self.to_string())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum FeatureAccess {
     Read,
     Write,
@@ -40,6 +58,7 @@ pub enum RuleFeatureType {
     Class,
     OperandNumber(usize),
     OperandOffset(usize),
+    ComType(ComType),
 }
 
 pub trait FeatureT {
@@ -198,6 +217,10 @@ impl Feature {
             RuleFeatureType::OperandOffset(a) => Ok(Feature::OperandOffset(
                 OperandOffsetFeature::new(&a, &value.get_int()? as &i128, description)?,
             )),
+            RuleFeatureType::ComType(_ct) => {
+                //TODO
+                unimplemented!()
+            }
         }
     }
 
@@ -1135,7 +1158,7 @@ impl SubstringFeature {
 pub struct RegexFeature {
     value: String,
     _description: String,
-    re: regex::bytes::Regex,
+    re: fancy_regex::Regex,
     scopes: HashSet<Scope>,
 }
 
@@ -1145,15 +1168,15 @@ impl RegexFeature {
         if value.ends_with("/i") {
             rre = r"(?-u)(?s)(?i)".to_string() + &value["/".len()..value.len() - "/i".len()];
         }
-        rre = rre.replace("\\/", "/");
-        rre = rre.replace("\\\"", "\"");
-        rre = rre.replace("\\'", "'");
-        rre = rre.replace("\\%", "%");
-        let rr = match regex::bytes::Regex::new(&rre) {
+        //        rre = rre.replace("\\/", "/");
+        //        rre = rre.replace("\\\"", "\"");
+        //        rre = rre.replace("\\'", "'");
+        //        rre = rre.replace("\\%", "%");
+        let rr = match fancy_regex::Regex::new(&rre) {
             Ok(s) => s,
             Err(e) => {
                 println!("{:?}", e);
-                return Err(Error::RegexError(e));
+                return Err(Error::FancyRegexError(e));
             }
         };
         Ok(RegexFeature {
@@ -1180,8 +1203,11 @@ impl RegexFeature {
         let mut ll = vec![];
         for (feature, locations) in features {
             if let Feature::String(s) = feature {
-                if self.re.find(s.value.as_bytes()).is_some() {
+                if let Ok(Some(_)) = self.re.find(s.value.as_bytes()) {
+                    //                    eprintln!("true {}\t{}", self.re.as_str(), s.value);
                     ll.extend(locations);
+                } else {
+                    //                    eprintln!("false {}\t{}", self.re.as_str(), s.value);
                 }
             }
         }

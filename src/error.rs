@@ -5,6 +5,8 @@ pub enum Error {
     #[error("{0}")]
     RegexError(#[from] regex::Error),
     #[error("{0}")]
+    FancyRegexError(#[from] fancy_regex::Error),
+    #[error("{0}")]
     FromHexError(#[from] hex::FromHexError),
     #[error("{0}")]
     YamlError(#[from] yaml_rust::ScanError),
@@ -43,6 +45,8 @@ pub enum Error {
     InvalidScope(u32, String),
     #[error("invalid static scope: {0}")]
     InvalidStaticScope(u32),
+    #[error("{0}")]
+    UndefinedComType(String),
     #[error("invalid dynamic scope: {0}")]
     InvalidDynamicScope(u32),
     #[error("{0}")]

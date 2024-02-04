@@ -10,7 +10,14 @@ use statement::{
 use std::collections::HashMap;
 use yaml_rust::{yaml::Hash, Yaml, YamlLoader};
 
+use self::features::ComType;
+
 const MAX_BYTES_FEATURE_SIZE: usize = 0x100;
+
+fn translate_com_features(_name: &str, _com_type: &ComType) -> Vec<StatementElement> {
+    //TODO
+    vec![]
+}
 
 #[derive(Debug)]
 pub enum Value {
@@ -867,6 +874,31 @@ impl Rule {
                                 ))
                             }
                         }
+                    } else if kkey.starts_with("com/") {
+                        let com_type_name = &kkey["com/".len()..];
+                        let com_type: ComType = com_type_name.try_into()?;
+                        let val = match &d[key] {
+                            Yaml::String(s) => s.clone(),
+                            Yaml::Integer(i) => i.to_string(),
+                            _ => return Err(Error::InvalidRule(line!(), format!("{:?}", d[key]))),
+                        };
+                        let description = match &d.get(&Yaml::String("description".to_string())) {
+                            Some(Yaml::String(s)) => Some(s.clone()),
+                            _ => None,
+                        };
+                        let (value, description) = Rule::parse_description(
+                            &val,
+                            &RuleFeatureType::ComType(com_type.clone()),
+                            &description,
+                        )?;
+                        let d = match description {
+                            Some(s) => s,
+                            _ => "".to_string(),
+                        };
+                        let ff = translate_com_features(&value.get_str()?, &com_type);
+                        return Ok(StatementElement::Statement(Box::new(Statement::Or(
+                            OrStatement::new(ff, &d)?,
+                        ))));
                     } else {
                         let feature_type = Rule::parse_feature_type(kkey)?;
                         let val = match &d[key] {
