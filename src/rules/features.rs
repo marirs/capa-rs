@@ -1461,7 +1461,7 @@ impl ClassFeature {
 
 impl std::hash::Hash for ClassFeature {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        "namespace_feature".hash(state);
+        "class_feature".hash(state);
         self.value.to_lowercase().hash(state);
     }
 }

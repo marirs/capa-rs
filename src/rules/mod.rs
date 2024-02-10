@@ -244,7 +244,7 @@ impl Rule {
             "api" => Ok(RuleFeatureType::Api),
             "property/read" => Ok(RuleFeatureType::PropretyRead),
             "property/write" => Ok(RuleFeatureType::PropretyWrite),
-            "namespace" => Ok(RuleFeatureType::StringFactory),
+            "namespace" => Ok(RuleFeatureType::Namespace),
             "string" => Ok(RuleFeatureType::StringFactory),
             "substring" => Ok(RuleFeatureType::Substring),
             "bytes" => Ok(RuleFeatureType::Bytes),

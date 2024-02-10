@@ -9,8 +9,10 @@ use dnfile::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, RwLock},
+    sync::{Arc},
 };
+
+use parking_lot::RwLock;
 
 use crate::extractor::Extractor as BaseExtractor;
 
@@ -173,7 +175,7 @@ impl super::Extractor for Extractor {
                     OpCodeValue::Jmp,
                     OpCodeValue::Newobj,
                 ]
-                .contains(&insn.opcode.value)
+                    .contains(&insn.opcode.value)
                 {
                     continue;
                 }
@@ -212,11 +214,11 @@ impl super::Extractor for Extractor {
             self.extract_function_call_from_features(&f)?,
             self.extract_recurcive_call_features(&f)?,
         ]
-        .into_iter()
-        .fold(Vec::new(), |mut acc, f| {
-            acc.extend(f);
-            acc
-        }))
+            .into_iter()
+            .fold(Vec::new(), |mut acc, f| {
+                acc.extend(f);
+                acc
+            }))
     }
 
     fn get_basic_blocks(
@@ -258,6 +260,7 @@ impl super::Extractor for Extractor {
         ss.extend(self.extract_unmanaged_call_characteristic_features(&f.f, &insn.i)?);
         Ok(ss)
     }
+
 }
 
 impl Extractor {
@@ -290,7 +293,7 @@ impl Extractor {
 
     pub fn extract_file_format(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         Ok(vec![(
-            crate::rules::features::Feature::Os(crate::rules::features::OsFeature::new(
+            crate::rules::features::Feature::Format(crate::rules::features::FormatFeature::new(
                 "dotnet", "",
             )?),
             0,
@@ -308,6 +311,14 @@ impl Extractor {
                 res.push((
                     crate::rules::features::Feature::Import(
                         crate::rules::features::ImportFeature::new(imp, "")?,
+                    ),
+                    *token,
+                ));
+                //split :: get last part and add stringFeature
+                let ss = imp.split("::").collect::<Vec<&str>>();
+                res.push((
+                    crate::rules::features::Feature::String(
+                        crate::rules::features::StringFeature::new(ss[1], "")?,
                     ),
                     *token,
                 ));
@@ -432,11 +443,20 @@ impl Extractor {
         Ok(None)
     }
 
-    pub fn get_properties(&self) -> Result<&RwLock<Option<HashMap<u64, DnMethod>>>> {
-        if let None = *self.properties_cache.read().unwrap() {
-            *self.properties_cache.write().unwrap() = Some(self.get_dotnet_properties()?);
+    pub fn get_properties(&self) -> Result<Arc<RwLock<Option<HashMap<u64, DnMethod>>>>> {
+        {
+            let properties_read = self.properties_cache.read();
+            if properties_read.is_some() {
+                return Ok(self.properties_cache.clone());
+            }
         }
-        Ok(&self.properties_cache)
+
+        let mut properties_write = self.properties_cache.write();
+        if properties_write.is_none() {
+            let dotnet_properties = self.get_dotnet_properties()?;
+            *properties_write = Some(dotnet_properties);
+        }
+        Ok(self.properties_cache.clone())
     }
 
     pub fn get_dotnet_properties(&self) -> Result<HashMap<u64, DnMethod>> {
@@ -489,8 +509,17 @@ impl Extractor {
     }
 
     pub fn get_fields(&self) -> Result<&RwLock<Option<HashMap<u64, DnMethod>>>> {
-        if let None = *self.fields_cache.read().unwrap() {
-            *self.fields_cache.write().unwrap() = Some(self.get_dotnet_fields()?);
+        {
+            let fields_read = self.fields_cache.read();
+            if fields_read.is_some() {
+                return Ok(&self.fields_cache);
+            }
+        }
+
+        let mut fields_write = self.fields_cache.write();
+        if fields_write.is_none() {
+            let dotnet_fields = self.get_dotnet_fields()?;
+            *fields_write = Some(dotnet_fields);
         }
         Ok(&self.fields_cache)
     }
@@ -654,7 +683,7 @@ impl Extractor {
             OpCodeValue::Calli,
             OpCodeValue::Newobj,
         ]
-        .contains(&insn.opcode.value)
+            .contains(&insn.opcode.value)
         {
             return Ok(vec![]);
         }
@@ -674,6 +703,21 @@ impl Extractor {
                         insn.offset as u64,
                     ));
                 }
+                //same for ::
+                if s.contains("::") {
+                    let ss = s.split("::").collect::<Vec<&str>>();
+                    for symbol_variant in crate::extractor::smda::generate_symbols(
+                        &Some(ss[0].to_string()),
+                        &Some(ss[1].to_string()),
+                    )? {
+                        res.push((
+                            crate::rules::features::Feature::Api(
+                                crate::rules::features::ApiFeature::new(&symbol_variant, "")?,
+                            ),
+                            insn.offset as u64,
+                        ));
+                    }
+                }
             }
             Some(Callee::Method(m)) => {
                 if m.name.starts_with("get_") || m.name.starts_with("set_") {
@@ -687,7 +731,6 @@ impl Extractor {
                         if self
                             .get_properties()?
                             .read()
-                            .unwrap()
                             .as_ref()
                             .unwrap()
                             .get(&(insn.operand.value()? as u64))
@@ -716,150 +759,123 @@ impl Extractor {
         _f: &cil::function::Function,
         insn: &cil::instruction::Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+        let mut res = Vec::new();
         if vec![
             OpCodeValue::Call,
             OpCodeValue::Callvirt,
             OpCodeValue::Jmp,
             OpCodeValue::Calli,
         ]
-        .contains(&insn.opcode.value)
+            .contains(&insn.opcode.value)
         {
-            let operand = resolve_dotnet_token(
+            let operand_result = resolve_dotnet_token(
                 &self.pe,
                 &cil::instruction::Operand::Token(clr::token::Token::new(insn.operand.value()?)),
-            )?;
-            if let Some(_operand) = operand.downcast_ref::<MethodDef>() {
-                // check if the method belongs to the MethodDef table and whether it is used to access a property
-                if let Some(prop) = self
-                    .get_properties()?
-                    .read()
-                    .unwrap()
-                    .as_ref()
-                    .unwrap()
-                    .get(&(insn.operand.value()? as u64))
-                {
-                    return Ok(vec![(
-                        crate::rules::features::Feature::Property(
-                            crate::rules::features::PropertyFeature::new(
-                                &prop.to_string(),
-                                prop.access.clone(),
-                                "",
-                            )?,
-                        ),
-                        insn.offset as u64,
-                    )]);
-                }
-            } else if let Some(operand) = operand.downcast_ref::<MemberRef>() {
-                if !operand.name.starts_with("get_") && !operand.name.starts_with("set_") {
-                    return Ok(vec![]);
-                }
-                // if the method belongs to the MemberRef table, we
-                // assume it is used to access a property
-                let (operand_class_type_namespace, operand_class_type_name) =
-                    match operand.class.table() {
-                        "TypeRef" => {
-                            let rr = self
-                                .pe
-                                .net()?
-                                .resolve_coded_index::<TypeRef>(&operand.class)?;
-                            (rr.type_namespace.clone(), rr.type_name.clone())
+            );
+
+            if let Ok(operand) = operand_result {
+                if operand.downcast_ref::<MethodDef>().is_some() {
+                    if let Ok(properties_lock) = self.get_properties() {
+                        if let Some(properties) = properties_lock.read().as_ref() {
+                            if let Some(prop) = properties.get(&(insn.operand.value()? as u64)) {
+                                res.push((
+                                    crate::rules::features::Feature::Property(
+                                        crate::rules::features::PropertyFeature::new(
+                                            &prop.to_string(),
+                                            prop.access.clone(),
+                                            "",
+                                        )?,
+                                    ),
+                                    insn.offset as u64,
+                                ));
+                            }
                         }
-                        "TypeDef" => {
-                            let rr = self
-                                .pe
-                                .net()?
-                                .resolve_coded_index::<TypeDef>(&operand.class)?;
-                            (rr.type_namespace.clone(), rr.type_name.clone())
-                        }
-                        _ => {
-                            return Ok(vec![]);
-                        }
-                    };
-                return Ok(vec![(
-                    crate::rules::features::Feature::Property(
-                        crate::rules::features::PropertyFeature::new(
-                            &format!(
-                                "{}.{}::{}",
-                                operand_class_type_namespace,
-                                operand_class_type_name,
-                                &operand.name[4..]
-                            ),
-                            if operand.name.starts_with("get_") {
-                                Some(crate::rules::features::FeatureAccess::Read)
-                            } else if operand.name.starts_with("set_") {
-                                Some(crate::rules::features::FeatureAccess::Write)
-                            } else {
-                                None
+                    }
+                } else if let Some(operand) = operand.downcast_ref::<MemberRef>() {
+                    // Verifica si el nombre del método indica un acceso a una propiedad (get o set).
+                    if operand.name.starts_with("get_") || operand.name.starts_with("set_") {
+                        // Obtiene el namespace y el nombre de la clase a la que pertenece el MemberRef.
+                        let (operand_class_type_namespace, operand_class_type_name) = match operand.class.table() {
+                            "TypeRef" => {
+                                if let Ok(rr) = self.pe.net()?.resolve_coded_index::<TypeRef>(&operand.class) {
+                                    (rr.type_namespace.clone(), rr.type_name.clone())
+                                } else {
+                                    return Ok(vec![]);
+                                }
                             },
-                            "",
-                        )?,
-                    ),
-                    insn.offset as u64,
-                )]);
+                            "TypeDef" => {
+                                if let Ok(rr) = self.pe.net()?.resolve_coded_index::<TypeDef>(&operand.class) {
+                                    (rr.type_namespace.clone(), rr.type_name.clone())
+                                } else {
+                                    return Ok(vec![]);
+                                }
+                            },
+                            _ => return Ok(vec![]),
+                        };
+
+                        // Construye el nombre completo de la propiedad accedida.
+                        let property_name = format!(
+                            "{}.{}::{}",
+                            operand_class_type_namespace,
+                            operand_class_type_name,
+                            &operand.name[4..] // Remueve "get_" o "set_" del nombre.
+                        );
+
+                        // Determina el tipo de acceso (lectura o escritura) basado en el prefijo del nombre del método.
+                        let access = if operand.name.starts_with("get_") {
+                            Some(crate::rules::features::FeatureAccess::Read)
+                        } else {
+                            Some(crate::rules::features::FeatureAccess::Write)
+                        };
+
+                        // Retorna la información de la propiedad como una característica.
+                        return Ok(vec![(
+                            crate::rules::features::Feature::Property(
+                                crate::rules::features::PropertyFeature::new(
+                                    &property_name,
+                                    access,
+                                    "", // Aquí puedes agregar una descripción adicional si es necesario.
+                                )?,
+                            ),
+                            insn.offset as u64,
+                        )]);
+                    }
+                }
             }
         } else if vec![
             OpCodeValue::Ldfld,
             OpCodeValue::Ldflda,
             OpCodeValue::Ldsfld,
             OpCodeValue::Ldsflda,
+            OpCodeValue::Stfld,
+            OpCodeValue::Stsfld,
         ]
-        .contains(&insn.opcode.value)
+            .contains(&insn.opcode.value)
         {
-            let operand = resolve_dotnet_token(
-                &self.pe,
-                &cil::instruction::Operand::Token(clr::token::Token::new(insn.operand.value()?)),
-            )?;
-            if let Some(_operand) = operand.downcast_ref::<Field>() {
-                // determine whether the operand is a field by checking if it belongs to the Field table
-                if let Some(field) = self
-                    .get_fields()?
-                    .read()
-                    .unwrap()
-                    .as_ref()
-                    .unwrap()
-                    .get(&(insn.operand.value()? as u64))
-                {
-                    return Ok(vec![(
-                        crate::rules::features::Feature::Property(
-                            crate::rules::features::PropertyFeature::new(
-                                &field.to_string(),
-                                Some(crate::rules::features::FeatureAccess::Read),
-                                "",
-                            )?,
-                        ),
-                        insn.offset as u64,
-                    )]);
-                }
-            }
-        } else if vec![OpCodeValue::Stfld, OpCodeValue::Stsfld].contains(&insn.opcode.value) {
-            let operand = resolve_dotnet_token(
-                &self.pe,
-                &cil::instruction::Operand::Token(clr::token::Token::new(insn.operand.value()?)),
-            )?;
-            if let Some(_operand) = operand.downcast_ref::<Field>() {
-                // determine whether the operand is a field by checking if it belongs to the Field table
-                if let Some(field) = self
-                    .get_fields()?
-                    .read()
-                    .unwrap()
-                    .as_ref()
-                    .unwrap()
-                    .get(&(insn.operand.value()? as u64))
-                {
-                    return Ok(vec![(
-                        crate::rules::features::Feature::Property(
-                            crate::rules::features::PropertyFeature::new(
-                                &field.to_string(),
-                                Some(crate::rules::features::FeatureAccess::Write),
-                                "",
-                            )?,
-                        ),
-                        insn.offset as u64,
-                    )]);
+            if let Ok(fields_lock) = self.get_fields() {
+                if let Some(fields) = fields_lock.read().as_ref() {
+                    if let Some(field) = fields.get(&(insn.operand.value()? as u64)) {
+                        let access = if vec![OpCodeValue::Stfld, OpCodeValue::Stsfld].contains(&insn.opcode.value) {
+                            Some(crate::rules::features::FeatureAccess::Write)
+                        } else {
+                            Some(crate::rules::features::FeatureAccess::Read)
+                        };
+                        res.push((
+                            crate::rules::features::Feature::Property(
+                                crate::rules::features::PropertyFeature::new(
+                                    &field.to_string(),
+                                    access,
+                                    "",
+                                )?,
+                            ),
+                            insn.offset as u64,
+                        ));
+                    }
                 }
             }
         }
-        Ok(vec![])
+
+        Ok(res)
     }
 
     pub fn extract_insn_number_features(
@@ -929,7 +945,7 @@ impl Extractor {
             OpCodeValue::Stsfld,
             OpCodeValue::Newobj,
         ]
-        .contains(&insn.opcode.value)
+            .contains(&insn.opcode.value)
         {
             return Ok(vec![]);
         }
@@ -964,20 +980,17 @@ impl Extractor {
                 ));
             }
         } else if operand.downcast_ref::<Field>().is_some() {
-            if let Some(field) = self
-                .get_fields()?
-                .read()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .get(&(insn.operand.value()? as u64))
-            {
-                res.push((
-                    crate::rules::features::Feature::Namespace(
-                        crate::rules::features::NamespaceFeature::new(&field.namespace, "")?,
-                    ),
-                    insn.offset as u64,
-                ));
+            let fields_lock = self.get_fields()?.read();
+
+            if let Some(fields) = &*fields_lock {
+                if let Some(field) = fields.clone().get(&(insn.operand.value()? as u64)){
+                    res.push((
+                        crate::rules::features::Feature::Namespace(
+                            crate::rules::features::NamespaceFeature::new(&field.namespace, "")?,
+                        ),
+                        insn.offset as u64,
+                    ));
+                }
             }
         }
         Ok(res)
@@ -1002,7 +1015,7 @@ impl Extractor {
             OpCodeValue::Stsfld,
             OpCodeValue::Newobj,
         ]
-        .contains(&insn.opcode.value)
+            .contains(&insn.opcode.value)
         {
             return Ok(vec![]);
         }
@@ -1046,25 +1059,22 @@ impl Extractor {
                 ));
             }
         } else if operand.downcast_ref::<Field>().is_some() {
-            if let Some(field) = self
-                .get_fields()?
-                .read()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .get(&(insn.operand.value()? as u64))
-            {
-                res.push((
-                    crate::rules::features::Feature::Class(
-                        crate::rules::features::ClassFeature::new(
-                            &format!("{}.{}", field.namespace, field.class_name),
-                            "",
-                        )?,
-                    ),
-                    insn.offset as u64,
-                ));
+            let fields_lock = self.get_fields()?.read();
+            if let Some(fields) = &*fields_lock {
+                if let Some(field) = fields.get(&(insn.operand.value()? as u64)) {
+                    res.push((
+                        crate::rules::features::Feature::Class(
+                            crate::rules::features::ClassFeature::new(
+                                &format!("{}.{}", field.namespace, field.class_name),
+                                "",
+                            )?,
+                        ),
+                        insn.offset as u64,
+                    ));
+                }
             }
         }
+
         Ok(res)
     }
 
@@ -1079,7 +1089,7 @@ impl Extractor {
             OpCodeValue::Jmp,
             OpCodeValue::Calli,
         ]
-        .contains(&insn.opcode.value)
+            .contains(&insn.opcode.value)
         {
             return Ok(vec![]);
         }
