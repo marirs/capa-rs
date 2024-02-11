@@ -846,7 +846,7 @@ impl Rule {
                                     return Ok(StatementElement::Statement(Box::new(
                                         Statement::Range(RangeStatement::new(
                                             StatementElement::Feature(Box::new(feature)),
-                                            min as u32,
+                                            min,
                                             max as u32,
                                             "",
                                         )?),
@@ -1044,9 +1044,9 @@ pub fn get_rules_and_dependencies<'a>(rules: &'a [Rule], rule_name: &str) -> Res
     }
     let mut wanted = vec![rule_name.to_string()];
 
-    fn rec<'a>(
+    fn rec(
         want: &mut Vec<String>,
-        rule: &'a Rule,
+        rule: &Rule,
         rules_by_name: &HashMap<String, &Rule>,
         namespaces: &HashMap<String, Vec<&Rule>>,
     ) -> Result<()> {

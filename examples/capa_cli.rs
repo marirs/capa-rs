@@ -33,7 +33,7 @@ fn main() {
     match FileCapabilities::from_file(&filename, &rules_path, true, true, &|_s| {}) {
         Err(e) => println!("{:?}", e),
         Ok(s) => {
-            match to_value(&s) {
+            match to_value(s) {
                 Err(e) => println!("serde_json_error: {}", e),
                 Ok(data) => {
                     let data = data.as_object().unwrap();
@@ -120,7 +120,7 @@ fn get_properties(props: &Value, features: Option<&Value>) -> Table {
         Alignment::CENTER,
     )
     .with_hspan(2)]));
-    for (k, v) in &*meta {
+    for (k, v) in meta {
         tbl.add_row(Row::new(vec![
             Cell::new(k)
                 .with_style(Attr::ForegroundColor(color::BRIGHT_BLUE))
@@ -153,7 +153,7 @@ fn get_mitre(attacks: &Map<String, Value>) -> Table {
         Cell::new_align("ATT&CK Technique", Alignment::LEFT),
     ]));
 
-    for (tatic, v) in &*attacks {
+    for (tatic, v) in attacks {
         let techniques = v.as_array().unwrap();
         let techniques = techniques
             .iter()
@@ -183,7 +183,7 @@ fn get_mbc(mbc: &Map<String, Value>) -> Table {
         Cell::new_align("MBC Objective", Alignment::LEFT),
         Cell::new_align("MBC Behavior", Alignment::LEFT),
     ]));
-    for (objective, v) in &*mbc {
+    for (objective, v) in mbc {
         let behaviors = v.as_array().unwrap();
         let behaviours = behaviors
             .iter()
@@ -213,7 +213,7 @@ fn get_namespace(namespace: &Map<String, Value>) -> Table {
         Cell::new_align("Capability", Alignment::LEFT),
         Cell::new_align("Namespace", Alignment::LEFT),
     ]));
-    for (capability, v) in &*namespace {
+    for (capability, v) in namespace {
         let ns = v.as_str().unwrap().to_string();
 
         tbl.add_row(Row::new(vec![
@@ -236,7 +236,7 @@ fn get_verbose_info(extra: &Map<String, Value>) -> Table {
         Cell::new_align("Features", Alignment::LEFT),
         Cell::new_align("Capabilities", Alignment::LEFT),
     ]));
-    for (function, v) in &*extra {
+    for (function, v) in extra {
         let caps = v.as_object().unwrap();
         let address = caps.get("address").unwrap().as_str().unwrap();
         let features = caps.get("features").unwrap().as_u64().unwrap().to_string();

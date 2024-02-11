@@ -94,7 +94,7 @@ impl FileCapabilities {
         #[cfg(feature = "verbose")] counts: &HashMap<u64, usize>,
     ) -> Result<()> {
         for rule in capabilities.keys() {
-            let mut attacks_set: BTreeSet<Attacks>= BTreeSet::new();
+            let mut attacks_set: BTreeSet<Attacks> = BTreeSet::new();
             let mut mbc_set: BTreeSet<Mbc> = BTreeSet::new();
             if rule
                 .meta
@@ -105,9 +105,9 @@ impl FileCapabilities {
                 {
                     for p in s {
                         match Attacks::from_str(p.as_str().unwrap()) {
-                            Ok(attack) =>{
+                            Ok(attack) => {
                                 attacks_set.insert(attack);
-                            },
+                            }
                             Err(e) => {
                                 println!("error = {:?}", e);
                             }
@@ -132,7 +132,7 @@ impl FileCapabilities {
                                 _ => {
                                     self.attacks.insert(
                                         parts[0].to_string(),
-                                        vec![ss.to_string()].iter().cloned().collect(),
+                                        [ss.to_string()].iter().cloned().collect(),
                                     );
                                 }
                             }
@@ -151,10 +151,10 @@ impl FileCapabilities {
                         match Mbc::from_str(p.as_str().unwrap()) {
                             Ok(mbc) => {
                                 mbc_set.insert(mbc);
-                            },
+                            }
                             Err(e) => {
                                 println!("error = {:?}", e);
-                            },
+                            }
                         }
                         let parts: Vec<&str> = p
                             .as_str()
@@ -176,7 +176,7 @@ impl FileCapabilities {
                                 _ => {
                                     self.mbc.insert(
                                         parts[0].to_string(),
-                                        vec![ss.to_string()].iter().cloned().collect(),
+                                        [ss.to_string()].iter().cloned().collect(),
                                     );
                                 }
                             }
@@ -193,12 +193,15 @@ impl FileCapabilities {
                 {
                     self.capability_namespaces
                         .insert(rule.name.clone(), s.clone());
-                    let _ = self.capabilities_associations.entry(rule.name.clone()).or_insert_with(|| CapabilityAssociation {
-                        attack: attacks_set.clone(),
-                        mbc: mbc_set.clone(),
-                        namespace: s.clone(),
-                        name: rule.name.clone(),
-                    });
+                    let _ = self
+                        .capabilities_associations
+                        .entry(rule.name.clone())
+                        .or_insert_with(|| CapabilityAssociation {
+                            attack: attacks_set.clone(),
+                            mbc: mbc_set.clone(),
+                            namespace: s.clone(),
+                            name: rule.name.clone(),
+                        });
                 }
             }
         }
@@ -235,26 +238,38 @@ impl FileCapabilities {
     pub fn construct_json_for_capabilities_associations(self) -> Value {
         let mut rules = serde_json::Map::new();
         for (name, association) in &self.capabilities_associations {
-            let attacks_json = association.attack.iter().map(|a| json!({
-            "id": a.id,
-            "subtechnique": a.subtechnique,
-            "tactic": a.tactic,
-            "technique": a.technique,
-        })).collect::<Vec<_>>();
+            let attacks_json = association
+                .attack
+                .iter()
+                .map(|a| {
+                    json!({
+                        "id": a.id,
+                        "subtechnique": a.subtechnique,
+                        "tactic": a.tactic,
+                        "technique": a.technique,
+                    })
+                })
+                .collect::<Vec<_>>();
 
-            let mbc_json = association.mbc.iter().map(|m| json!({
-            "objective": m.objective,
-            "behavior": m.behavior,
-            "method": m.method,
-            "id": m.id,
-        })).collect::<Vec<_>>();
+            let mbc_json = association
+                .mbc
+                .iter()
+                .map(|m| {
+                    json!({
+                        "objective": m.objective,
+                        "behavior": m.behavior,
+                        "method": m.method,
+                        "id": m.id,
+                    })
+                })
+                .collect::<Vec<_>>();
 
             let association_json = json!({
-            "attacks": attacks_json,
-            "mbc": mbc_json,
-            "namespace": association.namespace,
-            "name": association.name,
-        });
+                "attacks": attacks_json,
+                "mbc": mbc_json,
+                "namespace": association.namespace,
+                "name": association.name,
+            });
 
             rules.insert(name.clone(), association_json);
         }
@@ -263,10 +278,12 @@ impl FileCapabilities {
     pub fn serialize_file_capabilities(self) -> serde_json::Result<String> {
         let mut fc_json = serde_json::to_value(self.clone())?;
         let associations_json = self.construct_json_for_capabilities_associations();
-        fc_json.as_object_mut().unwrap().insert("rules".to_string(), associations_json);
+        fc_json
+            .as_object_mut()
+            .unwrap()
+            .insert("rules".to_string(), associations_json);
         serde_json::to_string(&fc_json)
     }
-
 
     fn get_format(extractor: &Box<dyn extractor::Extractor>) -> Result<FileFormat> {
         Ok(extractor.format())
@@ -526,9 +543,7 @@ fn find_file_capabilities<'a>(
                 }
             }
         } else {
-            file_features
-                .entry(feature)
-                .or_insert_with(std::vec::Vec::new);
+            file_features.entry(feature).or_default();
         }
     }
 
@@ -538,14 +553,8 @@ fn find_file_capabilities<'a>(
 
     let mut matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
 
-    matches.extend(
-        match_fn(&ruleset.file_rules, &file_features, &0x0, logger)?.1
-            .into_iter(),
-    );
-    matches.extend(
-        match_fn(&ruleset.function_rules, &file_features, &0x0, logger)?.1
-            .into_iter(),
-    );
+    matches.extend(match_fn(&ruleset.file_rules, &file_features, &0x0, logger)?.1);
+    matches.extend(match_fn(&ruleset.function_rules, &file_features, &0x0, logger)?.1);
     Ok((matches, file_features.len()))
 }
 
@@ -561,7 +570,11 @@ fn parse_parts_id(s: &str) -> Result<(Vec<String>, String)> {
     let re = regex::Regex::new(r"^(.*?)(?:\s*\[(.*?)])?$").unwrap();
     if let Some(caps) = re.captures(s) {
         let parts_str = caps.get(1).map_or("", |m| m.as_str());
-        let parts: Vec<String> = parts_str.split("::").filter(|s| !s.is_empty()).map(|s| s.to_string()).collect();
+        let parts: Vec<String> = parts_str
+            .split("::")
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
         let id = caps.get(2).map_or("", |m| m.as_str()).to_string();
         Ok((parts, id))
     } else {
@@ -577,7 +590,7 @@ pub struct Properties {
     #[serde(serialize_with = "to_hex", deserialize_with = "from_hex")]
     pub base_address: usize,
 }
-#[derive(Debug, Serialize,Deserialize, Clone, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Attacks {
     pub id: String,
     pub subtechnique: String,
@@ -587,7 +600,7 @@ pub struct Attacks {
 impl Attacks {
     fn from_str(s: &str) -> Result<Self> {
         let (parts, id) = parse_parts_id(s)?;
-        let tactic = parts.get(0).cloned().unwrap_or_default();
+        let tactic = parts.first().cloned().unwrap_or_default();
         let technique = parts.get(1).cloned().unwrap_or_default();
         let subtechnique = parts.get(2).cloned().unwrap_or_default();
 
@@ -631,7 +644,7 @@ impl Default for Mbc {
 impl Mbc {
     fn from_str(s: &str) -> Result<Self> {
         let (parts, id) = parse_parts_id(s)?;
-        let objective = parts.get(0).cloned().unwrap_or_default();
+        let objective = parts.first().cloned().unwrap_or_default();
         let behavior = parts.get(1).cloned().unwrap_or_default();
         let method = parts.get(2).cloned().unwrap_or_default();
 
@@ -779,24 +792,37 @@ fn get_format(f: &str) -> Result<(FileFormat, Vec<u8>)> {
     }
 }
 
-fn get_file_extractors(f: &str,
-                       format: FileFormat,
-                       data: &Vec<u8>,
-                       high_accuracy: bool,
-                       resolve_tailcalls: bool,) -> Result<Box<dyn extractor::Extractor>> {
+fn get_file_extractors(
+    f: &str,
+    format: FileFormat,
+    data: &Vec<u8>,
+    high_accuracy: bool,
+    resolve_tailcalls: bool,
+) -> Result<Box<dyn extractor::Extractor>> {
     match format {
         FileFormat::PE => {
             if let Ok(e) = extractor::dnfile::Extractor::new(f) {
                 Ok(Box::new(e))
-            }
-            else{
-                Ok(Box::new(extractor::smda::Extractor::new(f, high_accuracy, resolve_tailcalls, data)?))
+            } else {
+                Ok(Box::new(extractor::smda::Extractor::new(
+                    f,
+                    high_accuracy,
+                    resolve_tailcalls,
+                    data,
+                )?))
             }
         }
-        FileFormat::ELF => {
-            Ok(Box::new(extractor::smda::Extractor::new(f, high_accuracy, resolve_tailcalls, data)?))
-        }
-        _ => Ok(Box::new(extractor::smda::Extractor::new(f, high_accuracy, resolve_tailcalls, data)?)),
+        FileFormat::ELF => Ok(Box::new(extractor::smda::Extractor::new(
+            f,
+            high_accuracy,
+            resolve_tailcalls,
+            data,
+        )?)),
+        _ => Ok(Box::new(extractor::smda::Extractor::new(
+            f,
+            high_accuracy,
+            resolve_tailcalls,
+            data,
+        )?)),
     }
 }
-

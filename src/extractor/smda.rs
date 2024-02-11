@@ -239,9 +239,19 @@ impl super::Extractor for Extractor {
 }
 
 impl Extractor {
-    pub fn new(path: &str, high_accuracy: bool, resolve_tailcalls: bool, data: &Vec<u8>) -> Result<Extractor> {
+    pub fn new(
+        path: &str,
+        high_accuracy: bool,
+        resolve_tailcalls: bool,
+        data: &Vec<u8>,
+    ) -> Result<Extractor> {
         Ok(Extractor {
-            report: Disassembler::disassemble_file(path, high_accuracy, resolve_tailcalls, Some(&data))?,
+            report: Disassembler::disassemble_file(
+                path,
+                high_accuracy,
+                resolve_tailcalls,
+                Some(data),
+            )?,
             buf: data.clone(),
             path: path.to_string(),
         })
@@ -327,7 +337,9 @@ impl Extractor {
 
     fn _extract_file_embedded_pe(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        for (mz_offset, _pe_offset, _key) in Extractor::find_embedded_pe_headers(&self.report.buffer) {
+        for (mz_offset, _pe_offset, _key) in
+            Extractor::find_embedded_pe_headers(&self.report.buffer)
+        {
             res.push((
                 crate::rules::features::Feature::Characteristic(
                     crate::rules::features::CharacteristicFeature::new("embedded pe", "")?,
@@ -347,7 +359,7 @@ impl Extractor {
                 crate::rules::features::Feature::Section(
                     crate::rules::features::SectionFeature::new(n.trim_matches(char::from(0)), "")?,
                 ),
-                *b as u64,
+                *b,
             ));
         }
         Ok(res)
@@ -879,7 +891,8 @@ impl Extractor {
             if pbytes[current_offset + 0x3E] == pbytes[current_offset + 0x3F] {
                 let key = pbytes[current_offset + 0x3E];
 
-                if pbytes[current_offset] ^ key == b'M' && pbytes[current_offset + 1] ^ key == b'Z' {
+                if pbytes[current_offset] ^ key == b'M' && pbytes[current_offset + 1] ^ key == b'Z'
+                {
                     let e_lfanew = u32::from_le_bytes([
                         pbytes[current_offset + 0x3C] ^ key,
                         pbytes[current_offset + 0x3D] ^ key,
@@ -887,16 +900,19 @@ impl Extractor {
                         0,
                     ]) as usize;
 
-
-                    if current_offset + e_lfanew + 0x18 <= end_safe_zone {
-                        if pbytes[current_offset + e_lfanew] ^ key == b'P' &&
-                            pbytes[current_offset + e_lfanew + 1] ^ key == b'E' &&
-                            pbytes[current_offset + e_lfanew + 2] == key &&
-                            pbytes[current_offset + e_lfanew + 3] == key {
-                            results.push((current_offset as u64, (current_offset + e_lfanew) as u64, key));
-                            current_offset = current_offset + e_lfanew + 4;
-                            continue;
-                        }
+                    if current_offset + e_lfanew + 0x18 <= end_safe_zone
+                        && pbytes[current_offset + e_lfanew] ^ key == b'P'
+                        && pbytes[current_offset + e_lfanew + 1] ^ key == b'E'
+                        && pbytes[current_offset + e_lfanew + 2] == key
+                        && pbytes[current_offset + e_lfanew + 3] == key
+                    {
+                        results.push((
+                            current_offset as u64,
+                            (current_offset + e_lfanew) as u64,
+                            key,
+                        ));
+                        current_offset = current_offset + e_lfanew + 4;
+                        continue;
                     }
                 }
             }
@@ -910,7 +926,7 @@ impl Extractor {
         bytes.iter().map(|&b| b ^ key).collect()
     }
 
-    fn _carve_pe(pbytes: &[u8], offset: u64) -> Result<Vec<(u64, u64)>>{
+    fn _carve_pe(pbytes: &[u8], offset: u64) -> Result<Vec<(u64, u64)>> {
         let mut mz_xor = vec![];
         for key in 0..255 {
             mz_xor.push((
@@ -931,9 +947,9 @@ impl Extractor {
             }
         }
         let mut res = vec![];
-        while !todo.is_empty() {
+        while let Some((off, mzx, pex, key)) = todo.pop() {
             // println!("{}", todo.len());
-            let (off, mzx, pex, key) = todo.pop().unwrap();
+
             //The MZ header has one field we will check
             //e_lfanew is at 0x3c
             let e_lfanew = off + 0x3C;
@@ -1176,7 +1192,9 @@ lazy_static::lazy_static! {
 }
 
 pub fn extract_ascii_strings(data: &[u8], min_length: usize) -> Result<Vec<(String, u64)>> {
-    if data.get(0).map_or(false, |&b| REPEATS.contains(&b) && buf_filled_with(data, &b)) {
+    if data.first().map_or(false, |&b| {
+        REPEATS.contains(&b) && buf_filled_with(data, &b)
+    }) {
         return Ok(vec![]);
     }
     let re = regex::bytes::Regex::new(&format!(r##"([{}]{{{},}})"##, ASCII_BYTE, min_length))?;

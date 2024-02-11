@@ -9,7 +9,7 @@ use dnfile::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc},
+    sync::Arc,
 };
 
 use parking_lot::RwLock;
@@ -175,7 +175,7 @@ impl super::Extractor for Extractor {
                     OpCodeValue::Jmp,
                     OpCodeValue::Newobj,
                 ]
-                    .contains(&insn.opcode.value)
+                .contains(&insn.opcode.value)
                 {
                     continue;
                 }
@@ -210,15 +210,15 @@ impl super::Extractor for Extractor {
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let f: &Function = f.as_any().downcast_ref::<Function>().unwrap();
         Ok([
-            self.extract_function_call_to_features(&f)?,
-            self.extract_function_call_from_features(&f)?,
-            self.extract_recurcive_call_features(&f)?,
+            self.extract_function_call_to_features(f)?,
+            self.extract_function_call_from_features(f)?,
+            self.extract_recurcive_call_features(f)?,
         ]
-            .into_iter()
-            .fold(Vec::new(), |mut acc, f| {
-                acc.extend(f);
-                acc
-            }))
+        .into_iter()
+        .fold(Vec::new(), |mut acc, f| {
+            acc.extend(f);
+            acc
+        }))
     }
 
     fn get_basic_blocks(
@@ -260,7 +260,6 @@ impl super::Extractor for Extractor {
         ss.extend(self.extract_unmanaged_call_characteristic_features(&f.f, &insn.i)?);
         Ok(ss)
     }
-
 }
 
 impl Extractor {
@@ -676,14 +675,14 @@ impl Extractor {
         insn: &cil::instruction::Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        if !vec![
+        if ![
             OpCodeValue::Call,
             OpCodeValue::Callvirt,
             OpCodeValue::Jmp,
             OpCodeValue::Calli,
             OpCodeValue::Newobj,
         ]
-            .contains(&insn.opcode.value)
+        .contains(&insn.opcode.value)
         {
             return Ok(vec![]);
         }
@@ -760,13 +759,13 @@ impl Extractor {
         insn: &cil::instruction::Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = Vec::new();
-        if vec![
+        if [
             OpCodeValue::Call,
             OpCodeValue::Callvirt,
             OpCodeValue::Jmp,
             OpCodeValue::Calli,
         ]
-            .contains(&insn.opcode.value)
+        .contains(&insn.opcode.value)
         {
             let operand_result = resolve_dotnet_token(
                 &self.pe,
@@ -795,23 +794,32 @@ impl Extractor {
                     // Verifica si el nombre del método indica un acceso a una propiedad (get o set).
                     if operand.name.starts_with("get_") || operand.name.starts_with("set_") {
                         // Obtiene el namespace y el nombre de la clase a la que pertenece el MemberRef.
-                        let (operand_class_type_namespace, operand_class_type_name) = match operand.class.table() {
-                            "TypeRef" => {
-                                if let Ok(rr) = self.pe.net()?.resolve_coded_index::<TypeRef>(&operand.class) {
-                                    (rr.type_namespace.clone(), rr.type_name.clone())
-                                } else {
-                                    return Ok(vec![]);
+                        let (operand_class_type_namespace, operand_class_type_name) =
+                            match operand.class.table() {
+                                "TypeRef" => {
+                                    if let Ok(rr) = self
+                                        .pe
+                                        .net()?
+                                        .resolve_coded_index::<TypeRef>(&operand.class)
+                                    {
+                                        (rr.type_namespace.clone(), rr.type_name.clone())
+                                    } else {
+                                        return Ok(vec![]);
+                                    }
                                 }
-                            },
-                            "TypeDef" => {
-                                if let Ok(rr) = self.pe.net()?.resolve_coded_index::<TypeDef>(&operand.class) {
-                                    (rr.type_namespace.clone(), rr.type_name.clone())
-                                } else {
-                                    return Ok(vec![]);
+                                "TypeDef" => {
+                                    if let Ok(rr) = self
+                                        .pe
+                                        .net()?
+                                        .resolve_coded_index::<TypeDef>(&operand.class)
+                                    {
+                                        (rr.type_namespace.clone(), rr.type_name.clone())
+                                    } else {
+                                        return Ok(vec![]);
+                                    }
                                 }
-                            },
-                            _ => return Ok(vec![]),
-                        };
+                                _ => return Ok(vec![]),
+                            };
 
                         // Construye el nombre completo de la propiedad accedida.
                         let property_name = format!(
@@ -842,7 +850,7 @@ impl Extractor {
                     }
                 }
             }
-        } else if vec![
+        } else if [
             OpCodeValue::Ldfld,
             OpCodeValue::Ldflda,
             OpCodeValue::Ldsfld,
@@ -850,12 +858,14 @@ impl Extractor {
             OpCodeValue::Stfld,
             OpCodeValue::Stsfld,
         ]
-            .contains(&insn.opcode.value)
+        .contains(&insn.opcode.value)
         {
             if let Ok(fields_lock) = self.get_fields() {
                 if let Some(fields) = fields_lock.read().as_ref() {
                     if let Some(field) = fields.get(&(insn.operand.value()? as u64)) {
-                        let access = if vec![OpCodeValue::Stfld, OpCodeValue::Stsfld].contains(&insn.opcode.value) {
+                        let access = if [OpCodeValue::Stfld, OpCodeValue::Stsfld]
+                            .contains(&insn.opcode.value)
+                        {
                             Some(crate::rules::features::FeatureAccess::Write)
                         } else {
                             Some(crate::rules::features::FeatureAccess::Read)
@@ -932,7 +942,7 @@ impl Extractor {
         _f: &cil::function::Function,
         insn: &cil::instruction::Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-        if !vec![
+        if ![
             OpCodeValue::Call,
             OpCodeValue::Callvirt,
             OpCodeValue::Jmp,
@@ -945,7 +955,7 @@ impl Extractor {
             OpCodeValue::Stsfld,
             OpCodeValue::Newobj,
         ]
-            .contains(&insn.opcode.value)
+        .contains(&insn.opcode.value)
         {
             return Ok(vec![]);
         }
@@ -983,7 +993,7 @@ impl Extractor {
             let fields_lock = self.get_fields()?.read();
 
             if let Some(fields) = &*fields_lock {
-                if let Some(field) = fields.clone().get(&(insn.operand.value()? as u64)){
+                if let Some(field) = fields.clone().get(&(insn.operand.value()? as u64)) {
                     res.push((
                         crate::rules::features::Feature::Namespace(
                             crate::rules::features::NamespaceFeature::new(&field.namespace, "")?,
@@ -1002,7 +1012,7 @@ impl Extractor {
         _f: &cil::function::Function,
         insn: &cil::instruction::Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-        if !vec![
+        if ![
             OpCodeValue::Call,
             OpCodeValue::Callvirt,
             OpCodeValue::Jmp,
@@ -1015,7 +1025,7 @@ impl Extractor {
             OpCodeValue::Stsfld,
             OpCodeValue::Newobj,
         ]
-            .contains(&insn.opcode.value)
+        .contains(&insn.opcode.value)
         {
             return Ok(vec![]);
         }
@@ -1083,13 +1093,13 @@ impl Extractor {
         _f: &cil::function::Function,
         insn: &cil::instruction::Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-        if !vec![
+        if ![
             OpCodeValue::Call,
             OpCodeValue::Callvirt,
             OpCodeValue::Jmp,
             OpCodeValue::Calli,
         ]
-            .contains(&insn.opcode.value)
+        .contains(&insn.opcode.value)
         {
             return Ok(vec![]);
         }
