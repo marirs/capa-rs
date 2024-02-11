@@ -1,6 +1,6 @@
 [package]
 name = "capa"
-version = "0.3.9"
+version = "0.3.10"
 description = "File capability extractor."
 authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>"]
 keywords = ["capa", "fce", "capability", "file"]
