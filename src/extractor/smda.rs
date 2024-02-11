@@ -12,14 +12,10 @@ use smda::{
 };
 use std::{collections::HashMap, convert::TryInto};
 
-//use super::Extractor;
-use crate::extractor::Extractor as _;
-
 #[derive(Debug, Clone)]
 struct InstructionS {
     i: Instruction,
 }
-
 impl super::Instruction for InstructionS {
     fn is_mov_imm_to_stack(&self) -> Result<bool> {
         is_mov_imm_to_stack(&self.i)
@@ -116,6 +112,7 @@ impl super::Extractor for Extractor {
         res.extend(self.extract_file_export_names()?);
         res.extend(self.extract_file_import_names()?);
         res.extend(self.extract_file_section_names()?);
+        res.extend(self._extract_file_embedded_pe()?);
         res.extend(self.extract_file_strings()?);
         //        res.extend(self.extract_file_function_names(pbytes)?);
         res.extend(self.extract_file_format()?);
@@ -242,10 +239,10 @@ impl super::Extractor for Extractor {
 }
 
 impl Extractor {
-    pub fn new(path: &str, high_accuracy: bool, resolve_tailcalls: bool) -> Result<Extractor> {
+    pub fn new(path: &str, high_accuracy: bool, resolve_tailcalls: bool, data: &Vec<u8>) -> Result<Extractor> {
         Ok(Extractor {
-            report: Disassembler::disassemble_file(path, high_accuracy, resolve_tailcalls)?,
-            buf: Disassembler::load_file(path)?,
+            report: Disassembler::disassemble_file(path, high_accuracy, resolve_tailcalls, Some(&data))?,
+            buf: data.clone(),
             path: path.to_string(),
         })
     }
@@ -330,12 +327,12 @@ impl Extractor {
 
     fn _extract_file_embedded_pe(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        for (offset, _) in Extractor::carve_pe(&self.report.buffer, 1)? {
+        for (mz_offset, _pe_offset, _key) in Extractor::find_embedded_pe_headers(&self.report.buffer) {
             res.push((
                 crate::rules::features::Feature::Characteristic(
                     crate::rules::features::CharacteristicFeature::new("embedded pe", "")?,
                 ),
-                offset,
+                mz_offset,
             ));
         }
         Ok(res)
@@ -365,7 +362,7 @@ impl Extractor {
                         crate::rules::features::Feature::Export(
                             crate::rules::features::ExportFeature::new(e, "")?,
                         ),
-                        *o as u64 - self.get_base_address()?,
+                        *o as u64,
                     ));
                 }
                 Some(re) => {
@@ -373,7 +370,7 @@ impl Extractor {
                         crate::rules::features::Feature::Export(
                             crate::rules::features::ExportFeature::new(re, "")?,
                         ),
-                        *o as u64 - self.get_base_address()?,
+                        *o as u64,
                     ));
                     res.push((
                         crate::rules::features::Feature::Characteristic(
@@ -382,7 +379,7 @@ impl Extractor {
                                 "",
                             )?,
                         ),
-                        *o as u64 - self.get_base_address()?,
+                        *o as u64,
                     ));
                 }
             }
@@ -693,12 +690,12 @@ impl Extractor {
                 let number_int = re_number_int.captures(operand);
                 if let Some(n) = number_hex {
                     number = i128::from_str_radix(&n["num"][2..], 16)?;
-                    if &n["num"] == "-" {
+                    if &n["sign"] == "-" {
                         number *= -1;
                     }
                 } else if let Some(n) = number_int {
                     number = (n["num"]).parse::<i128>()?;
-                    if &n["num"] == "-" {
+                    if &n["sign"] == "-" {
                         number *= -1;
                     }
                 }
@@ -768,58 +765,31 @@ impl Extractor {
         Ok(res)
     }
 
+    fn parse_operand_to_number(&self, operand: &str) -> Option<i128> {
+        if let Some(x) = operand.strip_prefix("0x") {
+            i128::from_str_radix(x, 16).ok()
+        } else if operand.ends_with('h') {
+            i128::from_str_radix(&operand[..operand.len() - 1], 16).ok()
+        } else {
+            i128::from_str_radix(operand, 16).ok()
+        }
+    }
+
     pub fn extract_insn_number_features(
         &self,
         f: &Function,
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        //# example:
-        //#
-        //#     push    3136B0h         ; dwControlCode
         if let Some(o) = &insn.operands {
             let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
-            if insn.mnemonic == "add"
-                && ["esp".to_string(), "rsp".to_string()].contains(&operands[0])
-            {
-                //# skip things like:
-                //#
-                //#    .text:00401140                 call    sub_407E2B
-                //#    .text:00401145                 add     esp, 0Ch
+
+            if insn.mnemonic == "add" && ["esp", "rsp"].contains(&operands[0].as_str()) {
                 return Ok(vec![]);
             }
+
             for (i, operand) in operands.iter().enumerate() {
-                if let Some(x) = operand.strip_prefix("0x") {
-                    if let Ok(s) = i128::from_str_radix(x, 16) {
-                        res.push((
-                            crate::rules::features::Feature::Number(
-                                crate::rules::features::NumberFeature::new(f.bitness, &s, "")?,
-                            ),
-                            insn.offset,
-                        ));
-                        res.push((
-                            crate::rules::features::Feature::OperandNumber(
-                                crate::rules::features::OperandNumberFeature::new(&i, &s, "")?,
-                            ),
-                            insn.offset,
-                        ));
-                    }
-                } else if operand.ends_with('h') {
-                    if let Ok(s) = i128::from_str_radix(&operand[..operand.len() - 1], 16) {
-                        res.push((
-                            crate::rules::features::Feature::Number(
-                                crate::rules::features::NumberFeature::new(f.bitness, &s, "")?,
-                            ),
-                            insn.offset,
-                        ));
-                        res.push((
-                            crate::rules::features::Feature::OperandNumber(
-                                crate::rules::features::OperandNumberFeature::new(&i, &s, "")?,
-                            ),
-                            insn.offset,
-                        ));
-                    }
-                } else if let Ok(s) = i128::from_str_radix(operand, 16) {
+                if let Some(s) = self.parse_operand_to_number(operand) {
                     res.push((
                         crate::rules::features::Feature::Number(
                             crate::rules::features::NumberFeature::new(f.bitness, &s, "")?,
@@ -898,7 +868,49 @@ impl Extractor {
         Ok(res)
     }
 
-    fn carve_pe(pbytes: &[u8], offset: u64) -> Result<Vec<(u64, u64)>> {
+    fn find_embedded_pe_headers(pbytes: &[u8]) -> Vec<(u64, u64, u8)> {
+        let mut results = Vec::new();
+        let start_offset = 64usize;
+        let end = pbytes.len();
+
+        let end_safe_zone = if end > 0x40 { end - 0x40 } else { 0 };
+        let mut current_offset = start_offset;
+        while current_offset < end_safe_zone {
+            if pbytes[current_offset + 0x3E] == pbytes[current_offset + 0x3F] {
+                let key = pbytes[current_offset + 0x3E];
+
+                if pbytes[current_offset] ^ key == b'M' && pbytes[current_offset + 1] ^ key == b'Z' {
+                    let e_lfanew = u32::from_le_bytes([
+                        pbytes[current_offset + 0x3C] ^ key,
+                        pbytes[current_offset + 0x3D] ^ key,
+                        0,
+                        0,
+                    ]) as usize;
+
+
+                    if current_offset + e_lfanew + 0x18 <= end_safe_zone {
+                        if pbytes[current_offset + e_lfanew] ^ key == b'P' &&
+                            pbytes[current_offset + e_lfanew + 1] ^ key == b'E' &&
+                            pbytes[current_offset + e_lfanew + 2] == key &&
+                            pbytes[current_offset + e_lfanew + 3] == key {
+                            results.push((current_offset as u64, (current_offset + e_lfanew) as u64, key));
+                            current_offset = current_offset + e_lfanew + 4;
+                            continue;
+                        }
+                    }
+                }
+            }
+            current_offset += 1;
+        }
+
+        results
+    }
+
+    fn xor_with_key(bytes: &[u8], key: u8) -> Vec<u8> {
+        bytes.iter().map(|&b| b ^ key).collect()
+    }
+
+    fn _carve_pe(pbytes: &[u8], offset: u64) -> Result<Vec<(u64, u64)>>{
         let mut mz_xor = vec![];
         for key in 0..255 {
             mz_xor.push((
@@ -1164,7 +1176,7 @@ lazy_static::lazy_static! {
 }
 
 pub fn extract_ascii_strings(data: &[u8], min_length: usize) -> Result<Vec<(String, u64)>> {
-    if REPEATS.contains(&data[0]) && buf_filled_with(data, &data[0]) {
+    if data.get(0).map_or(false, |&b| REPEATS.contains(&b) && buf_filled_with(data, &b)) {
         return Ok(vec![]);
     }
     let re = regex::bytes::Regex::new(&format!(r##"([{}]{{{},}})"##, ASCII_BYTE, min_length))?;
