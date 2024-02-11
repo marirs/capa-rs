@@ -779,8 +779,8 @@ impl Extractor {
     fn parse_operand_to_number(&self, operand: &str) -> Option<i128> {
         if let Some(x) = operand.strip_prefix("0x") {
             i128::from_str_radix(x, 16).ok()
-        } else if operand.ends_with('h') {
-            i128::from_str_radix(&operand[..operand.len() - 1], 16).ok()
+        } else if let Some(stripped_operand) = operand.strip_suffix('h') {
+            i128::from_str_radix(stripped_operand, 16).ok()
         } else {
             i128::from_str_radix(operand, 16).ok()
         }

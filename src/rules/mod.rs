@@ -874,8 +874,8 @@ impl Rule {
                                 ))
                             }
                         }
-                    } else if kkey.starts_with("com/") {
-                        let com_type_name = &kkey["com/".len()..];
+                    } else if let Some(stripped_key) = kkey.strip_prefix("com/") {
+                        let com_type_name = stripped_key;
                         let com_type: ComType = com_type_name.try_into()?;
                         let val = match &d[key] {
                             Yaml::String(s) => s.clone(),
