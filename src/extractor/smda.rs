@@ -1,5 +1,4 @@
-#![allow(dead_code)]
-#![allow(clippy::to_string_in_format_args)]
+#![allow(dead_code, clippy::to_string_in_format_args)]
 use crate::{
     consts::{FileFormat, Os},
     error::Error,
