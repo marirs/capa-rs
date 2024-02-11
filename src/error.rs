@@ -5,7 +5,7 @@ pub enum Error {
     #[error("{0}")]
     RegexError(#[from] regex::Error),
     #[error("{0}")]
-    FancyRegexError(#[from] fancy_regex::Error),
+    FancyRegexError(#[from] Box<fancy_regex::Error>),
     #[error("{0}")]
     FromHexError(#[from] hex::FromHexError),
     #[error("{0}")]

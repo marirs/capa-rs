@@ -1176,7 +1176,7 @@ impl RegexFeature {
             Ok(s) => s,
             Err(e) => {
                 println!("{:?}", e);
-                return Err(Error::FancyRegexError(e));
+                return Err(Error::FancyRegexError(Box::new(e)));
             }
         };
         Ok(RegexFeature {
