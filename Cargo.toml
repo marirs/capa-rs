@@ -13,13 +13,12 @@ edition = "2021"
 
 [dependencies]
 hex = "0.4.3"
-itertools = "0.10.3"
+itertools = "0.12.1"
 pdb = "0.8.0"
 petgraph = "0.6.2"
 regex = "1.5"
 fancy-regex = { git = "https://github.com/mnaza/fancy-regex.git" }
 serde = { version = "1", features = ["derive"] }
-#smda = {git = "https://github.com/jorgeaduran/smda-rs.git", branch = "fixes"}
 smda = "0.2.6"
 thiserror = "1"
 walkdir = "2.3.2"
@@ -27,7 +26,6 @@ yaml-rust = "0.4.5"
 goblin = { version = "0.8.0", features = ["alloc"] }
 maplit = "1"
 dnfile = { git = "https://github.com/marirs/dnfile-rs.git", branch = "master" }
-#dnfile = { git = "https://github.com/jorgeaduran/dnfile-rs.git", branch = "features/optimize_decoding" }
 lazy_static = "1.4.0"
 parking_lot = "0.12.1"
 serde_json = "1.0.113"
