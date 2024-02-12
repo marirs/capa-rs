@@ -93,9 +93,9 @@ impl FileCapabilities {
         capabilities: &HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
         #[cfg(feature = "verbose")] counts: &HashMap<u64, usize>,
     ) -> Result<()> {
+        let mut attacks_set: BTreeSet<Attacks> = BTreeSet::new();
+        let mut mbc_set: BTreeSet<Mbc> = BTreeSet::new();
         for rule in capabilities.keys() {
-            let mut attacks_set: BTreeSet<Attacks> = BTreeSet::new();
-            let mut mbc_set: BTreeSet<Mbc> = BTreeSet::new();
             if rule
                 .meta
                 .contains_key(&yaml_rust::Yaml::String("att&ck".to_string()))
@@ -322,6 +322,7 @@ fn find_function_capabilities<'a>(
 
     for (feature, va) in itertools::chain!(
         extractor.extract_function_features(f)?,
+        extractor.extract_file_features()?,
         extractor.extract_global_features()?
     ) {
         match function_features.get_mut(&feature) {
@@ -368,22 +369,7 @@ fn find_function_capabilities<'a>(
         let insns = extractor.get_instructions(f, &bb)?;
         let _n_insns = insns.len();
         for (_insn_index, insn) in insns.iter().enumerate() {
-            //            println!("0x{:02x}, {:?}", insn.offset, insn);
-            //            logger(&format!("\t\tinstruction {} from {}", insn_index, _n_insns));
             for (feature, va) in extractor.extract_insn_features(f, insn)? {
-                //printear las features Number
-                // match feature.clone() {
-                //     crate::rules::features::Feature::Number(number_feature) => {
-                //         let target_addr = 5369669796u64;
-                //         let range = 16; // 8 bits a cada lado
-                //
-                //         if (target_addr.saturating_sub(range)..=target_addr.saturating_add(range)).contains(&va) {
-                //             println!("Feature Number: {:?} va={:?}", number_feature, va);
-                //         }
-                //
-                //     }
-                //     _ => {} // Para otros tipos de features, no haces nada.
-                // }
                 match bb_features.get_mut(&feature) {
                     Some(s) => s.push(va),
                     _ => {
