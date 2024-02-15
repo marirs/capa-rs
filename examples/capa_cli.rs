@@ -1,16 +1,16 @@
-use std::fs;
 use capa::FileCapabilities;
 use clap::Parser;
 use prettytable::{color, format::Alignment, Attr, Cell, Row, Table};
 use serde_json::{to_value, Map, Value};
+use std::fs;
 use std::time::Instant;
 
 #[derive(Parser)]
 #[clap(
-author,
-version,
-about,
-long_about = "Find Capabilities of a given file!"
+    author,
+    version,
+    about,
+    long_about = "Find Capabilities of a given file!"
 )]
 struct CliOpts {
     /// File to analyse
@@ -133,7 +133,7 @@ fn get_properties(props: &Value, features: Option<&Value>) -> Table {
         "File Properties",
         Alignment::CENTER,
     )
-        .with_hspan(2)]));
+    .with_hspan(2)]));
     for (k, v) in meta {
         tbl.add_row(Row::new(vec![
             Cell::new(k)
@@ -161,7 +161,7 @@ fn get_mitre(attacks: &Map<String, Value>) -> Table {
         "MITRE ATT&CK",
         Alignment::CENTER,
     )
-        .with_hspan(2)]));
+    .with_hspan(2)]));
     tbl.set_titles(Row::new(vec![
         Cell::new_align("ATT&CK Tactic", Alignment::LEFT),
         Cell::new_align("ATT&CK Technique", Alignment::LEFT),
@@ -192,7 +192,7 @@ fn get_mbc(mbc: &Map<String, Value>) -> Table {
         "Malware Behavior Catalog",
         Alignment::CENTER,
     )
-        .with_hspan(2)]));
+    .with_hspan(2)]));
     tbl.set_titles(Row::new(vec![
         Cell::new_align("MBC Objective", Alignment::LEFT),
         Cell::new_align("MBC Behavior", Alignment::LEFT),
@@ -222,7 +222,7 @@ fn get_namespace(namespace: &Map<String, Value>) -> Table {
         "File Capability/Namespace",
         Alignment::CENTER,
     )
-        .with_hspan(2)]));
+    .with_hspan(2)]));
     tbl.set_titles(Row::new(vec![
         Cell::new_align("Capability", Alignment::LEFT),
         Cell::new_align("Namespace", Alignment::LEFT),
