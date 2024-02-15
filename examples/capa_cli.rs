@@ -1,3 +1,4 @@
+use std::fs;
 use capa::FileCapabilities;
 use clap::Parser;
 use prettytable::{color, format::Alignment, Attr, Cell, Row, Table};
@@ -6,10 +7,10 @@ use std::time::Instant;
 
 #[derive(Parser)]
 #[clap(
-    author,
-    version,
-    about,
-    long_about = "Find Capabilities of a given file!"
+author,
+version,
+about,
+long_about = "Find Capabilities of a given file!"
 )]
 struct CliOpts {
     /// File to analyse
@@ -21,6 +22,12 @@ struct CliOpts {
     /// verbose output
     #[clap(long)]
     verbose: bool,
+    /// file path to save the result in json format
+    #[clap(short = 'o', long, value_name = "JSON_PATH")]
+    output: Option<String>,
+    /// map_features
+    #[clap(short = 'm', long, default_value = "false")]
+    map_features: bool,
 }
 
 fn main() {
@@ -28,12 +35,14 @@ fn main() {
     let filename = cli.name;
     let rules_path = cli.rules_path;
     let verbose = cli.verbose;
+    let map_features = cli.map_features;
+    let json_path = cli.output;
 
     let start = Instant::now();
-    match FileCapabilities::from_file(&filename, &rules_path, true, true, &|_s| {}) {
+    match FileCapabilities::from_file(&filename, &rules_path, true, true, &|_s| {}, map_features) {
         Err(e) => println!("{:?}", e),
         Ok(s) => {
-            match to_value(s) {
+            match to_value(&s) {
                 Err(e) => println!("serde_json_error: {}", e),
                 Ok(data) => {
                     let data = data.as_object().unwrap();
@@ -105,6 +114,11 @@ fn main() {
                     println!();
                 }
             }
+            if let Some(json_path) = json_path {
+                let json = s.serialize_file_capabilities().unwrap();
+                fs::write(json_path.clone(), json).expect("Unable to write file");
+                println!("Analysis result saved in JSON format at: {}", json_path);
+            }
         }
     }
     println!("Time taken (seconds): {:?}", start.elapsed());
@@ -119,7 +133,7 @@ fn get_properties(props: &Value, features: Option<&Value>) -> Table {
         "File Properties",
         Alignment::CENTER,
     )
-    .with_hspan(2)]));
+        .with_hspan(2)]));
     for (k, v) in meta {
         tbl.add_row(Row::new(vec![
             Cell::new(k)
@@ -147,7 +161,7 @@ fn get_mitre(attacks: &Map<String, Value>) -> Table {
         "MITRE ATT&CK",
         Alignment::CENTER,
     )
-    .with_hspan(2)]));
+        .with_hspan(2)]));
     tbl.set_titles(Row::new(vec![
         Cell::new_align("ATT&CK Tactic", Alignment::LEFT),
         Cell::new_align("ATT&CK Technique", Alignment::LEFT),
@@ -178,7 +192,7 @@ fn get_mbc(mbc: &Map<String, Value>) -> Table {
         "Malware Behavior Catalog",
         Alignment::CENTER,
     )
-    .with_hspan(2)]));
+        .with_hspan(2)]));
     tbl.set_titles(Row::new(vec![
         Cell::new_align("MBC Objective", Alignment::LEFT),
         Cell::new_align("MBC Behavior", Alignment::LEFT),
@@ -208,7 +222,7 @@ fn get_namespace(namespace: &Map<String, Value>) -> Table {
         "File Capability/Namespace",
         Alignment::CENTER,
     )
-    .with_hspan(2)]));
+        .with_hspan(2)]));
     tbl.set_titles(Row::new(vec![
         Cell::new_align("Capability", Alignment::LEFT),
         Cell::new_align("Namespace", Alignment::LEFT),
