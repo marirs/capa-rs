@@ -15,6 +15,8 @@ use std::{
 mod error;
 pub use crate::error::Error;
 use serde_json::{json, Value};
+use yaml_rust::Yaml;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl FileCapabilities {
@@ -24,6 +26,7 @@ impl FileCapabilities {
         high_accuracy: bool,
         resolve_tailcalls: bool,
         logger: &dyn Fn(&str),
+        features_dump: bool,
     ) -> Result<Self> {
         //! Loads a binary from a given file for capability analysis
         //! ## Example
@@ -32,7 +35,7 @@ impl FileCapabilities {
         //!
         //! let rules_path = "./rules";
         //! let file_to_analyse = "./demo.exe";
-        //! let result = FileCapabilities::from_file(file_to_analyse, rules_path, true, true, &|_s| {});
+        //! let result = FileCapabilities::from_file(file_to_analyse, rules_path, true, true, &|_s| {}, false);
         //! println!("{:?}", result);
         //! ```
         let f = file_name.to_string();
@@ -53,12 +56,18 @@ impl FileCapabilities {
         }
         #[cfg(not(feature = "verbose"))]
         {
-            let (capabilities, _counts) = find_capabilities(&rules, &extractor, logger)?;
+            let (capabilities, _counts, _map_features) = find_capabilities(&rules, &extractor, logger, features_dump)?;
+            if features_dump {
+                file_capabilities.map_features = _map_features;
+            }
             file_capabilities.update_capabilities(&capabilities)?;
         }
         #[cfg(feature = "verbose")]
         {
-            let (capabilities, counts) = find_capabilities(&rules, &extractor, logger)?;
+            let (capabilities, counts, _map_features) = find_capabilities(&rules, &extractor, logger, features_dump)?;
+            if features_dump {
+                file_capabilities.map_features = _map_features;
+            }
             file_capabilities.update_capabilities(&capabilities, &counts)?;
         }
 
@@ -84,6 +93,7 @@ impl FileCapabilities {
             #[cfg(feature = "verbose")]
             functions_capabilities: BTreeMap::new(),
             tags: BTreeSet::new(),
+            map_features: HashMap::new(),
             capabilities_associations: BTreeMap::new(),
         })
     }
@@ -93,183 +103,118 @@ impl FileCapabilities {
         capabilities: &HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
         #[cfg(feature = "verbose")] counts: &HashMap<u64, usize>,
     ) -> Result<()> {
-        let mut attacks_set: BTreeSet<Attacks> = BTreeSet::new();
-        let mut mbc_set: BTreeSet<Mbc> = BTreeSet::new();
-        for rule in capabilities.keys() {
-            if rule
-                .meta
-                .contains_key(&yaml_rust::Yaml::String("att&ck".to_string()))
-            {
-                if let yaml_rust::Yaml::Array(s) =
-                    &rule.meta[&yaml_rust::Yaml::String("att&ck".to_string())]
-                {
-                    for p in s {
-                        match Attacks::from_str(p.as_str().unwrap()) {
-                            Ok(attack) => {
-                                attacks_set.insert(attack);
-                            }
-                            Err(e) => {
-                                println!("error = {:?}", e);
-                            }
-                        }
-                        let parts: Vec<&str> = p
-                            .as_str()
-                            .ok_or_else(|| Error::InvalidRule(line!(), file!().to_string()))?
-                            .split("::")
-                            .collect();
-                        if parts.len() > 1 {
-                            let ss = parts[1..].join("::");
-                            let re = regex::Regex::new(r##"[^]]*\[(?P<tag>[^]]*)]"##)?;
-                            if let Some(s) = re.captures(&ss) {
-                                if let Some(t) = s.name("tag") {
-                                    self.tags.insert(t.as_str().to_string());
-                                }
-                            }
-                            match self.attacks.get_mut(parts[0]) {
-                                Some(s) => {
-                                    s.insert(ss);
-                                }
-                                _ => {
-                                    self.attacks.insert(
-                                        parts[0].to_string(),
-                                        [ss.to_string()].iter().cloned().collect(),
-                                    );
-                                }
+        let re = regex::Regex::new(r##"[^]]*\[(?P<tag>[^]]*)]"##)?;
+        for (rule, caps) in capabilities {
+            let mut local_attacks_set: BTreeSet<Attacks> = BTreeSet::new();
+            let mut local_mbc_set: BTreeSet<Mbc> = BTreeSet::new();
+
+            if let Some(Yaml::Array(attacks)) = rule.meta.get(&Yaml::String("att&ck".to_string())) {
+                for p in attacks.iter().filter_map(|item| item.as_str()) {
+                    if let Ok(attack) = Attacks::from_str(p) {
+                        local_attacks_set.insert(attack);
+                    }
+
+                    let parts: Vec<&str> = p.split("::").collect();
+                    if parts.len() > 1 {
+                        let detail = parts[1..].join("::");
+                        if let Some(caps) = re.captures(&detail) {
+                            if let Some(tag_match) = caps.name("tag") {
+                                self.tags.insert(tag_match.as_str().to_string());
                             }
                         }
+
+                        self.attacks.entry(parts[0].to_string())
+                            .or_insert_with(BTreeSet::new)
+                            .insert(detail);
                     }
                 }
             }
-            if rule
-                .meta
-                .contains_key(&yaml_rust::Yaml::String("mbc".to_string()))
-            {
-                if let yaml_rust::Yaml::Array(s) =
-                    &rule.meta[&yaml_rust::Yaml::String("mbc".to_string())]
-                {
-                    for p in s {
-                        match Mbc::from_str(p.as_str().unwrap()) {
-                            Ok(mbc) => {
-                                mbc_set.insert(mbc);
-                            }
-                            Err(e) => {
-                                println!("error = {:?}", e);
-                            }
-                        }
-                        let parts: Vec<&str> = p
-                            .as_str()
-                            .ok_or_else(|| Error::InvalidRule(line!(), file!().to_string()))?
-                            .split("::")
-                            .collect();
-                        if parts.len() > 1 {
-                            let ss = parts[1..].join("::");
-                            let re = regex::Regex::new(r##"[^]]*\[(?P<tag>[^]]*)]"##)?;
-                            if let Some(s) = re.captures(&ss) {
-                                if let Some(t) = s.name("tag") {
-                                    self.tags.insert(t.as_str().to_string());
-                                }
-                            }
-                            match self.mbc.get_mut(parts[0]) {
-                                Some(s) => {
-                                    s.insert(ss);
-                                }
-                                _ => {
-                                    self.mbc.insert(
-                                        parts[0].to_string(),
-                                        [ss.to_string()].iter().cloned().collect(),
-                                    );
-                                }
+
+            if let Some(Yaml::Array(mbcs)) = rule.meta.get(&Yaml::String("mbc".to_string())) {
+                for p in mbcs.iter().filter_map(|item| item.as_str()) {
+                    if let Ok(mbc) = Mbc::from_str(p) {
+                        local_mbc_set.insert(mbc);
+                    }
+
+                    let parts: Vec<&str> = p.split("::").collect();
+                    if parts.len() > 1 {
+                        let detail = parts[1..].join("::");
+                        if let Some(caps) = re.captures(&detail) {
+                            if let Some(tag_match) = caps.name("tag") {
+                                self.tags.insert(tag_match.as_str().to_string());
                             }
                         }
+
+                        self.mbc.entry(parts[0].to_string())
+                            .or_insert_with(BTreeSet::new)
+                            .insert(detail);
                     }
                 }
             }
-            if rule
-                .meta
-                .contains_key(&yaml_rust::Yaml::String("namespace".to_string()))
-            {
-                if let yaml_rust::Yaml::String(s) =
-                    &rule.meta[&yaml_rust::Yaml::String("namespace".to_string())]
-                {
-                    self.capability_namespaces
-                        .insert(rule.name.clone(), s.clone());
-                    let _ = self
-                        .capabilities_associations
-                        .entry(rule.name.clone())
-                        .or_insert_with(|| CapabilityAssociation {
-                            attack: attacks_set.clone(),
-                            mbc: mbc_set.clone(),
-                            namespace: s.clone(),
-                            name: rule.name.clone(),
-                        });
+
+            if let Some(namespace) = rule.meta.get(&Yaml::String("namespace".to_string())) {
+                if let Yaml::String(s) = namespace {
+                    self.capability_namespaces.insert(rule.name.clone(), s.clone());
+                    let first_non_zero_address = caps.iter()
+                        .find(|&&(addr, _)| addr != 0)
+                        .map(|&(addr, _)| addr)
+                        .unwrap_or(0);
+
+                    let _ = self.capabilities_associations.entry(rule.name.clone()).or_insert_with(|| CapabilityAssociation {
+                        attack: local_attacks_set.clone(),
+                        mbc: local_mbc_set.clone(),
+                        namespace: s.clone(),
+                        name: rule.name.clone(),
+                        address: first_non_zero_address as usize,
+                    });
                 }
             }
-        }
-        #[cfg(feature = "verbose")]
-        {
-            self.features = counts[&0];
+            #[cfg(feature = "verbose")]
+            {
+                for &(addr, _) in caps {
+                    if addr != 0 {
+                        self.functions_capabilities.entry(addr)
+                            .and_modify(|fc| {
+                                fc.capabilities.push(rule.name.clone());
+                            })
+                            .or_insert_with(|| FunctionCapabilities {
+                                address: addr as usize,
+                                features: *counts.get(&addr).unwrap_or(&0),
+                                capabilities: vec![rule.name.clone()],
+                            });
+                    }
+                }
+                self.features = counts[&0];
+            }
         }
 
-        #[cfg(feature = "verbose")]
-        for (addr, count) in counts {
-            if addr == &0 {
-                continue;
-            }
-            eprintln!("{}, {}", addr, count);
-            let mut fc = FunctionCapabilities {
-                address: *addr as usize,
-                features: *count,
-                capabilities: vec![],
-            };
-            for (rule, caps) in capabilities {
-                for cap in caps {
-                    if &cap.0 == addr {
-                        fc.capabilities.push(rule.name.clone());
-                    }
-                }
-            }
-            if fc.capabilities.len() > 0 {
-                self.functions_capabilities.insert(addr.clone(), fc);
-            }
-        }
         Ok(())
     }
 
     pub fn construct_json_for_capabilities_associations(self) -> Value {
         let mut rules = serde_json::Map::new();
         for (name, association) in &self.capabilities_associations {
-            let attacks_json = association
-                .attack
-                .iter()
-                .map(|a| {
-                    json!({
-                        "id": a.id,
-                        "subtechnique": a.subtechnique,
-                        "tactic": a.tactic,
-                        "technique": a.technique,
-                    })
-                })
-                .collect::<Vec<_>>();
+            let attacks_json = association.attack.iter().map(|a| json!({
+            "id": a.id,
+            "subtechnique": a.subtechnique,
+            "tactic": a.tactic,
+            "technique": a.technique,
+        })).collect::<Vec<_>>();
 
-            let mbc_json = association
-                .mbc
-                .iter()
-                .map(|m| {
-                    json!({
-                        "objective": m.objective,
-                        "behavior": m.behavior,
-                        "method": m.method,
-                        "id": m.id,
-                    })
-                })
-                .collect::<Vec<_>>();
+            let mbc_json = association.mbc.iter().map(|m| json!({
+            "objective": m.objective,
+            "behavior": m.behavior,
+            "method": m.method,
+            "id": m.id,
+        })).collect::<Vec<_>>();
 
             let association_json = json!({
-                "attacks": attacks_json,
-                "mbc": mbc_json,
-                "namespace": association.namespace,
-                "name": association.name,
-            });
+            "attacks": attacks_json,
+            "mbc": mbc_json,
+            "namespace": association.namespace,
+            "name": association.name,
+            "address": association.address,
+        });
 
             rules.insert(name.clone(), association_json);
         }
@@ -277,11 +222,14 @@ impl FileCapabilities {
     }
     pub fn serialize_file_capabilities(self) -> serde_json::Result<String> {
         let mut fc_json = serde_json::to_value(self.clone())?;
-        let associations_json = self.construct_json_for_capabilities_associations();
-        fc_json
-            .as_object_mut()
-            .unwrap()
-            .insert("rules".to_string(), associations_json);
+        let associations_json = self.clone().construct_json_for_capabilities_associations();
+        fc_json.as_object_mut().unwrap().insert("rules".to_string(), associations_json);
+        if let Some(map_features) = fc_json.get("map_features") {
+            if map_features.as_object().map_or(false, |m| m.is_empty()) {
+                fc_json.as_object_mut().unwrap().remove("map_features");
+            }
+        }
+
         serde_json::to_string(&fc_json)
     }
 
@@ -311,127 +259,83 @@ fn find_function_capabilities<'a>(
     extractor: &Box<dyn crate::extractor::Extractor>,
     f: &Box<dyn extractor::Function>,
     logger: &dyn Fn(&str),
+    map_features: &mut HashMap<crate::rules::features::Feature, Vec<u64>>,
+    features_dump: bool,
 ) -> Result<(
     HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     usize,
 )> {
-    //    println!("0x{:02x}", f.offset);
     let mut function_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
-    let mut bb_matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
 
-    for (feature, va) in itertools::chain!(
-        extractor.extract_function_features(f)?,
-        extractor.extract_file_features()?,
-        extractor.extract_global_features()?
-    ) {
-        match function_features.get_mut(&feature) {
-            Some(s) => s.push(va),
-            _ => {
-                function_features.insert(feature.clone(), vec![va]);
-            }
+    for (feature, va) in extractor.extract_global_features()? {
+        function_features.entry(feature).or_default().push(va);
+    }
+
+    for (feature, va) in extractor.extract_function_features(f)? {
+        function_features.entry(feature).or_default().push(va);
+    }
+
+    // Condition for .NET and add file features if necessary
+    if extractor.is_dot_net() {
+        for (feature, va) in extractor.extract_file_features()? {
+            function_features.entry(feature).or_default().push(va);
         }
     }
+
     let blocks = extractor.get_basic_blocks(f)?;
-    let _n_blocks = blocks.len();
-    for (index, bb) in blocks.iter().enumerate() {
-        logger(&format!("\tblock {} from {}", index, _n_blocks));
+    let mut bb_matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
+    for bb in blocks.iter() {
         let mut bb_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
-        for (feature, va) in extractor.extract_basic_block_features(f, &bb)? {
-            match bb_features.get_mut(&feature) {
-                Some(s) => s.push(va),
-                _ => {
-                    bb_features.insert(feature.clone(), vec![va]);
-                }
-            }
-            match function_features.get_mut(&feature) {
-                Some(s) => s.push(va),
-                _ => {
-                    function_features.insert(feature.clone(), vec![va]);
-                }
-            }
-        }
-        for (feature, va) in extractor.extract_global_features()? {
-            match bb_features.get_mut(&feature) {
-                Some(s) => s.push(va),
-                _ => {
-                    bb_features.insert(feature.clone(), vec![va]);
-                }
-            }
-            match function_features.get_mut(&feature) {
-                Some(s) => s.push(va),
-                _ => {
-                    function_features.insert(feature.clone(), vec![va]);
-                }
-            }
+        for (feature, va) in itertools::chain!(
+            extractor.extract_basic_block_features(f, &bb)?,
+            extractor.extract_global_features()?
+        ) {
+            bb_features.entry(feature.clone()).or_default().push(va);
+            function_features.entry(feature).or_default().push(va);
         }
 
         let insns = extractor.get_instructions(f, &bb)?;
-        let _n_insns = insns.len();
-        for (_insn_index, insn) in insns.iter().enumerate() {
+        for insn in insns.iter() {
             for (feature, va) in extractor.extract_insn_features(f, insn)? {
-                match bb_features.get_mut(&feature) {
-                    Some(s) => s.push(va),
-                    _ => {
-                        bb_features.insert(feature.clone(), vec![va]);
-                    }
-                }
-                match function_features.get_mut(&feature) {
-                    Some(s) => s.push(va),
-                    _ => {
-                        function_features.insert(feature.clone(), vec![va]);
-                    }
-                }
-            }
-            for (feature, va) in extractor.extract_global_features()? {
-                match bb_features.get_mut(&feature) {
-                    Some(s) => s.push(va),
-                    _ => {
-                        bb_features.insert(feature.clone(), vec![va]);
-                    }
-                }
-                match function_features.get_mut(&feature) {
-                    Some(s) => s.push(va),
-                    _ => {
-                        function_features.insert(feature.clone(), vec![va]);
-                    }
-                }
+                bb_features.entry(feature.clone()).or_default().push(va);
+                function_features.entry(feature).or_default().push(va);
             }
         }
+
         let (_, matches) = match_fn(&ruleset.basic_block_rules, &bb_features, bb.0, logger)?;
-        for (rule, res) in &matches {
-            match bb_matches.get_mut(rule) {
-                Some(s) => {
-                    for r in res {
-                        s.push(r.clone());
-                    }
-                }
-                _ => {
-                    bb_matches.insert(rule, res.clone());
-                }
-            }
-            for (va, _) in res {
-                index_rule_matches(&mut function_features, rule, vec![*va])?;
-            }
+        for (rule, res) in matches {
+            bb_matches.entry(rule).or_default().extend(res.iter().cloned());
+            index_rule_matches(&mut function_features, rule, res.iter().map(|&(va, _)| va).collect())?;
         }
     }
-    //    println!("{:?}", function_features);
-    let (_, function_matches) = match_fn(
-        &ruleset.function_rules,
-        &function_features,
-        &f.offset(),
-        logger,
-    )?;
+
+    let (_, function_matches) = match_fn(&ruleset.function_rules, &function_features, &f.offset(), logger)?;
+
+    if features_dump {
+        map_features.extend(function_features.clone());
+    }
+
     Ok((function_matches, bb_matches, function_features.len()))
+}
+fn aggregate_matches<'a, T: Clone>(
+    all_matches: &mut HashMap<&'a crate::rules::Rule, Vec<T>>,
+    new_matches: &HashMap<&'a crate::rules::Rule, Vec<T>>,
+) {
+    for (rule, res) in new_matches {
+        all_matches.entry(rule).or_default().extend(res.clone());
+    }
 }
 
 fn find_capabilities(
     ruleset: &crate::rules::RuleSet,
     extractor: &Box<dyn crate::extractor::Extractor>,
     logger: &dyn Fn(&str),
+    features_dump: bool,
 ) -> Result<(
     HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     HashMap<u64, usize>,
+    HashMap<String, Vec<u64>>,
 )> {
     let mut all_function_matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
         HashMap::new();
@@ -439,46 +343,23 @@ fn find_capabilities(
         HashMap::new();
 
     let mut meta = HashMap::new();
+
     let functions = extractor.get_functions()?;
-    let _n_funcs = functions.len();
     logger("functions capabilities started");
+
+    let mut map_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
+
     for (index, (function_address, f)) in functions.iter().enumerate() {
-        // logger(&format!(
-        //     "function 0x{:02x} {} from {} started",
-        //     function_address, index, _n_funcs
-        // ));
-        //TODO capstone not understand this
-        //if extractor.is_library_function(function_address){
-        //let function_name = extractor.get_function_name(function_address)?;
-        //}
         let (function_matches, bb_matches, feature_count) =
-            find_function_capabilities(ruleset, extractor, f, logger)?;
+            find_function_capabilities(ruleset, extractor, f, logger, &mut map_features, features_dump)?;
         meta.insert(*function_address, feature_count);
-        for (rule, res) in &function_matches {
-            match all_function_matches.get_mut(rule) {
-                Some(s) => {
-                    s.extend(res.clone());
-                }
-                _ => {
-                    all_function_matches.insert(rule, res.clone());
-                }
-            }
-        }
-        for (rule, res) in &bb_matches {
-            match all_bb_matches.get_mut(rule) {
-                Some(s) => {
-                    s.extend(res.clone());
-                }
-                _ => {
-                    all_bb_matches.insert(rule, res.clone());
-                }
-            }
-        }
-        logger(&format!(
-            "function 0x{:02x} {} from {} started",
-            function_address, index, _n_funcs
-        ));
+
+        aggregate_matches(&mut all_function_matches, &function_matches);
+        aggregate_matches(&mut all_bb_matches, &bb_matches);
+
+        logger(&format!("function 0x{:02x} {} from {} processed", function_address, index, functions.len()));
     }
+
     logger("functions capabilities finish");
     //# collection of features that captures the rule matches within function and BB scopes.
     //# mapping from feature (matched rule) to set of addresses at which it matched.
@@ -489,7 +370,7 @@ fn find_capabilities(
     }
 
     let (all_file_matches, feature_count) =
-        find_file_capabilities(ruleset, extractor, &function_and_lower_features, logger)?;
+        find_file_capabilities(ruleset, extractor, &function_and_lower_features, logger, &mut map_features, features_dump)?;
 
     let mut matches = HashMap::new();
     for (rule, res) in itertools::chain!(&all_bb_matches, &all_function_matches, &all_file_matches)
@@ -499,7 +380,8 @@ fn find_capabilities(
 
     meta.insert(0, feature_count);
 
-    Ok((matches, meta))
+    let map_features_string = map_features.iter().map(|(k, v)| (format!("{:?}", k), v.clone())).collect();
+    Ok((matches, meta, map_features_string))
 }
 
 fn find_file_capabilities<'a>(
@@ -507,6 +389,8 @@ fn find_file_capabilities<'a>(
     extractor: &Box<dyn crate::extractor::Extractor>,
     function_features: &HashMap<crate::rules::features::Feature, Vec<u64>>,
     logger: &dyn Fn(&str),
+    map_features: &mut HashMap<crate::rules::features::Feature, Vec<u64>>,
+    features_dump: bool,
 ) -> Result<(
     HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     usize,
@@ -516,31 +400,25 @@ fn find_file_capabilities<'a>(
         extractor.extract_file_features()?,
         extractor.extract_global_features()?
     ) {
-        // not all file features may have virtual addresses.
-        // if not, then at least ensure the feature shows up in the index.
-        // the set of addresses will still be empty.
-        if va > 0 {
-            match file_features.get_mut(&feature) {
-                Some(s) => {
-                    s.push(va);
-                }
-                _ => {
-                    file_features.insert(feature.clone(), vec![va]);
-                }
-            }
-        } else {
-            file_features.entry(feature).or_default();
+        file_features.entry(feature.clone()).or_default().push(va);
+    }
+
+    for (feature, addresses) in function_features {
+        file_features.entry(feature.clone()).or_default().extend(addresses.iter().cloned());
+    }
+
+
+    let mut matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
+    for rule_set in [&ruleset.file_rules, &ruleset.function_rules].iter() {
+        for (rule, matched) in match_fn(rule_set, &file_features, &0, logger)?.1 {
+            matches.entry(rule).or_default().extend(matched.iter().cloned());
         }
     }
 
-    for (f1, f2) in function_features {
-        file_features.insert(f1.clone(), f2.clone());
+    if features_dump {
+        map_features.extend(file_features.clone());
     }
 
-    let mut matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
-
-    matches.extend(match_fn(&ruleset.file_rules, &file_features, &0x0, logger)?.1);
-    matches.extend(match_fn(&ruleset.function_rules, &file_features, &0x0, logger)?.1);
     Ok((matches, file_features.len()))
 }
 
@@ -564,7 +442,7 @@ fn parse_parts_id(s: &str) -> Result<(Vec<String>, String)> {
         let id = caps.get(2).map_or("", |m| m.as_str()).to_string();
         Ok((parts, id))
     } else {
-        Err(Error::InvalidRule(0, s.to_string())) // Asegúrate de tener este error definido en alguna parte de tu código
+        Err(Error::InvalidRule(0, s.to_string()))
     }
 }
 #[cfg(feature = "properties")]
@@ -649,6 +527,7 @@ pub struct CapabilityAssociation {
     pub mbc: BTreeSet<Mbc>,
     pub namespace: String,
     pub name: String,
+    pub address: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -663,6 +542,7 @@ pub struct FileCapabilities {
     #[cfg(feature = "verbose")]
     pub functions_capabilities: BTreeMap<u64, FunctionCapabilities>,
     pub tags: BTreeSet<String>,
+    pub map_features: HashMap<String, Vec<u64>>,
     pub capabilities_associations: BTreeMap<String, CapabilityAssociation>,
 }
 
@@ -705,63 +585,20 @@ fn index_rule_matches(
     rule: &crate::rules::Rule,
     locations: Vec<u64>,
 ) -> Result<()> {
-    for location in &locations {
-        match features.get_mut(&crate::rules::features::Feature::MatchedRule(
-            crate::rules::features::MatchedRuleFeature::new(&rule.name, "")?,
-        )) {
-            Some(s) => {
-                s.push(*location);
-            }
-            None => {
-                features.insert(
-                    crate::rules::features::Feature::MatchedRule(
-                        crate::rules::features::MatchedRuleFeature::new(&rule.name, "")?,
-                    ),
-                    vec![*location],
-                );
-            }
-        }
-    }
-    if rule
-        .meta
-        .contains_key(&yaml_rust::Yaml::String("namespace".to_string()))
-    {
-        if let yaml_rust::Yaml::String(namespace) =
-            &rule.meta[&yaml_rust::Yaml::String("namespace".to_string())]
-        {
-            let mut ns = Some(namespace.clone());
-            while let Some(namespace) = ns {
-                for location in &locations {
-                    match features.get_mut(&crate::rules::features::Feature::MatchedRule(
-                        crate::rules::features::MatchedRuleFeature::new(&namespace, "")?,
-                    )) {
-                        Some(s) => {
-                            s.push(*location);
-                        }
-                        None => {
-                            features.insert(
-                                crate::rules::features::Feature::MatchedRule(
-                                    crate::rules::features::MatchedRuleFeature::new(
-                                        &namespace, "",
-                                    )?,
-                                ),
-                                vec![*location],
-                            );
-                        }
-                    }
-                }
-                let parts: Vec<&str> = namespace.split('/').collect();
-                if parts.len() == 1 {
-                    ns = None;
-                } else {
-                    let mut nss = "".to_string();
-                    for item in parts.iter().take(parts.len() - 1) {
-                        nss += "/";
-                        nss += item;
-                    }
-                    ns = Some(nss[1..].to_string());
-                }
-            }
+    let matched_rule_feature = crate::rules::features::Feature::MatchedRule(
+        crate::rules::features::MatchedRuleFeature::new(&rule.name, "")?,
+    );
+
+    features.entry(matched_rule_feature.clone()).or_default().extend(locations.iter().cloned());
+
+    if let Some(Yaml::String(namespace)) = rule.meta.get(&Yaml::String("namespace".to_string())) {
+        let parts: Vec<&str> = namespace.split('/').collect();
+        for i in 0..parts.len() {
+            let sub_namespace = parts[..=i].join("/");
+            let ns_feature = crate::rules::features::Feature::MatchedRule(
+                crate::rules::features::MatchedRuleFeature::new(&sub_namespace, "")?,
+            );
+            features.entry(ns_feature).or_default().extend(locations.iter().cloned());
         }
     }
     Ok(())

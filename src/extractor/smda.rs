@@ -111,7 +111,7 @@ impl super::Extractor for Extractor {
         res.extend(self.extract_file_export_names()?);
         res.extend(self.extract_file_import_names()?);
         res.extend(self.extract_file_section_names()?);
-        res.extend(self._extract_file_embedded_pe()?);
+        res.extend(self.extract_file_embedded_pe()?);
         res.extend(self.extract_file_strings()?);
         //        res.extend(self.extract_file_function_names(pbytes)?);
         res.extend(self.extract_file_format()?);
@@ -334,10 +334,10 @@ impl Extractor {
         Ok(res)
     }
 
-    fn _extract_file_embedded_pe(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+    fn extract_file_embedded_pe(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         for (mz_offset, _pe_offset, _key) in
-            Extractor::find_embedded_pe_headers(&self.report.buffer)
+        Extractor::find_embedded_pe_headers(&self.report.buffer)
         {
             res.push((
                 crate::rules::features::Feature::Characteristic(

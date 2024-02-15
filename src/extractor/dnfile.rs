@@ -175,7 +175,7 @@ impl super::Extractor for Extractor {
                     OpCodeValue::Jmp,
                     OpCodeValue::Newobj,
                 ]
-                .contains(&insn.opcode.value)
+                    .contains(&insn.opcode.value)
                 {
                     continue;
                 }
@@ -210,15 +210,15 @@ impl super::Extractor for Extractor {
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let f: &Function = f.as_any().downcast_ref::<Function>().unwrap();
         Ok([
-            self.extract_function_call_to_features(f)?,
-            self.extract_function_call_from_features(f)?,
-            self.extract_recurcive_call_features(f)?,
+            self.extract_function_call_to_features(&f)?,
+            self.extract_function_call_from_features(&f)?,
+            self.extract_recurcive_call_features(&f)?,
         ]
-        .into_iter()
-        .fold(Vec::new(), |mut acc, f| {
-            acc.extend(f);
-            acc
-        }))
+            .into_iter()
+            .fold(Vec::new(), |mut acc, f| {
+                acc.extend(f);
+                acc
+            }))
     }
 
     fn get_basic_blocks(
@@ -682,7 +682,7 @@ impl Extractor {
             OpCodeValue::Calli,
             OpCodeValue::Newobj,
         ]
-        .contains(&insn.opcode.value)
+            .contains(&insn.opcode.value)
         {
             return Ok(vec![]);
         }
@@ -765,7 +765,7 @@ impl Extractor {
             OpCodeValue::Jmp,
             OpCodeValue::Calli,
         ]
-        .contains(&insn.opcode.value)
+            .contains(&insn.opcode.value)
         {
             let operand_result = resolve_dotnet_token(
                 &self.pe,
@@ -858,7 +858,7 @@ impl Extractor {
             OpCodeValue::Stfld,
             OpCodeValue::Stsfld,
         ]
-        .contains(&insn.opcode.value)
+            .contains(&insn.opcode.value)
         {
             if let Ok(fields_lock) = self.get_fields() {
                 if let Some(fields) = fields_lock.read().as_ref() {
@@ -955,7 +955,7 @@ impl Extractor {
             OpCodeValue::Stsfld,
             OpCodeValue::Newobj,
         ]
-        .contains(&insn.opcode.value)
+            .contains(&insn.opcode.value)
         {
             return Ok(vec![]);
         }
@@ -1025,7 +1025,7 @@ impl Extractor {
             OpCodeValue::Stsfld,
             OpCodeValue::Newobj,
         ]
-        .contains(&insn.opcode.value)
+            .contains(&insn.opcode.value)
         {
             return Ok(vec![]);
         }
@@ -1099,7 +1099,7 @@ impl Extractor {
             OpCodeValue::Jmp,
             OpCodeValue::Calli,
         ]
-        .contains(&insn.opcode.value)
+            .contains(&insn.opcode.value)
         {
             return Ok(vec![]);
         }
