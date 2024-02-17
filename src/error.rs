@@ -63,4 +63,6 @@ pub enum Error {
     InvalidToken(String),
     #[error("not implemented")]
     NoiImplementedError,
+    #[error("Buffer overflow error")]
+    BufferOverflowError,
 }

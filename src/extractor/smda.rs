@@ -337,7 +337,7 @@ impl Extractor {
     fn extract_file_embedded_pe(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         for (mz_offset, _pe_offset, _key) in
-            Extractor::find_embedded_pe_headers(&self.report.buffer)
+        Extractor::find_embedded_pe_headers(&self.report.buffer)
         {
             res.push((
                 crate::rules::features::Feature::Characteristic(
@@ -416,9 +416,13 @@ impl Extractor {
     fn extract_file_strings(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         for (s, a) in extract_file_strings(&self.buf)? {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
             res.push((
                 crate::rules::features::Feature::String(
-                    crate::rules::features::StringFeature::new(&s, "")?,
+                    crate::rules::features::StringFeature::new(&trimmed, "")?,
                 ),
                 a,
             ));
@@ -739,10 +743,14 @@ impl Extractor {
         for data_ref in insn.get_data_refs(&self.report)? {
             for v in derefs(&self.report, &data_ref)? {
                 let string_read = read_string(&self.report, &v)?;
+                let trimmed = string_read.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
                 res.push((
                     crate::rules::features::Feature::String(
                         crate::rules::features::StringFeature::new(
-                            string_read.trim_end_matches('\x00'),
+                            &trimmed.trim_end_matches('\x00'),
                             "",
                         )?,
                     ),
@@ -755,14 +763,20 @@ impl Extractor {
 
     pub fn extract_insn_bytes_features(
         &self,
-        _f: &Function,
+        f: &Function,
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
+        let instruction_length = insn.bytes.len();
+        let context_based_length = if f.arch == crate::FileArchitecture::AMD64 {
+            std::cmp::min(instruction_length, 16)
+        } else {
+            instruction_length
+        };
         for data_ref in insn.get_data_refs(&self.report)? {
             for v in derefs(&self.report, &data_ref)? {
-                let bytes_read = read_bytes(&self.report, &v, 0x100)?;
-                if all_zeros(bytes_read)? {
+                let bytes_read = read_bytes(&self.report, &v, context_based_length)?;
+                if all_zeros(bytes_read)? || is_padding(bytes_read)? {
                     continue;
                 }
                 res.push((
@@ -1067,44 +1081,65 @@ pub fn derefs(report: &DisassemblyReport, p: &u64) -> Result<Vec<u64>> {
 
 pub fn read_bytes<'a>(
     report: &'a DisassemblyReport,
-    va: &u64,
+    offset: &u64,
     num_bytes: usize,
 ) -> Result<&'a [u8]> {
-    let rva = va - report.base_addr;
+    let rva = offset - report.base_addr;
     let buffer_end = report.buffer.len();
-    if rva + num_bytes as u64 > buffer_end as u64 {
-        Ok(&report.buffer[rva as usize..])
-    } else {
-        Ok(&report.buffer[rva as usize..rva as usize + num_bytes])
+    let end_of_string = rva + num_bytes as u64;
+    if end_of_string > buffer_end as u64 {
+        return Err(Error::BufferOverflowError);
     }
+
+    Ok(&report.buffer[rva as usize..end_of_string as usize])
 }
 
 pub fn read_string(report: &DisassemblyReport, offset: &u64) -> Result<String> {
     let alen = detect_ascii_len(report, offset)?;
     if alen > 1 {
-        return Ok(std::str::from_utf8(read_bytes(report, offset, alen)?)?.to_string());
+        let bytes = read_bytes(report, offset, alen)?;
+        return Ok(std::str::from_utf8(&bytes)?.to_string());
     }
     let ulen = detect_unicode_len(report, offset)?;
     if ulen > 2 {
-        let bb: &[u16] = &to_u16(read_bytes(report, offset, ulen)?)?;
-        return Ok(std::string::String::from_utf16(bb)?);
+        let bytes = read_bytes(report, offset, ulen)?;
+        let utf16_units: Vec<u16> = bytes.chunks_exact(2)
+            .map(|arr| u16::from_le_bytes([arr[0], arr[1]]))
+            .collect();
+        return Ok(std::string::String::from_utf16(&utf16_units)?);
     }
     Ok("".to_string())
 }
 
 pub fn detect_ascii_len(report: &DisassemblyReport, offset: &u64) -> Result<usize> {
-    let mut ascii_len = 0;
-    let mut rva = offset - report.base_addr;
-    let mut ch = report.buffer[rva as usize];
-    while ch < 127 && b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+, -./:;<=>?@[\\]^_`{|}~ ".contains(&ch){
-        ascii_len += 1;
-        rva += 1;
-        ch = report.buffer[rva as usize];
+    let buffer_len = report.buffer.len() as u64;
+    let rva = offset.checked_sub(report.base_addr)
+        .ok_or_else(|| std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Offset is out of bounds relative to the base address"
+        ))?;
+
+    if rva as usize >= report.buffer.len() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "RVA is beyond buffer length"
+        ))?;
     }
-    if ch == 0 {
-        return Ok(ascii_len);
+
+    let ascii_len = report.buffer[rva as usize..]
+        .iter()
+        .take_while(|&&ch| ch != 0 && ch.is_ascii())
+        .take_while(|&&ch| b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+, -./:;<=>?@[\\]^_`{|}~ ".contains(&ch))
+        .count();
+
+    if rva + ascii_len as u64 >= buffer_len {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Buffer overflow detected while detecting ASCII length"
+        ))?;
     }
-    Ok(0)
+
+    Ok(ascii_len)
 }
 
 pub fn detect_unicode_len(report: &DisassemblyReport, offset: &u64) -> Result<usize> {
@@ -1130,6 +1165,10 @@ pub fn all_zeros(bytez: &[u8]) -> Result<bool> {
         res &= b == &0;
     }
     Ok(res)
+}
+
+pub fn is_padding(bytez: &[u8]) -> Result<bool> {
+    Ok(bytez.iter().all(|&b| b == 0x00 || b == 0xFF))
 }
 
 pub fn is_security_cookie(f: &Function, insn: &Instruction) -> Result<bool> {
@@ -1207,24 +1246,61 @@ pub fn extract_ascii_strings(data: &[u8], min_length: usize) -> Result<Vec<(Stri
         })
         .collect())
 }
-
 pub fn extract_unicode_strings(data: &[u8], min_length: usize) -> Result<Vec<(String, u64)>> {
-    if REPEATS.contains(&data[0]) && buf_filled_with(data, &data[0]) {
+    if data.len() < min_length * 2 {
         return Ok(vec![]);
     }
-    let re = regex::bytes::Regex::new(&format!(
-        r##"((?:[{}]\x00){{{},}})"##,
-        ASCII_BYTE, min_length
-    ))?;
-    Ok(re
-        .find_iter(data)
-        .map(|d| {
-            let dd = (0..(d.end() + 1 - d.start()) / 2)
-                .map(|i| u16::from_be_bytes([d.as_bytes()[2 * i], d.as_bytes()[2 * i + 1]]))
-                .collect::<Vec<u16>>();
-            (std::string::String::from_utf16_lossy(&dd), d.start() as u64)
-        })
-        .collect())
+
+    let mut results = Vec::new();
+
+    // regex pattern for UTF-16LE and UTF-16BE
+    let re_le = regex::bytes::Regex::new(&format!(r"((?:[\x20-\x7E]\x00){{{},}})", min_length))?;
+    let re_be = regex::bytes::Regex::new(&format!(r"((?:\x00[\x20-\x7E]){{{},}})", min_length))?;
+    let re_utf8 = regex::bytes::Regex::new(&format!(r"((?:[\x20-\x7E]){{{},}})", min_length))?;
+
+    // UTF-16LE
+    for mat in re_le.find_iter(data) {
+        let matched_bytes = mat.as_bytes();
+        let utf16_units = matched_bytes.chunks(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect::<Vec<u16>>();
+        if let Ok(decoded_string) = String::from_utf16(&utf16_units) {
+            results.push((decoded_string, mat.start() as u64));
+        }
+    }
+
+    // UTF-16BE
+    for mat in re_be.find_iter(data) {
+        let matched_bytes = mat.as_bytes();
+        let utf16_units = matched_bytes.chunks(2)
+            .map(|chunk| u16::from_be_bytes([chunk[1], chunk[0]]))
+            .collect::<Vec<u16>>();
+        if let Ok(decoded_string) = String::from_utf16(&utf16_units) {
+            results.push((decoded_string, mat.start() as u64));
+        }
+    }
+
+    // UTF-8
+    for mat in re_utf8.find_iter(data) {
+        let matched_bytes = mat.as_bytes();
+        let decoded_string = String::from_utf8_lossy(matched_bytes).to_string();
+        results.push((decoded_string, mat.start() as u64));
+    }
+
+    let cleaned_results = results
+        .into_iter()
+        .filter(|(s, _)| !s.trim().is_empty())
+        .map(|(s, pos)| (clean_string(&s), pos))
+        .collect::<Vec<(String, u64)>>();
+
+    Ok(cleaned_results)
+}
+
+fn clean_string(s: &str) -> String {
+    s.replace("\u{0000}", "")
+        .chars()
+        .filter(|c| c.is_ascii_graphic() || c.is_ascii_whitespace())
+        .collect()
 }
 
 fn buf_filled_with(data: &[u8], character: &u8) -> bool {

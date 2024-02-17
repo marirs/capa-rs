@@ -310,6 +310,35 @@ impl Feature {
             Feature::OperandOffset(a) => Ok(a.value.to_string()),
         }
     }
+    pub fn get_name(&self) -> String {
+        match self {
+            Feature::Property(_) => "PropertyFeature",
+            Feature::Api(_) => "ApiFeature",
+            Feature::String(_) => "StringFeature",
+            Feature::Regex(_) => "RegexFeature",
+            Feature::Substring(_) => "SubstringFeature",
+            Feature::Bytes(_) => "BytesFeature",
+            Feature::Number(_) => "NumberFeature",
+            Feature::Offset(_) => "OffsetFeature",
+            Feature::Mnemonic(_) => "MnemonicFeature",
+            Feature::BasicBlock(_) => "BasicBlockFeature",
+            Feature::Characteristic(_) => "CharacteristicFeature",
+            Feature::Export(_) => "ExportFeature",
+            Feature::Import(_) => "ImportFeature",
+            Feature::Section(_) => "SectionFeature",
+            Feature::MatchedRule(_) => "MatchedRuleFeature",
+            Feature::FunctionName(_) => "FunctionNameFeature",
+            Feature::Os(_) => "OsFeature",
+            Feature::Format(_) => "FormatFeature",
+            Feature::Arch(_) => "ArchFeature",
+            Feature::Namespace(_) => "NamespaceFeature",
+            Feature::Class(_) => "ClassFeature",
+            Feature::OperandNumber(_) => "OperandNumberFeature",
+            Feature::OperandOffset(_) => "OperandOffsetFeature",
+        }
+        .to_string()
+    }
+
 }
 
 #[derive(Debug, Clone, Eq)]
@@ -1294,7 +1323,9 @@ impl BytesFeature {
     ) -> Result<(bool, Vec<u64>)> {
         for (feature, locations) in features {
             if let Feature::Bytes(s) = feature {
-                if s.value.starts_with(&self.value) {
+                if s.value.windows(
+                    self.value.len())
+                    .any(|window| window == self.value) {
                     return Ok((true, locations.clone()));
                 }
             } else {
