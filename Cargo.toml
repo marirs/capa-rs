@@ -2,7 +2,7 @@
 name = "capa"
 version = "0.3.12"
 description = "File capability extractor."
-authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>", "Jorge Alejandro Durán Royo<jorge.duran.royo@gmail.com"]
+authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>", "Jorge Alejandro Durán Royo<jorge.duran.royo@gmail.com>"]
 keywords = ["capa", "fce", "capability", "file"]
 readme = "README.md"
 license-file = "LICENSE"
