@@ -338,7 +338,6 @@ impl Feature {
         }
         .to_string()
     }
-
 }
 
 #[derive(Debug, Clone, Eq)]
@@ -1323,9 +1322,10 @@ impl BytesFeature {
     ) -> Result<(bool, Vec<u64>)> {
         for (feature, locations) in features {
             if let Feature::Bytes(s) = feature {
-                if s.value.windows(
-                    self.value.len())
-                    .any(|window| window == self.value) {
+                if s.value
+                    .windows(self.value.len())
+                    .any(|window| window == self.value)
+                {
                     return Ok((true, locations.clone()));
                 }
             } else {

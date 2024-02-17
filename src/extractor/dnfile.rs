@@ -175,7 +175,7 @@ impl super::Extractor for Extractor {
                     OpCodeValue::Jmp,
                     OpCodeValue::Newobj,
                 ]
-                    .contains(&insn.opcode.value)
+                .contains(&insn.opcode.value)
                 {
                     continue;
                 }
@@ -214,11 +214,11 @@ impl super::Extractor for Extractor {
             self.extract_function_call_from_features(&f)?,
             self.extract_recurcive_call_features(&f)?,
         ]
-            .into_iter()
-            .fold(Vec::new(), |mut acc, f| {
-                acc.extend(f);
-                acc
-            }))
+        .into_iter()
+        .fold(Vec::new(), |mut acc, f| {
+            acc.extend(f);
+            acc
+        }))
     }
 
     fn get_basic_blocks(
@@ -1011,7 +1011,10 @@ impl Extractor {
                     if !field.namespace.is_empty() {
                         res.push((
                             crate::rules::features::Feature::Namespace(
-                                crate::rules::features::NamespaceFeature::new(&field.namespace, "")?,
+                                crate::rules::features::NamespaceFeature::new(
+                                    &field.namespace,
+                                    "",
+                                )?,
                             ),
                             insn.offset as u64,
                         ));

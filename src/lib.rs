@@ -7,11 +7,11 @@ use consts::{FileFormat, Os};
 use sede::{from_hex, to_hex};
 use serde::{Deserialize, Serialize};
 use smda::FileArchitecture;
+use std::collections::HashSet;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     thread::spawn,
 };
-use std::collections::HashSet;
 
 mod error;
 pub use crate::error::Error;
@@ -127,7 +127,7 @@ impl FileCapabilities {
                         }
 
                         self.attacks
-			    .entry(parts[0].to_string())
+                            .entry(parts[0].to_string())
                             .or_insert_with(BTreeSet::new)
                             .insert(detail);
                     }
@@ -150,7 +150,7 @@ impl FileCapabilities {
                         }
 
                         self.mbc
-			                .entry(parts[0].to_string())
+                            .entry(parts[0].to_string())
                             .or_insert_with(BTreeSet::new)
                             .insert(detail);
                     }
@@ -159,8 +159,10 @@ impl FileCapabilities {
 
             if let Some(namespace) = rule.meta.get(&Yaml::String("namespace".to_string())) {
                 if let Yaml::String(s) = namespace {
-                    self.capability_namespaces.insert(rule.name.clone(), s.clone());
-                    let first_non_zero_address = caps.iter()
+                    self.capability_namespaces
+                        .insert(rule.name.clone(), s.clone());
+                    let first_non_zero_address = caps
+                        .iter()
                         .find(|&&(addr, _)| addr != 0)
                         .map(|&(addr, _)| addr)
                         .unwrap_or(0);
@@ -200,10 +202,14 @@ impl FileCapabilities {
         Ok(())
     }
 
-    pub fn construct_json_for_capabilities_associations(&mut self, filter: Option<String>) -> Value {
+    pub fn construct_json_for_capabilities_associations(
+        &mut self,
+        filter: Option<String>,
+    ) -> Value {
         if let Some(f) = filter {
             let filters: Vec<&str> = f.split('|').collect();
-            self.map_features.retain(|k, _v| filters.iter().any(|filter| k.contains(filter)));
+            self.map_features
+                .retain(|k, _v| filters.iter().any(|filter| k.contains(filter)));
         }
 
         let mut rules = serde_json::Map::new();
@@ -211,24 +217,28 @@ impl FileCapabilities {
             let attacks_json = association
                 .attack
                 .iter()
-                .map(|a|
+                .map(|a| {
                     json!({
                         "id": a.id,
                         "subtechnique": a.subtechnique,
                         "tactic": a.tactic,
                         "technique": a.technique,
-                    })).collect::<Vec<_>>();
+                    })
+                })
+                .collect::<Vec<_>>();
 
             let mbc_json = association
                 .mbc
                 .iter()
-                .map(|m|
+                .map(|m| {
                     json!({
                         "objective": m.objective,
                         "behavior": m.behavior,
                         "method": m.method,
                         "id": m.id,
-                    })).collect::<Vec<_>>();
+                    })
+                })
+                .collect::<Vec<_>>();
 
             let association_json = json!({
                 "attacks": attacks_json,
@@ -242,7 +252,10 @@ impl FileCapabilities {
         }
         Value::Object(rules)
     }
-    pub fn serialize_file_capabilities(&mut self, filter: Option<String>) -> serde_json::Result<String> {
+    pub fn serialize_file_capabilities(
+        &mut self,
+        filter: Option<String>,
+    ) -> serde_json::Result<String> {
         let associations_json = self.construct_json_for_capabilities_associations(filter);
         let mut fc_json = serde_json::to_value(self.clone())?;
         fc_json
@@ -484,7 +497,10 @@ fn find_file_capabilities<'a>(
     let mut matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
     for rule_set in [&ruleset.file_rules, &ruleset.function_rules].iter() {
         for (rule, matched) in match_fn(rule_set, &file_features, &0, logger)?.1 {
-            matches.entry(rule).or_default().extend(matched.iter().cloned());
+            matches
+                .entry(rule)
+                .or_default()
+                .extend(matched.iter().cloned());
         }
     }
 
@@ -662,7 +678,10 @@ fn index_rule_matches(
         crate::rules::features::MatchedRuleFeature::new(&rule.name, "")?,
     );
 
-    features.entry(matched_rule_feature.clone()).or_default().extend(locations.iter().cloned());
+    features
+        .entry(matched_rule_feature.clone())
+        .or_default()
+        .extend(locations.iter().cloned());
 
     if let Some(Yaml::String(namespace)) = rule.meta.get(&Yaml::String("namespace".to_string())) {
         let parts: Vec<&str> = namespace.split('/').collect();
@@ -671,7 +690,10 @@ fn index_rule_matches(
             let ns_feature = crate::rules::features::Feature::MatchedRule(
                 crate::rules::features::MatchedRuleFeature::new(&sub_namespace, "")?,
             );
-            features.entry(ns_feature).or_default().extend(locations.iter().cloned());
+            features
+                .entry(ns_feature)
+                .or_default()
+                .extend(locations.iter().cloned());
         }
     }
     Ok(())

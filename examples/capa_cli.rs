@@ -1,16 +1,16 @@
-use std::fs;
 use capa::FileCapabilities;
 use clap::Parser;
 use prettytable::{color, format::Alignment, Attr, Cell, Row, Table};
 use serde_json::{to_value, Map, Value};
+use std::fs;
 use std::time::Instant;
 
 #[derive(Parser)]
 #[clap(
-author,
-version,
-about,
-long_about = "Find Capabilities of a given file!"
+    author,
+    version,
+    about,
+    long_about = "Find Capabilities of a given file!"
 )]
 struct CliOpts {
     /// File to analyse
@@ -26,7 +26,12 @@ struct CliOpts {
     #[clap(short = 'o', long, value_name = "JSON_PATH")]
     output: Option<String>,
     /// map_features
-    #[clap(short = 'm', long, value_name = "MAP_FEATURES", default_value = "false")]
+    #[clap(
+        short = 'm',
+        long,
+        value_name = "MAP_FEATURES",
+        default_value = "false"
+    )]
     map_features: bool,
     /// filter map_features
     #[clap(short = 'f', long, value_name = "FILTER_MAP_FEATURES")]
@@ -118,7 +123,9 @@ fn main() {
                 }
             }
             if let Some(json_path) = json_path {
-                let json = s.serialize_file_capabilities(cli.filter_map_features).unwrap();
+                let json = s
+                    .serialize_file_capabilities(cli.filter_map_features)
+                    .unwrap();
                 fs::write(json_path.clone(), json).expect("Unable to write file");
                 println!("Analysis result saved in JSON format at: {}", json_path);
             }

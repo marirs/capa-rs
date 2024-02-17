@@ -337,7 +337,7 @@ impl Extractor {
     fn extract_file_embedded_pe(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         for (mz_offset, _pe_offset, _key) in
-        Extractor::find_embedded_pe_headers(&self.report.buffer)
+            Extractor::find_embedded_pe_headers(&self.report.buffer)
         {
             res.push((
                 crate::rules::features::Feature::Characteristic(
@@ -1103,7 +1103,8 @@ pub fn read_string(report: &DisassemblyReport, offset: &u64) -> Result<String> {
     let ulen = detect_unicode_len(report, offset)?;
     if ulen > 2 {
         let bytes = read_bytes(report, offset, ulen)?;
-        let utf16_units: Vec<u16> = bytes.chunks_exact(2)
+        let utf16_units: Vec<u16> = bytes
+            .chunks_exact(2)
             .map(|arr| u16::from_le_bytes([arr[0], arr[1]]))
             .collect();
         return Ok(std::string::String::from_utf16(&utf16_units)?);
@@ -1113,16 +1114,17 @@ pub fn read_string(report: &DisassemblyReport, offset: &u64) -> Result<String> {
 
 pub fn detect_ascii_len(report: &DisassemblyReport, offset: &u64) -> Result<usize> {
     let buffer_len = report.buffer.len() as u64;
-    let rva = offset.checked_sub(report.base_addr)
-        .ok_or_else(|| std::io::Error::new(
+    let rva = offset.checked_sub(report.base_addr).ok_or_else(|| {
+        std::io::Error::new(
             std::io::ErrorKind::Other,
-            "Offset is out of bounds relative to the base address"
-        ))?;
+            "Offset is out of bounds relative to the base address",
+        )
+    })?;
 
     if rva as usize >= report.buffer.len() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Other,
-            "RVA is beyond buffer length"
+            "RVA is beyond buffer length",
         ))?;
     }
 
@@ -1135,7 +1137,7 @@ pub fn detect_ascii_len(report: &DisassemblyReport, offset: &u64) -> Result<usiz
     if rva + ascii_len as u64 >= buffer_len {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Other,
-            "Buffer overflow detected while detecting ASCII length"
+            "Buffer overflow detected while detecting ASCII length",
         ))?;
     }
 
@@ -1261,7 +1263,8 @@ pub fn extract_unicode_strings(data: &[u8], min_length: usize) -> Result<Vec<(St
     // UTF-16LE
     for mat in re_le.find_iter(data) {
         let matched_bytes = mat.as_bytes();
-        let utf16_units = matched_bytes.chunks(2)
+        let utf16_units = matched_bytes
+            .chunks(2)
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
             .collect::<Vec<u16>>();
         if let Ok(decoded_string) = String::from_utf16(&utf16_units) {
@@ -1272,7 +1275,8 @@ pub fn extract_unicode_strings(data: &[u8], min_length: usize) -> Result<Vec<(St
     // UTF-16BE
     for mat in re_be.find_iter(data) {
         let matched_bytes = mat.as_bytes();
-        let utf16_units = matched_bytes.chunks(2)
+        let utf16_units = matched_bytes
+            .chunks(2)
             .map(|chunk| u16::from_be_bytes([chunk[1], chunk[0]]))
             .collect::<Vec<u16>>();
         if let Ok(decoded_string) = String::from_utf16(&utf16_units) {
