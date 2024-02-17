@@ -2,7 +2,7 @@
 name = "capa"
 version = "0.3.12"
 description = "File capability extractor."
-authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>", "Jorge Alejandro Durán Royo"]
+authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>", "Jorge Alejandro Durán Royo<jorge.duran.royo@gmail.com"]
 keywords = ["capa", "fce", "capability", "file"]
 readme = "README.md"
 license-file = "LICENSE"
@@ -19,7 +19,7 @@ petgraph = "0.6.2"
 regex = "1.5"
 fancy-regex = { git = "https://github.com/mnaza/fancy-regex.git" }
 serde = { version = "1", features = ["derive"] }
-smda = "0.2.6"
+smda = "0.2.7"
 thiserror = "1"
 walkdir = "2.3.2"
 yaml-rust = "0.4.5"
