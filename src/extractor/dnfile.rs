@@ -210,9 +210,9 @@ impl super::Extractor for Extractor {
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let f: &Function = f.as_any().downcast_ref::<Function>().unwrap();
         Ok([
-            self.extract_function_call_to_features(&f)?,
-            self.extract_function_call_from_features(&f)?,
-            self.extract_recurcive_call_features(&f)?,
+            self.extract_function_call_to_features(f)?,
+            self.extract_function_call_from_features(f)?,
+            self.extract_recurcive_call_features(f)?,
         ]
         .into_iter()
         .fold(Vec::new(), |mut acc, f| {
@@ -931,7 +931,7 @@ impl Extractor {
                     if !trimmed.is_empty() {
                         res.push((
                             crate::rules::features::Feature::String(
-                                crate::rules::features::StringFeature::new(&trimmed, "")?,
+                                crate::rules::features::StringFeature::new(trimmed, "")?,
                             ),
                             insn.offset as u64,
                         ));

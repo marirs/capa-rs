@@ -128,7 +128,7 @@ impl FileCapabilities {
 
                         self.attacks
                             .entry(parts[0].to_string())
-                            .or_insert_with(BTreeSet::new)
+                            .or_default()
                             .insert(detail);
                     }
                 }
@@ -151,7 +151,7 @@ impl FileCapabilities {
 
                         self.mbc
                             .entry(parts[0].to_string())
-                            .or_insert_with(BTreeSet::new)
+                            .or_default()
                             .insert(detail);
                     }
                 }
@@ -452,13 +452,9 @@ fn find_capabilities(
         let feature_type = key.get_name();
         let feature_value = key.get_value()?;
 
-        let feature_map = map_features_string
-            .entry(feature_type)
-            .or_insert_with(HashMap::new);
+        let feature_map = map_features_string.entry(feature_type).or_default();
 
-        let offsets_set = feature_map
-            .entry(feature_value)
-            .or_insert_with(HashSet::new);
+        let offsets_set = feature_map.entry(feature_value).or_default();
 
         for offset in offsets {
             offsets_set.insert(*offset);

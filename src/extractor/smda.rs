@@ -422,7 +422,7 @@ impl Extractor {
             }
             res.push((
                 crate::rules::features::Feature::String(
-                    crate::rules::features::StringFeature::new(&trimmed, "")?,
+                    crate::rules::features::StringFeature::new(trimmed, "")?,
                 ),
                 a,
             ));
@@ -750,7 +750,7 @@ impl Extractor {
                 res.push((
                     crate::rules::features::Feature::String(
                         crate::rules::features::StringFeature::new(
-                            &trimmed.trim_end_matches('\x00'),
+                            trimmed.trim_end_matches('\x00'),
                             "",
                         )?,
                     ),
@@ -1098,7 +1098,7 @@ pub fn read_string(report: &DisassemblyReport, offset: &u64) -> Result<String> {
     let alen = detect_ascii_len(report, offset)?;
     if alen > 1 {
         let bytes = read_bytes(report, offset, alen)?;
-        return Ok(std::str::from_utf8(&bytes)?.to_string());
+        return Ok(std::str::from_utf8(bytes)?.to_string());
     }
     let ulen = detect_unicode_len(report, offset)?;
     if ulen > 2 {
@@ -1122,7 +1122,7 @@ pub fn detect_ascii_len(report: &DisassemblyReport, offset: &u64) -> Result<usiz
     })?;
 
     if rva as usize >= report.buffer.len() {
-        return Err(std::io::Error::new(
+        Err(std::io::Error::new(
             std::io::ErrorKind::Other,
             "RVA is beyond buffer length",
         ))?;
@@ -1135,7 +1135,7 @@ pub fn detect_ascii_len(report: &DisassemblyReport, offset: &u64) -> Result<usiz
         .count();
 
     if rva + ascii_len as u64 >= buffer_len {
-        return Err(std::io::Error::new(
+        Err(std::io::Error::new(
             std::io::ErrorKind::Other,
             "Buffer overflow detected while detecting ASCII length",
         ))?;
@@ -1301,7 +1301,7 @@ pub fn extract_unicode_strings(data: &[u8], min_length: usize) -> Result<Vec<(St
 }
 
 fn clean_string(s: &str) -> String {
-    s.replace("\u{0000}", "")
+    s.replace('\u{0000}', "")
         .chars()
         .filter(|c| c.is_ascii_graphic() || c.is_ascii_whitespace())
         .collect()
