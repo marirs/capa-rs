@@ -175,7 +175,7 @@ impl super::Extractor for Extractor {
                     OpCodeValue::Jmp,
                     OpCodeValue::Newobj,
                 ]
-                .contains(&insn.opcode.value)
+                    .contains(&insn.opcode.value)
                 {
                     continue;
                 }
@@ -210,15 +210,15 @@ impl super::Extractor for Extractor {
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let f: &Function = f.as_any().downcast_ref::<Function>().unwrap();
         Ok([
-            self.extract_function_call_to_features(f)?,
-            self.extract_function_call_from_features(f)?,
-            self.extract_recurcive_call_features(f)?,
+            self.extract_function_call_to_features(&f)?,
+            self.extract_function_call_from_features(&f)?,
+            self.extract_recurcive_call_features(&f)?,
         ]
-        .into_iter()
-        .fold(Vec::new(), |mut acc, f| {
-            acc.extend(f);
-            acc
-        }))
+            .into_iter()
+            .fold(Vec::new(), |mut acc, f| {
+                acc.extend(f);
+                acc
+            }))
     }
 
     fn get_basic_blocks(
@@ -315,12 +315,15 @@ impl Extractor {
                 ));
                 //split :: get last part and add stringFeature
                 let ss = imp.split("::").collect::<Vec<&str>>();
-                res.push((
-                    crate::rules::features::Feature::String(
-                        crate::rules::features::StringFeature::new(ss[1], "")?,
-                    ),
-                    *token,
-                ));
+                let trimmed = ss[1].trim();
+                if !trimmed.is_empty() {
+                    res.push((
+                        crate::rules::features::Feature::String(
+                            crate::rules::features::StringFeature::new(trimmed, "")?,
+                        ),
+                        *token,
+                    ));
+                }
             } else {
                 let ss = imp.split('.').collect::<Vec<&str>>();
                 for symbol_variant in crate::extractor::smda::generate_symbols(
@@ -373,12 +376,14 @@ impl Extractor {
             ))
         }
         for ns in namespaces {
-            res.push((
-                crate::rules::features::Feature::Namespace(
-                    crate::rules::features::NamespaceFeature::new(&ns, "")?,
-                ),
-                0,
-            ))
+            if !ns.is_empty() {
+                res.push((
+                    crate::rules::features::Feature::Namespace(
+                        crate::rules::features::NamespaceFeature::new(&ns, "")?,
+                    ),
+                    0,
+                ))
+            }
         }
         Ok(res)
     }
@@ -922,12 +927,15 @@ impl Extractor {
             match self.pe.net()?.get_us(t.rid()) {
                 Err(_) => Ok(res),
                 Ok(s) => {
-                    res.push((
-                        crate::rules::features::Feature::String(
-                            crate::rules::features::StringFeature::new(&s, "")?,
-                        ),
-                        insn.offset as u64,
-                    ));
+                    let trimmed = s.trim();
+                    if !trimmed.is_empty() {
+                        res.push((
+                            crate::rules::features::Feature::String(
+                                crate::rules::features::StringFeature::new(&trimmed, "")?,
+                            ),
+                            insn.offset as u64,
+                        ));
+                    }
                     Ok(res)
                 }
             }
@@ -966,40 +974,48 @@ impl Extractor {
         )?;
         if let Some(s) = operand.downcast_ref::<MemberRef>() {
             if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeDef>(&s.class) {
-                res.push((
-                    crate::rules::features::Feature::Namespace(
-                        crate::rules::features::NamespaceFeature::new(&ss.type_namespace, "")?,
-                    ),
-                    insn.offset as u64,
-                ))
+                if !ss.type_namespace.is_empty() {
+                    res.push((
+                        crate::rules::features::Feature::Namespace(
+                            crate::rules::features::NamespaceFeature::new(&ss.type_namespace, "")?,
+                        ),
+                        insn.offset as u64,
+                    ))
+                }
             } else if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeRef>(&s.class) {
-                res.push((
-                    crate::rules::features::Feature::Namespace(
-                        crate::rules::features::NamespaceFeature::new(&ss.type_namespace, "")?,
-                    ),
-                    insn.offset as u64,
-                ));
+                if !ss.type_namespace.is_empty() {
+                    res.push((
+                        crate::rules::features::Feature::Namespace(
+                            crate::rules::features::NamespaceFeature::new(&ss.type_namespace, "")?,
+                        ),
+                        insn.offset as u64,
+                    ));
+                }
             }
         } else if operand.downcast_ref::<MethodDef>().is_some() {
             if let Some(Callee::Method(dm)) = self.get_callee(insn.operand.value()? as u64)? {
-                res.push((
-                    crate::rules::features::Feature::Namespace(
-                        crate::rules::features::NamespaceFeature::new(&dm.namespace, "")?,
-                    ),
-                    insn.offset as u64,
-                ));
+                if !dm.namespace.is_empty() {
+                    res.push((
+                        crate::rules::features::Feature::Namespace(
+                            crate::rules::features::NamespaceFeature::new(&dm.namespace, "")?,
+                        ),
+                        insn.offset as u64,
+                    ));
+                }
             }
         } else if operand.downcast_ref::<Field>().is_some() {
             let fields_lock = self.get_fields()?.read();
 
             if let Some(fields) = &*fields_lock {
                 if let Some(field) = fields.clone().get(&(insn.operand.value()? as u64)) {
-                    res.push((
-                        crate::rules::features::Feature::Namespace(
-                            crate::rules::features::NamespaceFeature::new(&field.namespace, "")?,
-                        ),
-                        insn.offset as u64,
-                    ));
+                    if !field.namespace.is_empty() {
+                        res.push((
+                            crate::rules::features::Feature::Namespace(
+                                crate::rules::features::NamespaceFeature::new(&field.namespace, "")?,
+                            ),
+                            insn.offset as u64,
+                        ));
+                    }
                 }
             }
         }

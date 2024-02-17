@@ -11,6 +11,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     thread::spawn,
 };
+use std::collections::HashSet;
 
 mod error;
 pub use crate::error::Error;
@@ -126,8 +127,8 @@ impl FileCapabilities {
                         }
 
                         self.attacks
-                            .entry(parts[0].to_string())
-                            .or_default()
+			    .entry(parts[0].to_string())
+                            .or_insert_with(BTreeSet::new)
                             .insert(detail);
                     }
                 }
@@ -149,32 +150,32 @@ impl FileCapabilities {
                         }
 
                         self.mbc
-                            .entry(parts[0].to_string())
-                            .or_default()
+			                .entry(parts[0].to_string())
+                            .or_insert_with(BTreeSet::new)
                             .insert(detail);
                     }
                 }
             }
 
-            if let Some(Yaml::String(s)) = rule.meta.get(&Yaml::String("namespace".to_string())) {
-                self.capability_namespaces
-                    .insert(rule.name.clone(), s.clone());
-                let first_non_zero_address = caps
-                    .iter()
-                    .find(|&&(addr, _)| addr != 0)
-                    .map(|&(addr, _)| addr)
-                    .unwrap_or(0);
+            if let Some(namespace) = rule.meta.get(&Yaml::String("namespace".to_string())) {
+                if let Yaml::String(s) = namespace {
+                    self.capability_namespaces.insert(rule.name.clone(), s.clone());
+                    let first_non_zero_address = caps.iter()
+                        .find(|&&(addr, _)| addr != 0)
+                        .map(|&(addr, _)| addr)
+                        .unwrap_or(0);
 
-                let _ = self
-                    .capabilities_associations
-                    .entry(rule.name.clone())
-                    .or_insert_with(|| CapabilityAssociation {
-                        attack: local_attacks_set.clone(),
-                        mbc: local_mbc_set.clone(),
-                        namespace: s.clone(),
-                        name: rule.name.clone(),
-                        address: first_non_zero_address as usize,
-                    });
+                    let _ = self
+                        .capabilities_associations
+                        .entry(rule.name.clone())
+                        .or_insert_with(|| CapabilityAssociation {
+                            attack: local_attacks_set.clone(),
+                            mbc: local_mbc_set.clone(),
+                            namespace: s.clone(),
+                            name: rule.name.clone(),
+                            address: first_non_zero_address as usize,
+                        });
+                }
             }
             #[cfg(feature = "verbose")]
             {
@@ -199,34 +200,35 @@ impl FileCapabilities {
         Ok(())
     }
 
-    pub fn construct_json_for_capabilities_associations(self) -> Value {
+    pub fn construct_json_for_capabilities_associations(&mut self, filter: Option<String>) -> Value {
+        if let Some(f) = filter {
+            let filters: Vec<&str> = f.split('|').collect();
+            self.map_features.retain(|k, _v| filters.iter().any(|filter| k.contains(filter)));
+        }
+
         let mut rules = serde_json::Map::new();
         for (name, association) in &self.capabilities_associations {
             let attacks_json = association
                 .attack
                 .iter()
-                .map(|a| {
+                .map(|a|
                     json!({
                         "id": a.id,
                         "subtechnique": a.subtechnique,
                         "tactic": a.tactic,
                         "technique": a.technique,
-                    })
-                })
-                .collect::<Vec<_>>();
+                    })).collect::<Vec<_>>();
 
             let mbc_json = association
                 .mbc
                 .iter()
-                .map(|m| {
+                .map(|m|
                     json!({
                         "objective": m.objective,
                         "behavior": m.behavior,
                         "method": m.method,
                         "id": m.id,
-                    })
-                })
-                .collect::<Vec<_>>();
+                    })).collect::<Vec<_>>();
 
             let association_json = json!({
                 "attacks": attacks_json,
@@ -240,9 +242,9 @@ impl FileCapabilities {
         }
         Value::Object(rules)
     }
-    pub fn serialize_file_capabilities(self) -> serde_json::Result<String> {
+    pub fn serialize_file_capabilities(&mut self, filter: Option<String>) -> serde_json::Result<String> {
+        let associations_json = self.construct_json_for_capabilities_associations(filter);
         let mut fc_json = serde_json::to_value(self.clone())?;
-        let associations_json = self.clone().construct_json_for_capabilities_associations();
         fc_json
             .as_object_mut()
             .unwrap()
@@ -370,7 +372,7 @@ fn find_capabilities(
 ) -> Result<(
     HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     HashMap<u64, usize>,
-    HashMap<String, Vec<u64>>,
+    HashMap<String, HashMap<String, HashSet<u64>>>,
 )> {
     let mut all_function_matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
         HashMap::new();
@@ -431,11 +433,25 @@ fn find_capabilities(
     }
 
     meta.insert(0, feature_count);
+    let mut map_features_string: HashMap<String, HashMap<String, HashSet<u64>>> = HashMap::new();
 
-    let map_features_string = map_features
-        .iter()
-        .map(|(k, v)| (format!("{:?}", k), v.clone()))
-        .collect();
+    for (key, offsets) in &map_features {
+        let feature_type = key.get_name();
+        let feature_value = key.get_value()?;
+
+        let feature_map = map_features_string
+            .entry(feature_type)
+            .or_insert_with(HashMap::new);
+
+        let offsets_set = feature_map
+            .entry(feature_value)
+            .or_insert_with(HashSet::new);
+
+        for offset in offsets {
+            offsets_set.insert(*offset);
+        }
+    }
+
     Ok((matches, meta, map_features_string))
 }
 
@@ -468,10 +484,7 @@ fn find_file_capabilities<'a>(
     let mut matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
     for rule_set in [&ruleset.file_rules, &ruleset.function_rules].iter() {
         for (rule, matched) in match_fn(rule_set, &file_features, &0, logger)?.1 {
-            matches
-                .entry(rule)
-                .or_default()
-                .extend(matched.iter().cloned());
+            matches.entry(rule).or_default().extend(matched.iter().cloned());
         }
     }
 
@@ -602,7 +615,7 @@ pub struct FileCapabilities {
     #[cfg(feature = "verbose")]
     pub functions_capabilities: BTreeMap<u64, FunctionCapabilities>,
     pub tags: BTreeSet<String>,
-    pub map_features: HashMap<String, Vec<u64>>,
+    pub map_features: HashMap<String, HashMap<String, HashSet<u64>>>,
     pub capabilities_associations: BTreeMap<String, CapabilityAssociation>,
 }
 
@@ -649,10 +662,7 @@ fn index_rule_matches(
         crate::rules::features::MatchedRuleFeature::new(&rule.name, "")?,
     );
 
-    features
-        .entry(matched_rule_feature.clone())
-        .or_default()
-        .extend(locations.iter().cloned());
+    features.entry(matched_rule_feature.clone()).or_default().extend(locations.iter().cloned());
 
     if let Some(Yaml::String(namespace)) = rule.meta.get(&Yaml::String("namespace".to_string())) {
         let parts: Vec<&str> = namespace.split('/').collect();
@@ -661,10 +671,7 @@ fn index_rule_matches(
             let ns_feature = crate::rules::features::Feature::MatchedRule(
                 crate::rules::features::MatchedRuleFeature::new(&sub_namespace, "")?,
             );
-            features
-                .entry(ns_feature)
-                .or_default()
-                .extend(locations.iter().cloned());
+            features.entry(ns_feature).or_default().extend(locations.iter().cloned());
         }
     }
     Ok(())
