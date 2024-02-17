@@ -157,28 +157,27 @@ impl FileCapabilities {
                 }
             }
 
-            if let Some(namespace) = rule.meta.get(&Yaml::String("namespace".to_string())) {
-                if let Yaml::String(s) = namespace {
-                    self.capability_namespaces
-                        .insert(rule.name.clone(), s.clone());
-                    let first_non_zero_address = caps
-                        .iter()
-                        .find(|&&(addr, _)| addr != 0)
-                        .map(|&(addr, _)| addr)
-                        .unwrap_or(0);
+            if let Some(Yaml::String(s)) = rule.meta.get(&Yaml::String("namespace".to_string())) {
+                self.capability_namespaces
+                    .insert(rule.name.clone(), s.clone());
+                let first_non_zero_address = caps
+                    .iter()
+                    .find(|&&(addr, _)| addr != 0)
+                    .map(|&(addr, _)| addr)
+                    .unwrap_or(0);
 
-                    let _ = self
-                        .capabilities_associations
-                        .entry(rule.name.clone())
-                        .or_insert_with(|| CapabilityAssociation {
-                            attack: local_attacks_set.clone(),
-                            mbc: local_mbc_set.clone(),
-                            namespace: s.clone(),
-                            name: rule.name.clone(),
-                            address: first_non_zero_address as usize,
-                        });
-                }
+                let _ = self
+                    .capabilities_associations
+                    .entry(rule.name.clone())
+                    .or_insert_with(|| CapabilityAssociation {
+                        attack: local_attacks_set.clone(),
+                        mbc: local_mbc_set.clone(),
+                        namespace: s.clone(),
+                        name: rule.name.clone(),
+                        address: first_non_zero_address as usize,
+                    });
             }
+
             #[cfg(feature = "verbose")]
             {
                 for &(addr, _) in caps {
