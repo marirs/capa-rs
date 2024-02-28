@@ -950,21 +950,7 @@ impl Extractor {
         _f: &cil::function::Function,
         insn: &cil::instruction::Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-        if ![
-            OpCodeValue::Call,
-            OpCodeValue::Callvirt,
-            OpCodeValue::Jmp,
-            OpCodeValue::Calli,
-            OpCodeValue::Ldfld,
-            OpCodeValue::Ldflda,
-            OpCodeValue::Ldsfld,
-            OpCodeValue::Ldsflda,
-            OpCodeValue::Stfld,
-            OpCodeValue::Stsfld,
-            OpCodeValue::Newobj,
-        ]
-        .contains(&insn.opcode.value)
-        {
+        if self.check_contains_opcode(insn) {
             return Ok(vec![]);
         }
         let mut res = vec![];
@@ -1025,12 +1011,7 @@ impl Extractor {
         Ok(res)
     }
 
-    ///parse instruction class features
-    pub fn extract_insn_class_features(
-        &self,
-        _f: &cil::function::Function,
-        insn: &cil::instruction::Instruction,
-    ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+    fn check_contains_opcode(&self, insn: &cil::instruction::Instruction) -> bool {
         if ![
             OpCodeValue::Call,
             OpCodeValue::Callvirt,
@@ -1046,8 +1027,21 @@ impl Extractor {
         ]
         .contains(&insn.opcode.value)
         {
+            return true;
+        }
+        false
+
+    }
+    ///parse instruction class features
+    pub fn extract_insn_class_features(
+        &self,
+        _f: &cil::function::Function,
+        insn: &cil::instruction::Instruction,
+    ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+        if self.check_contains_opcode(insn) {
             return Ok(vec![]);
         }
+
         let mut res = vec![];
         let operand = resolve_dotnet_token(
             &self.pe,
