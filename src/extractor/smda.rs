@@ -422,7 +422,7 @@ impl Extractor {
             }
             res.push((
                 crate::rules::features::Feature::String(
-                    crate::rules::features::StringFeature::new(&trimmed, "")?,
+                    crate::rules::features::StringFeature::new(trimmed, "")?,
                 ),
                 a,
             ));
@@ -763,19 +763,14 @@ impl Extractor {
 
     pub fn extract_insn_bytes_features(
         &self,
-        f: &Function,
+        _f: &Function,
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        let instruction_length = insn.bytes.len();
-        let context_based_length = if f.arch == crate::FileArchitecture::AMD64 {
-            std::cmp::min(instruction_length, 16)
-        } else {
-            instruction_length
-        };
+
         for data_ref in insn.get_data_refs(&self.report)? {
             for v in derefs(&self.report, &data_ref)? {
-                let bytes_read = read_bytes(&self.report, &v, context_based_length)?;
+                let bytes_read = read_bytes(&self.report, &v, 0x100)?;
                 if all_zeros(bytes_read)? || is_padding(bytes_read)? {
                     continue;
                 }
@@ -1134,7 +1129,7 @@ pub fn detect_ascii_len(report: &DisassemblyReport, offset: &u64) -> Result<usiz
         .count();
 
     if rva + ascii_len as u64 >= buffer_len {
-        return Err(std::io::Error::new(
+        Err(std::io::Error::new(
             std::io::ErrorKind::Other,
             "Buffer overflow detected while detecting ASCII length"
         ))?;
@@ -1300,7 +1295,7 @@ pub fn extract_unicode_strings(data: &[u8], min_length: usize) -> Result<Vec<(St
 }
 
 fn clean_string(s: &str) -> String {
-    s.replace("\u{0000}", "")
+    s.replace('\u{0000}', "")
         .chars()
         .filter(|c| c.is_ascii_graphic() || c.is_ascii_whitespace())
         .collect()
