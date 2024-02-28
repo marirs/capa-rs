@@ -1030,7 +1030,6 @@ impl Extractor {
             return true;
         }
         false
-
     }
     ///parse instruction class features
     pub fn extract_insn_class_features(
