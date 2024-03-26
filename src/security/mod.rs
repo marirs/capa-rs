@@ -47,7 +47,7 @@ pub fn get_security_checks(
     }?;
     let statuses = results
         .into_iter()
-        .map(|r| r.get_status().unwrap())
+        .map(|r| r.get_security_check_status().unwrap())
         .collect::<Vec<_>>();
     
     Ok(statuses)

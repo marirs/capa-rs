@@ -7,21 +7,10 @@ use serde::{Deserialize, Serialize};
 use crate::Result;
 use crate::security::elf;
 use crate::security::elf::needed_libc::NeededLibC;
-use crate::error::{Error};
 
-pub(crate) const MARKER_GOOD: char = '+';
-pub(crate) const MARKER_BAD: char = '!';
-pub(crate) const MARKER_MAYBE: char = '~';
-pub(crate) const MARKER_UNKNOWN: char = '?';
+pub(crate) trait HasSecurityStatus {
 
-pub(crate) const COLOR_GOOD: termcolor::Color = termcolor::Color::Green;
-pub(crate) const COLOR_BAD: termcolor::Color = termcolor::Color::Red;
-pub(crate) const COLOR_UNKNOWN: termcolor::Color = termcolor::Color::Yellow;
-
-pub(crate) trait DisplayInColorTerm {
-    fn display_in_color_term(&self, wc: &mut dyn termcolor::WriteColor) -> Result<()>;
-
-    fn get_status(&self) -> Result<SecurityCheckStatus>;
+    fn get_security_check_status(&self) -> Result<SecurityCheckStatus>;
 }
 
 pub(crate) struct YesNoUnknownStatus {
@@ -30,7 +19,7 @@ pub(crate) struct YesNoUnknownStatus {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
-pub(crate) struct SecurityCheckStatus {
+pub struct SecurityCheckStatus {
     pub(crate) name: String,
     pub(crate) status: String,
 }
@@ -48,24 +37,9 @@ impl YesNoUnknownStatus {
     }
 }
 
-impl DisplayInColorTerm for YesNoUnknownStatus {
-    fn display_in_color_term(&self, wc: &mut dyn termcolor::WriteColor) -> Result<()> {
-        let (marker, color) = match self.status {
-            Some(true) => (MARKER_GOOD, COLOR_GOOD),
-            Some(false) => (MARKER_BAD, COLOR_BAD),
-            None => (MARKER_UNKNOWN, COLOR_UNKNOWN),
-        };
-
-        wc.set_color(termcolor::ColorSpec::new().set_fg(Some(color)))
-            .map_err(|r| Error::IoError(r))?;
-
-        write!(wc, "{}{}", marker, self.name)
-            .map_err(|r| Error::IoError(r))?;
-        wc.reset()
-            .map_err(|r| Error::IoError(r))
-    }
-
-    fn get_status(&self) -> Result<SecurityCheckStatus> {
+impl HasSecurityStatus for YesNoUnknownStatus {
+    
+    fn get_security_check_status(&self) -> Result<SecurityCheckStatus> {
         let (name, status) = match self.status {
             Some(true) => (self.name, "passed"),
             Some(false) => (self.name, "failed"),
@@ -93,25 +67,9 @@ pub(crate) enum PEControlFlowGuardLevel {
     Supported,
 }
 
-impl DisplayInColorTerm for PEControlFlowGuardLevel {
-    fn display_in_color_term(&self, wc: &mut dyn termcolor::WriteColor) -> Result<()> {
-        let (marker, color) = match *self {
-            PEControlFlowGuardLevel::Unknown => (MARKER_UNKNOWN, COLOR_UNKNOWN),
-            PEControlFlowGuardLevel::Unsupported => (MARKER_BAD, COLOR_BAD),
-            PEControlFlowGuardLevel::Ineffective => (MARKER_MAYBE, COLOR_UNKNOWN),
-            PEControlFlowGuardLevel::Supported => (MARKER_GOOD, COLOR_GOOD),
-        };
+impl HasSecurityStatus for PEControlFlowGuardLevel {
 
-        wc.set_color(termcolor::ColorSpec::new().set_fg(Some(color)))
-            .map_err(|r| Error::IoError(r))?;
-
-        write!(wc, "{marker}CONTROL-FLOW-GUARD")
-            .map_err(|r| Error::IoError(r))?;
-        wc.reset()
-            .map_err(|r| Error::IoError(r))
-    }
-
-    fn get_status(&self) -> Result<SecurityCheckStatus> {
+    fn get_security_check_status(&self) -> Result<SecurityCheckStatus> {
         let status = match *self {
             PEControlFlowGuardLevel::Unknown => "unknown",
             PEControlFlowGuardLevel::Unsupported => "unsupported",
@@ -147,34 +105,8 @@ pub(crate) enum ASLRCompatibilityLevel {
     Supported,
 }
 
-impl DisplayInColorTerm for ASLRCompatibilityLevel {
-    fn display_in_color_term(&self, wc: &mut dyn termcolor::WriteColor) -> Result<()> {
-        let (marker, color, text) = match *self {
-            ASLRCompatibilityLevel::Unknown => (MARKER_UNKNOWN, COLOR_UNKNOWN, "ASLR"),
-            ASLRCompatibilityLevel::Unsupported => (MARKER_BAD, COLOR_BAD, "ASLR"),
-            ASLRCompatibilityLevel::Expensive => (MARKER_MAYBE, COLOR_UNKNOWN, "ASLR-EXPENSIVE"),
-            ASLRCompatibilityLevel::SupportedLowEntropyBelow2G => {
-                (MARKER_MAYBE, COLOR_UNKNOWN, "ASLR-LOW-ENTROPY-LT-2GB")
-            }
-            ASLRCompatibilityLevel::SupportedLowEntropy => {
-                (MARKER_MAYBE, COLOR_UNKNOWN, "ASLR-LOW-ENTROPY")
-            }
-            ASLRCompatibilityLevel::SupportedBelow2G => {
-                (MARKER_MAYBE, COLOR_UNKNOWN, "ASLR-LT-2GB")
-            }
-            ASLRCompatibilityLevel::Supported => (MARKER_GOOD, COLOR_GOOD, "ASLR"),
-        };
-
-        wc.set_color(termcolor::ColorSpec::new().set_fg(Some(color)))
-            .map_err(Error::IoError)?;
-
-        write!(wc, "{marker}{text}")
-            .map_err(Error::IoError)?;
-        wc.reset()
-            .map_err(Error::IoError)
-    }
-
-    fn get_status(&self) -> Result<SecurityCheckStatus> {
+impl HasSecurityStatus for ASLRCompatibilityLevel {
+    fn get_security_check_status(&self) -> Result<SecurityCheckStatus> {
         let status = match *self {
             ASLRCompatibilityLevel::Unknown => "unknown",
             ASLRCompatibilityLevel::Unsupported => "unsupported",
@@ -255,66 +187,8 @@ impl Drop for ELFFortifySourceStatus {
     }
 }
 
-impl DisplayInColorTerm for Pin<Box<ELFFortifySourceStatus>> {
-    fn display_in_color_term(&self, wc: &mut dyn termcolor::WriteColor) -> Result<()> {
-        let no_protected_functions = self.protected_functions.is_empty();
-        let no_unprotected_functions = self.unprotected_functions.is_empty();
-
-        let (marker, color) = match (no_protected_functions, no_unprotected_functions) {
-            // Neither protected not unprotected functions are used. The binary can still be secure,
-            // if it does not use these functions.
-            (true, true) => (MARKER_UNKNOWN, COLOR_UNKNOWN),
-            // Only unprotected functions are used.
-            (true, false) => (MARKER_BAD, COLOR_BAD),
-            // Only protected functions are used.
-            (false, true) => (MARKER_GOOD, COLOR_GOOD),
-            // Both protected and unprotected functions are used. This usually indicates a compiler
-            // that, through static analysis, proves that some usage of the unprotected functions
-            // is actually safe, and for those instances, does not call the protected functions.
-            // It can also indicate that multiple object files have been compiled with different
-            // compiler flags (with and without `FORTIFY_SOURCE`) then linked together.
-            (false, false) => (MARKER_MAYBE, COLOR_UNKNOWN),
-        };
-
-        let set_color_err = |r| Error::IoError(r);
-
-        wc.set_color(termcolor::ColorSpec::new().set_fg(Some(color)))
-            .map_err(set_color_err)?;
-
-        write!(wc, "{marker}FORTIFY-SOURCE")
-            .map_err(|r| Error::IoError(r))?;
-        wc.reset()
-            .map_err(|r| Error::IoError(r))?;
-
-        write!(wc, "(").map_err(|r| Error::IoError(r))?;
-
-        wc.set_color(termcolor::ColorSpec::new().set_fg(Some(COLOR_GOOD)))
-            .map_err(set_color_err)?;
-
-        let mut separator = "";
-        for &name in &self.protected_functions {
-            write!(wc, "{separator}{MARKER_GOOD}{name}")
-                .map_err(|r| Error::IoError(r))?;
-            separator = ",";
-        }
-
-        wc.set_color(termcolor::ColorSpec::new().set_fg(Some(COLOR_BAD)))
-            .map_err(set_color_err)?;
-
-        for &name in &self.unprotected_functions {
-            write!(wc, "{separator}{MARKER_BAD}{name}")
-                .map_err(|r| Error::IoError(r))?;
-            separator = ",";
-        }
-
-        wc.reset()
-            .map_err(|r| Error::IoError(r))?;
-        writeln!(wc, ")")
-            .map_err(|r| Error::IoError(r))?;
-        Ok(())
-    }
-
-    fn get_status(&self) -> Result<SecurityCheckStatus> {
+impl HasSecurityStatus for Pin<Box<ELFFortifySourceStatus>> {
+    fn get_security_check_status(&self) -> Result<SecurityCheckStatus> {
         let mut status = SecurityCheckStatus {
             name: "Fortify Source".to_string(),
             status: "".to_string()

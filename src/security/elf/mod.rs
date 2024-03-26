@@ -13,7 +13,7 @@ use log::{debug, log_enabled, warn};
 
 use crate::Result;
 use crate::security::options::{
-    status::{ASLRCompatibilityLevel, DisplayInColorTerm},
+    status::{ASLRCompatibilityLevel, HasSecurityStatus},
     AddressSpaceLayoutRandomizationOption, BinarySecurityOption, ELFFortifySourceOption,
     ELFImmediateBindingOption, ELFReadOnlyAfterRelocationsOption, ELFStackProtectionOption,
 };
@@ -25,7 +25,7 @@ use self::needed_libc::NeededLibC;
 pub(crate) fn analyze_binary(
     parser: &BinaryParser,
     options: &crate::security::cmdline::Options,
-) -> Result<Vec<Box<dyn DisplayInColorTerm>>> {
+) -> Result<Vec<Box<dyn HasSecurityStatus>>> {
     let supports_address_space_layout_randomization =
         AddressSpaceLayoutRandomizationOption.check(parser, options)?;
     let has_stack_protection = ELFStackProtectionOption.check(parser, options)?;

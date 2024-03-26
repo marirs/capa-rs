@@ -1,20 +1,20 @@
-pub(crate) mod status;
-
-use crate::security::elf::needed_libc::{LibCResolver, NeededLibC};
 use crate::Result;
-use crate::security::parser::BinaryParser;
 use crate::security::{cmdline, elf, pe};
+use crate::security::elf::needed_libc::{LibCResolver, NeededLibC};
+use crate::security::parser::BinaryParser;
 
 use self::status::{
-    DisplayInColorTerm, ELFFortifySourceStatus, PEControlFlowGuardLevel, YesNoUnknownStatus,
+    ELFFortifySourceStatus, HasSecurityStatus, PEControlFlowGuardLevel, YesNoUnknownStatus,
 };
+
+pub(crate) mod status;
 
 pub(crate) trait BinarySecurityOption<'t> {
     fn check(
         &self,
         parser: &BinaryParser,
-        options: &crate::security::cmdline::Options,
-    ) -> Result<Box<dyn DisplayInColorTerm>>;
+        options: &cmdline::Options,
+    ) -> Result<Box<dyn HasSecurityStatus>>;
 }
 
 struct PEDllCharacteristicsBitOption {
@@ -28,8 +28,8 @@ impl<'t> BinarySecurityOption<'t> for PEDllCharacteristicsBitOption {
     fn check(
         &self,
         parser: &BinaryParser,
-        _options: &crate::security::cmdline::Options,
-    ) -> Result<Box<dyn DisplayInColorTerm>> {
+        _options: &cmdline::Options,
+    ) -> Result<Box<dyn HasSecurityStatus>> {
         if let goblin::Object::PE(pe) = parser.object() {
             if let Some(bit_is_set) =
                 pe::dll_characteristics_bit_is_set(pe, self.mask_name, self.mask)
@@ -51,8 +51,8 @@ impl<'t> BinarySecurityOption<'t> for PEHasCheckSumOption {
     fn check(
         &self,
         parser: &BinaryParser,
-        _options: &crate::security::cmdline::Options,
-    ) -> Result<Box<dyn DisplayInColorTerm>> {
+        _options: &cmdline::Options,
+    ) -> Result<Box<dyn HasSecurityStatus>> {
         let r = if let goblin::Object::PE(pe) = parser.object() {
             pe::has_check_sum(pe)
         } else {
@@ -78,8 +78,8 @@ impl<'t> BinarySecurityOption<'t> for DataExecutionPreventionOption {
     fn check(
         &self,
         parser: &BinaryParser,
-        options: &crate::security::cmdline::Options,
-    ) -> Result<Box<dyn DisplayInColorTerm>> {
+        options: &cmdline::Options,
+    ) -> Result<Box<dyn HasSecurityStatus>> {
         if let goblin::Object::PE(_pe) = parser.object() {
             PEDllCharacteristicsBitOption {
                 name: "DATA-EXEC-PREVENT",
@@ -106,8 +106,8 @@ impl<'t> BinarySecurityOption<'t> for PERunsOnlyInAppContainerOption {
     fn check(
         &self,
         parser: &BinaryParser,
-        options: &crate::security::cmdline::Options,
-    ) -> Result<Box<dyn DisplayInColorTerm>> {
+        options: &cmdline::Options,
+    ) -> Result<Box<dyn HasSecurityStatus>> {
         PEDllCharacteristicsBitOption {
             name: "RUNS-IN-APP-CONTAINER",
             mask_name: "IMAGE_DLLCHARACTERISTICS_APPCONTAINER",
@@ -127,8 +127,8 @@ impl<'t> BinarySecurityOption<'t> for RequiresIntegrityCheckOption {
     fn check(
         &self,
         parser: &BinaryParser,
-        options: &crate::security::cmdline::Options,
-    ) -> Result<Box<dyn DisplayInColorTerm>> {
+        options: &cmdline::Options,
+    ) -> Result<Box<dyn HasSecurityStatus>> {
         if let goblin::Object::PE(_pe) = parser.object() {
             PEDllCharacteristicsBitOption {
                 name: "VERIFY-DIGITAL-CERT",
@@ -158,8 +158,8 @@ impl<'t> BinarySecurityOption<'t> for PEEnableManifestHandlingOption {
     fn check(
         &self,
         parser: &BinaryParser,
-        options: &crate::security::cmdline::Options,
-    ) -> Result<Box<dyn DisplayInColorTerm>> {
+        options: &cmdline::Options,
+    ) -> Result<Box<dyn HasSecurityStatus>> {
         PEDllCharacteristicsBitOption {
             name: "CONSIDER-MANIFEST",
             mask_name: "IMAGE_DLLCHARACTERISTICS_NO_ISOLATION",
@@ -177,8 +177,8 @@ impl<'t> BinarySecurityOption<'t> for PEControlFlowGuardOption {
     fn check(
         &self,
         parser: &BinaryParser,
-        _options: &crate::security::cmdline::Options,
-    ) -> Result<Box<dyn DisplayInColorTerm>> {
+        _options: &cmdline::Options,
+    ) -> Result<Box<dyn HasSecurityStatus>> {
         let r = if let goblin::Object::PE(pe) = parser.object() {
             pe::supports_control_flow_guard(pe)
         } else {
@@ -195,8 +195,8 @@ impl<'t> BinarySecurityOption<'t> for PEHandlesAddressesLargerThan2GBOption {
     fn check(
         &self,
         parser: &BinaryParser,
-        _options: &crate::security::cmdline::Options,
-    ) -> Result<Box<dyn DisplayInColorTerm>> {
+        _options: &cmdline::Options,
+    ) -> Result<Box<dyn HasSecurityStatus>> {
         let r = if let goblin::Object::PE(pe) = parser.object() {
             YesNoUnknownStatus::new(
                 "HANDLES-ADDR-GT-2GB",
@@ -221,8 +221,8 @@ impl<'t> BinarySecurityOption<'t> for AddressSpaceLayoutRandomizationOption {
     fn check(
         &self,
         parser: &BinaryParser,
-        _options: &crate::security::cmdline::Options,
-    ) -> Result<Box<dyn DisplayInColorTerm>> {
+        _options: &cmdline::Options,
+    ) -> Result<Box<dyn HasSecurityStatus>> {
         match parser.object() {
             goblin::Object::PE(pe) => Ok(Box::new(pe::supports_aslr(pe))),
             goblin::Object::Elf(elf_obj) => Ok(Box::new(elf::supports_aslr(elf_obj))),
@@ -238,8 +238,8 @@ impl<'t> BinarySecurityOption<'t> for PESafeStructuredExceptionHandlingOption {
     fn check(
         &self,
         parser: &BinaryParser,
-        _options: &crate::security::cmdline::Options,
-    ) -> Result<Box<dyn DisplayInColorTerm>> {
+        _options: &cmdline::Options,
+    ) -> Result<Box<dyn HasSecurityStatus>> {
         let r = if let goblin::Object::PE(pe) = parser.object() {
             YesNoUnknownStatus::new(
                 "SAFE-SEH",
@@ -259,8 +259,8 @@ impl<'t> BinarySecurityOption<'t> for ELFReadOnlyAfterRelocationsOption {
     fn check(
         &self,
         parser: &BinaryParser,
-        _options: &crate::security::cmdline::Options,
-    ) -> Result<Box<dyn DisplayInColorTerm>> {
+        _options: &cmdline::Options,
+    ) -> Result<Box<dyn HasSecurityStatus>> {
         let r = if let goblin::Object::Elf(elf) = parser.object() {
             YesNoUnknownStatus::new(
                 "READ-ONLY-RELOC",
@@ -280,8 +280,8 @@ impl<'t> BinarySecurityOption<'t> for ELFStackProtectionOption {
     fn check(
         &self,
         parser: &BinaryParser,
-        _options: &crate::security::cmdline::Options,
-    ) -> Result<Box<dyn DisplayInColorTerm>> {
+        _options: &cmdline::Options,
+    ) -> Result<Box<dyn HasSecurityStatus>> {
         let r = match parser.object() {
             goblin::Object::Elf(elf_obj) => {
                 YesNoUnknownStatus::new("STACK-PROT", elf::has_stack_protection(elf_obj))
@@ -300,8 +300,8 @@ impl<'t> BinarySecurityOption<'t> for ELFImmediateBindingOption {
     fn check(
         &self,
         parser: &BinaryParser,
-        _options: &crate::security::cmdline::Options,
-    ) -> Result<Box<dyn DisplayInColorTerm>> {
+        _options: &cmdline::Options,
+    ) -> Result<Box<dyn HasSecurityStatus>> {
         let r = if let goblin::Object::Elf(elf) = parser.object() {
             YesNoUnknownStatus::new("IMMEDIATE-BIND", elf::requires_immediate_binding(elf))
         } else {
@@ -325,8 +325,8 @@ impl<'t> BinarySecurityOption<'t> for ELFFortifySourceOption {
     fn check(
         &self,
         parser: &BinaryParser,
-        options: &crate::security::cmdline::Options,
-    ) -> Result<Box<dyn DisplayInColorTerm>> {
+        options: &cmdline::Options,
+    ) -> Result<Box<dyn HasSecurityStatus>> {
         if let goblin::Object::Elf(elf) = parser.object() {
             let libc = if let Some(spec) = self.libc_spec {
                 NeededLibC::from_spec(spec)
