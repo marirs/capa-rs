@@ -1,22 +1,21 @@
+use std::path::Path;
+
+use log::debug;
+
+use crate::error::Error;
+use crate::Result;
+use crate::security::options::status::SecurityCheckStatus;
+use crate::security::parser::BinaryParser;
+
 mod pe;
 mod parser;
 pub(crate) mod options;
-mod elf;
-pub(crate) mod cmdline;
-
-use std::path::{Path};
-
-use log::{debug};
-
-
-use crate::Result;
-use crate::error::{Error};
-use crate::security::options::status::{SecurityCheckStatus};
-use crate::security::parser::BinaryParser;
+pub(crate) mod elf;
+pub mod cmdline;
 
 pub fn get_security_checks(
     path: &impl AsRef<Path>,
-    options: &cmdline::Options,
+    options: &crate::BinarySecurityCheckOptions,
 ) -> Result<Vec<SecurityCheckStatus>> {
     use goblin::Object;
 

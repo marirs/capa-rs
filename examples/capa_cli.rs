@@ -1,9 +1,11 @@
-use capa::FileCapabilities;
-use clap::Parser;
-use prettytable::{color, format::Alignment, Attr, Cell, Row, Table};
-use serde_json::{to_value, Map, Value};
 use std::fs;
 use std::time::Instant;
+
+use clap::Parser;
+use prettytable::{Attr, Cell, color, format::Alignment, Row, Table};
+use serde_json::{Map, to_value, Value};
+
+use capa::{BinarySecurityCheckOptions, FileCapabilities};
 
 #[derive(Parser)]
 #[clap(
@@ -36,6 +38,22 @@ struct CliOpts {
     /// filter map_features
     #[clap(short = 'f', long, value_name = "FILTER_MAP_FEATURES")]
     filter_map_features: Option<String>,
+
+    /// Path of the C runtime library file.
+    #[clap(long, value_name = "LIBC")]
+    libc: Option<String>,
+
+    /// Path of the system root for finding the corresponding C runtime library.
+    #[clap(long, value_name = "SYSROOT")]
+    sysroot: Option<String>,
+
+    /// Use an internal list of checked functions as specified by a specification. Provide the version of the specification. eg 3.2.0
+    #[clap(long, value_name = "LIBC_SPEC")]
+    libc_spec: Option<String>,
+
+    /// Assume that input files do not use any C runtime libraries.
+    #[clap(long, default_value = "false", value_name = "NO_LIBC")]
+    no_libc: bool
 }
 
 fn main() {
@@ -45,9 +63,15 @@ fn main() {
     let verbose = cli.verbose;
     let map_features = cli.map_features;
     let json_path = cli.output;
+    let libc = cli.libc.map(|s| s.into());
+    let sysroot = cli.sysroot.map(|s| s.into());
+    let libc_spec = cli.libc_spec.map(|s| s.into());
+    let no_libc = cli.no_libc;
+    let security_check_opts = BinarySecurityCheckOptions::new(libc, sysroot, libc_spec, no_libc);
+
 
     let start = Instant::now();
-    match FileCapabilities::from_file(&filename, &rules_path, true, true, &|_s| {}, map_features) {
+    match FileCapabilities::from_file(&filename, &rules_path, true, true, &|_s| {}, map_features, Some(security_check_opts)) {
         Err(e) => println!("{:?}", e),
         Ok(mut s) => {
             match to_value(&s) {

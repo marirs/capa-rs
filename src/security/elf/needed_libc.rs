@@ -5,11 +5,11 @@ use std::sync::OnceLock;
 use log::{debug, log_enabled};
 use regex::{Regex, RegexBuilder};
 
-use super::checked_functions::{function_is_checked_version, CheckedFunction};
-use crate::security::cmdline::LibCSpec;
-use crate::Result;
-use crate::error::{Error};
+use crate::{LibCSpec, Result};
+use crate::error::Error;
 use crate::security::parser::BinaryParser;
+
+use super::checked_functions::{CheckedFunction, function_is_checked_version};
 
 #[derive(Debug)]
 pub(crate) struct LibCResolver {
@@ -20,7 +20,7 @@ pub(crate) struct LibCResolver {
 static LIBC_RESOLVER: OnceLock<Option<LibCResolver>> = OnceLock::new();
 
 impl LibCResolver {
-    pub(crate) fn get(options: &crate::security::cmdline::Options) -> Result<&'static Self> {
+    pub(crate) fn get(options: &crate::BinarySecurityCheckOptions) -> Result<&'static Self> {
         let mut first_err = None;
 
         let r = LIBC_RESOLVER.get_or_init(|| match Self::new(options) {
@@ -42,7 +42,7 @@ impl LibCResolver {
         }
     }
 
-    fn new(options: &crate::security::cmdline::Options) -> Result<Self> {
+    fn new(options: &crate::BinarySecurityCheckOptions) -> Result<Self> {
         let ld_so_cache = if options.sysroot.is_none() {
             Some(dynamic_loader_cache::Cache::load()?)
         } else {

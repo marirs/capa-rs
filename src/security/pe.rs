@@ -6,18 +6,18 @@ use memoffset::offset_of;
 use scroll::Pread;
 
 use crate::Result;
-use crate::security::options::status::{ASLRCompatibilityLevel, HasSecurityStatus, PEControlFlowGuardLevel};
 use crate::security::options::{
     AddressSpaceLayoutRandomizationOption, BinarySecurityOption, DataExecutionPreventionOption,
     PEControlFlowGuardOption, PEEnableManifestHandlingOption,
     PEHandlesAddressesLargerThan2GBOption, PEHasCheckSumOption, PERunsOnlyInAppContainerOption,
     PESafeStructuredExceptionHandlingOption, RequiresIntegrityCheckOption,
 };
+use crate::security::options::status::{ASLRCompatibilityLevel, HasSecurityStatus, PEControlFlowGuardLevel};
 use crate::security::parser::BinaryParser;
 
 pub(crate) fn analyze_binary(
     parser: &BinaryParser,
-    options: &crate::security::cmdline::Options,
+    options: &crate::BinarySecurityCheckOptions,
 ) -> Result<Vec<Box<dyn HasSecurityStatus>>> {
     let has_checksum = PEHasCheckSumOption.check(parser, options)?;
     let supports_data_execution_prevention =

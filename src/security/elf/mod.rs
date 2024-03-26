@@ -24,7 +24,7 @@ pub(crate) mod needed_libc;
 
 pub(crate) fn analyze_binary(
     parser: &BinaryParser,
-    options: &crate::security::cmdline::Options,
+    options: &crate::BinarySecurityCheckOptions,
 ) -> Result<Vec<Box<dyn HasSecurityStatus>>> {
     let supports_address_space_layout_randomization =
         AddressSpaceLayoutRandomizationOption.check(parser, options)?;
