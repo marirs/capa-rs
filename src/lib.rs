@@ -203,12 +203,10 @@ impl FileCapabilities {
         let rules_thread_handle = spawn(move || rules::RuleSet::new(&r));
         let rules = rules_thread_handle.join().unwrap()?;
 
-        // Fetch security checks on a separate thread
+        // Fetch security checks
         let mut security_opts = security_checks_opts.unwrap_or_default();
         security_opts.input_file = PathBuf::from(&f);
-        let security_checks_thread_handle =
-            spawn(move || security::get_security_checks(&f, &security_opts));
-        let security_checks = security_checks_thread_handle.join().unwrap()?;
+        let security_checks = security::get_security_checks(&f, &security_opts)?;
 
         let mut file_capabilities;
         #[cfg(not(feature = "properties"))]
