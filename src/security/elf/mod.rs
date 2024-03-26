@@ -4,23 +4,23 @@
 // Licensed under the MIT license. This file may not be copied, modified,
 // or distributed except according to those terms.
 
-pub(crate) mod checked_functions;
-pub(crate) mod needed_libc;
-
 use std::collections::HashSet;
 
 use log::{debug, log_enabled, warn};
 
 use crate::Result;
 use crate::security::options::{
-    status::{ASLRCompatibilityLevel, HasSecurityStatus},
-    AddressSpaceLayoutRandomizationOption, BinarySecurityOption, ELFFortifySourceOption,
-    ELFImmediateBindingOption, ELFReadOnlyAfterRelocationsOption, ELFStackProtectionOption,
+    AddressSpaceLayoutRandomizationOption,
+    BinarySecurityOption, ELFFortifySourceOption, ELFImmediateBindingOption,
+    ELFReadOnlyAfterRelocationsOption, ELFStackProtectionOption, status::{ASLRCompatibilityLevel, HasSecurityStatus},
 };
 use crate::security::parser::BinaryParser;
 
 use self::checked_functions::function_is_checked_version;
 use self::needed_libc::NeededLibC;
+
+pub(crate) mod checked_functions;
+pub(crate) mod needed_libc;
 
 pub(crate) fn analyze_binary(
     parser: &BinaryParser,
@@ -40,9 +40,10 @@ pub(crate) fn analyze_binary(
     ];
 
     if !options.no_libc {
-        let fortify_source =
-            ELFFortifySourceOption::new(options.libc_spec).check(parser, options)?;
-        result.push(fortify_source);
+        if let Ok(fortify_source) =
+            ELFFortifySourceOption::new(options.libc_spec).check(parser, options) {
+            result.push(fortify_source);
+        }
     }
 
     Ok(result)

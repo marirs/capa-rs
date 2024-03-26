@@ -1,26 +1,29 @@
 #![allow(clippy::type_complexity, clippy::borrowed_box)]
-pub(crate) mod consts;
-mod extractor;
-pub mod rules;
-mod sede;
-use consts::{FileFormat, Os};
-use sede::{from_hex, to_hex};
-use serde::{Deserialize, Serialize};
-use smda::FileArchitecture;
-use std::collections::HashSet;
+
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     thread::spawn,
 };
+use std::collections::HashSet;
 use std::path::PathBuf;
 
-mod error;
-mod security;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use smda::FileArchitecture;
+use yaml_rust::Yaml;
+
+use consts::{FileFormat, Os};
+use sede::{from_hex, to_hex};
 
 pub use crate::error::Error;
-use serde_json::{json, Value};
-use yaml_rust::Yaml;
 use crate::security::options::status::SecurityCheckStatus;
+
+pub(crate) mod consts;
+mod extractor;
+pub mod rules;
+mod sede;
+mod error;
+mod security;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -56,12 +59,12 @@ impl FileCapabilities {
             libc: None,
             sysroot: None,
             libc_spec: None,
-            no_libc: true,
+            no_libc: false,
             input_files: vec![PathBuf::from(&f)],
         };
         let security_checks_thread_handle = spawn(move || security::get_security_checks(&f, &default_opts));
         let security_checks = security_checks_thread_handle.join().unwrap()?;
-        
+
         let mut file_capabilities;
         #[cfg(not(feature = "properties"))]
         {
