@@ -12,11 +12,15 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     thread::spawn,
 };
+use std::path::PathBuf;
 
 mod error;
+mod security;
+
 pub use crate::error::Error;
 use serde_json::{json, Value};
 use yaml_rust::Yaml;
+use crate::security::options::status::SecurityCheckStatus;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -46,6 +50,18 @@ impl FileCapabilities {
         let rules_thread_handle = spawn(move || rules::RuleSet::new(&r));
         let rules = rules_thread_handle.join().unwrap()?;
 
+        // Fetch security checks on a separate thread
+        let default_opts = security::cmdline::Options {
+            verbose: false,
+            libc: None,
+            sysroot: None,
+            libc_spec: None,
+            no_libc: true,
+            input_files: vec![PathBuf::from(&f)],
+        };
+        let security_checks_thread_handle = spawn(move || security::get_security_checks(&f, &default_opts));
+        let security_checks = security_checks_thread_handle.join().unwrap()?;
+        
         let mut file_capabilities;
         #[cfg(not(feature = "properties"))]
         {
@@ -57,6 +73,7 @@ impl FileCapabilities {
         }
         #[cfg(not(feature = "verbose"))]
         {
+            file_capabilities.security_checks = BTreeSet::from_iter(security_checks);
             let (capabilities, _counts, _map_features) =
                 find_capabilities(&rules, &extractor, logger, features_dump)?;
             if features_dump {
@@ -66,6 +83,7 @@ impl FileCapabilities {
         }
         #[cfg(feature = "verbose")]
         {
+            file_capabilities.security_checks = BTreeSet::from_iter(security_checks);
             let (capabilities, counts, _map_features) =
                 find_capabilities(&rules, &extractor, logger, features_dump)?;
             if features_dump {
@@ -96,6 +114,7 @@ impl FileCapabilities {
             #[cfg(feature = "verbose")]
             functions_capabilities: BTreeMap::new(),
             tags: BTreeSet::new(),
+            security_checks: BTreeSet::new(),
             map_features: HashMap::new(),
             capabilities_associations: BTreeMap::new(),
         })
@@ -292,11 +311,11 @@ impl FileCapabilities {
 }
 
 fn find_function_capabilities<'a>(
-    ruleset: &'a crate::rules::RuleSet,
-    extractor: &Box<dyn crate::extractor::Extractor>,
+    ruleset: &'a rules::RuleSet,
+    extractor: &Box<dyn extractor::Extractor>,
     f: &Box<dyn extractor::Function>,
     logger: &dyn Fn(&str),
-    map_features: &mut HashMap<crate::rules::features::Feature, Vec<u64>>,
+    map_features: &mut HashMap<rules::features::Feature, Vec<u64>>,
     features_dump: bool,
 ) -> Result<(
     HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
@@ -626,6 +645,7 @@ pub struct FileCapabilities {
     #[cfg(feature = "verbose")]
     pub functions_capabilities: BTreeMap<u64, FunctionCapabilities>,
     pub tags: BTreeSet<String>,
+    pub security_checks: BTreeSet<SecurityCheckStatus>,
     pub map_features: HashMap<String, HashMap<String, HashSet<u64>>>,
     pub capabilities_associations: BTreeMap<String, CapabilityAssociation>,
 }

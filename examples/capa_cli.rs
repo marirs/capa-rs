@@ -82,6 +82,14 @@ fn main() {
                         }
                     }
                     println!();
+                    
+                    // print the Security Checks
+                    if let Some(security_checks) = data.get("security_checks") {
+                        let tbl = get_security_checks(security_checks);
+                        tbl.printstd();
+                    }
+                    
+                    println!();
 
                     // print the Capability/Namespace
                     if let Some(namespace) = data.get("capability_namespaces") {
@@ -219,6 +227,29 @@ fn get_mbc(mbc: &Map<String, Value>) -> Table {
                 .with_style(Attr::ForegroundColor(color::RED))
                 .with_style(Attr::Bold),
             Cell::new(&behaviours.join("\n")),
+        ]));
+    }
+
+    tbl
+}
+
+fn get_security_checks(security_checks: &Value) -> Table {
+    let security_checks = security_checks.as_array().unwrap();
+    let mut tbl = Table::new();
+    tbl.set_titles(Row::new(vec![
+        Cell::new_align("Binary Security Checks", Alignment::CENTER).with_hspan(2),
+    ]));
+    for check in security_checks {
+        let check = check.as_object().unwrap();
+        let check_name = check.get("name").unwrap().as_str().unwrap();
+        let v = check.get("status").unwrap();
+        let status = v.as_str().unwrap().to_string();
+
+        tbl.add_row(Row::new(vec![
+            Cell::new(check_name)
+                .with_style(Attr::ForegroundColor(color::YELLOW))
+                .with_style(Attr::Bold),
+            Cell::new(&status),
         ]));
     }
 
