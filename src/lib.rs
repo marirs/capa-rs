@@ -143,8 +143,8 @@ pub struct BinarySecurityCheckOptions {
     /// Assume that input files do not use any C runtime libraries.
     pub(crate) no_libc: bool,
 
-    /// Binary files to analyze.
-    pub(crate) input_files: Vec<PathBuf>,
+    /// Binary file to analyze.
+    pub(crate) input_file: PathBuf,
 }
 
 impl BinarySecurityCheckOptions {
@@ -165,7 +165,7 @@ impl BinarySecurityCheckOptions {
             sysroot,
             libc_spec,
             no_libc,
-            input_files: Vec::new(),
+            input_file: PathBuf::new(),
         }
     }
 }
@@ -205,7 +205,7 @@ impl FileCapabilities {
 
         // Fetch security checks on a separate thread
         let mut security_opts = security_checks_opts.unwrap_or_default();
-        security_opts.input_files = vec![PathBuf::from(&f)];
+        security_opts.input_file = PathBuf::from(&f);
         let security_checks_thread_handle =
             spawn(move || security::get_security_checks(&f, &security_opts));
         let security_checks = security_checks_thread_handle.join().unwrap()?;
@@ -466,11 +466,11 @@ fn find_function_capabilities<'a>(
     map_features: &mut HashMap<rules::features::Feature, Vec<u64>>,
     features_dump: bool,
 ) -> Result<(
-    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
-    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<&'a rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<&'a rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     usize,
 )> {
-    let mut function_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
+    let mut function_features: HashMap<rules::features::Feature, Vec<u64>> = HashMap::new();
 
     for (feature, va) in extractor.extract_global_features()? {
         function_features.entry(feature).or_default().push(va);
@@ -535,8 +535,8 @@ fn find_function_capabilities<'a>(
     Ok((function_matches, bb_matches, function_features.len()))
 }
 fn aggregate_matches<'a, T: Clone>(
-    all_matches: &mut HashMap<&'a crate::rules::Rule, Vec<T>>,
-    new_matches: &HashMap<&'a crate::rules::Rule, Vec<T>>,
+    all_matches: &mut HashMap<&'a rules::Rule, Vec<T>>,
+    new_matches: &HashMap<&'a rules::Rule, Vec<T>>,
 ) {
     for (rule, res) in new_matches {
         all_matches.entry(rule).or_default().extend(res.clone());
@@ -544,19 +544,18 @@ fn aggregate_matches<'a, T: Clone>(
 }
 
 fn find_capabilities(
-    ruleset: &crate::rules::RuleSet,
-    extractor: &Box<dyn crate::extractor::Extractor>,
+    ruleset: &rules::RuleSet,
+    extractor: &Box<dyn extractor::Extractor>,
     logger: &dyn Fn(&str),
     features_dump: bool,
 ) -> Result<(
-    HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     HashMap<u64, usize>,
     HashMap<String, HashMap<String, HashSet<u64>>>,
 )> {
-    let mut all_function_matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
+    let mut all_function_matches: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
         HashMap::new();
-    let mut all_bb_matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
-        HashMap::new();
+    let mut all_bb_matches: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
 
     let mut meta = HashMap::new();
 
@@ -631,17 +630,17 @@ fn find_capabilities(
 }
 
 fn find_file_capabilities<'a>(
-    ruleset: &'a crate::rules::RuleSet,
-    extractor: &Box<dyn crate::extractor::Extractor>,
-    function_features: &HashMap<crate::rules::features::Feature, Vec<u64>>,
+    ruleset: &'a rules::RuleSet,
+    extractor: &Box<dyn extractor::Extractor>,
+    function_features: &HashMap<rules::features::Feature, Vec<u64>>,
     logger: &dyn Fn(&str),
-    map_features: &mut HashMap<crate::rules::features::Feature, Vec<u64>>,
+    map_features: &mut HashMap<rules::features::Feature, Vec<u64>>,
     features_dump: bool,
 ) -> Result<(
-    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<&'a rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     usize,
 )> {
-    let mut file_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
+    let mut file_features: HashMap<rules::features::Feature, Vec<u64>> = HashMap::new();
     for (feature, va) in itertools::chain!(
         extractor.extract_file_features()?,
         extractor.extract_global_features()?
@@ -656,7 +655,7 @@ fn find_file_capabilities<'a>(
             .extend(addresses.iter().cloned());
     }
 
-    let mut matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
+    let mut matches: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
     for rule_set in [&ruleset.file_rules, &ruleset.function_rules].iter() {
         for (rule, matched) in match_fn(rule_set, &file_features, &0, logger)?.1 {
             matches
@@ -799,15 +798,15 @@ pub struct FileCapabilities {
 }
 
 fn match_fn<'a>(
-    rules: &'a [crate::rules::Rule],
-    features: &HashMap<crate::rules::features::Feature, Vec<u64>>,
+    rules: &'a [rules::Rule],
+    features: &HashMap<rules::features::Feature, Vec<u64>>,
     va: &u64,
     logger: &dyn Fn(&str),
 ) -> Result<(
-    HashMap<crate::rules::features::Feature, Vec<u64>>,
-    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<rules::features::Feature, Vec<u64>>,
+    HashMap<&'a rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
 )> {
-    let mut results: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
+    let mut results: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
     let mut features = features.clone();
     for (_index, rule) in rules.iter().enumerate() {
         logger(&format!(
@@ -833,12 +832,12 @@ fn match_fn<'a>(
 }
 
 fn index_rule_matches(
-    features: &mut HashMap<crate::rules::features::Feature, Vec<u64>>,
-    rule: &crate::rules::Rule,
+    features: &mut HashMap<rules::features::Feature, Vec<u64>>,
+    rule: &rules::Rule,
     locations: Vec<u64>,
 ) -> Result<()> {
-    let matched_rule_feature = crate::rules::features::Feature::MatchedRule(
-        crate::rules::features::MatchedRuleFeature::new(&rule.name, "")?,
+    let matched_rule_feature = rules::features::Feature::MatchedRule(
+        rules::features::MatchedRuleFeature::new(&rule.name, "")?,
     );
 
     features
