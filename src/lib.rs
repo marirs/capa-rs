@@ -2,36 +2,33 @@
 
 extern crate core;
 
+use crate::security::options::status::SecurityCheckStatus;
+use consts::{FileFormat, Os};
 use core::fmt;
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
-    thread::spawn,
-};
-use std::collections::HashSet;
-use std::path::PathBuf;
-
+use sede::{from_hex, to_hex};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use smda::FileArchitecture;
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    path::PathBuf,
+    thread::spawn,
+};
 use yaml_rust::Yaml;
 
-use consts::{FileFormat, Os};
-use sede::{from_hex, to_hex};
-
 pub use crate::error::Error;
-use crate::security::options::status::SecurityCheckStatus;
 
 pub(crate) mod consts;
+mod error;
 mod extractor;
 pub mod rules;
-mod sede;
-mod error;
 mod security;
+mod sede;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-
 // If this changes, then update the command line reference.
+// Used for options for binary security checks.
 #[derive(Debug, Copy, Clone)]
 pub enum LibCSpec {
     LSB1,
@@ -49,6 +46,7 @@ pub enum LibCSpec {
     LSB5,
 }
 
+// Used for options for binary security checks.
 impl fmt::Display for LibCSpec {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let spec_name = match *self {
@@ -87,6 +85,7 @@ impl fmt::Display for LibCSpec {
     }
 }
 
+// Used for options for binary security checks.
 impl LibCSpec {
     pub(crate) fn get_functions_with_checked_versions(self) -> &'static [&'static str] {
         match self {
@@ -108,6 +107,7 @@ impl LibCSpec {
     }
 }
 
+// Used for options for binary security checks.
 impl From<String> for LibCSpec {
     fn from(value: String) -> Self {
         match value.as_str() {
@@ -148,10 +148,12 @@ pub struct BinarySecurityCheckOptions {
 }
 
 impl BinarySecurityCheckOptions {
-    pub fn new(libc: Option<PathBuf>,
-               sysroot: Option<PathBuf>,
-               libc_spec: Option<LibCSpec>,
-               no_libc: bool) -> Self {
+    pub fn new(
+        libc: Option<PathBuf>,
+        sysroot: Option<PathBuf>,
+        libc_spec: Option<LibCSpec>,
+        no_libc: bool,
+    ) -> Self {
         //!
         //! Create some options to configure binary security checks.
         //! - libc: This is the path of the C runtime library file.
@@ -164,7 +166,6 @@ impl BinarySecurityCheckOptions {
             libc_spec,
             no_libc,
             input_files: Vec::new(),
-
         }
     }
 }
@@ -175,7 +176,6 @@ impl Default for BinarySecurityCheckOptions {
     }
 }
 
-
 impl FileCapabilities {
     pub fn from_file(
         file_name: &str,
@@ -184,7 +184,7 @@ impl FileCapabilities {
         resolve_tailcalls: bool,
         logger: &dyn Fn(&str),
         features_dump: bool,
-        security_checks_opts: Option<BinarySecurityCheckOptions>
+        security_checks_opts: Option<BinarySecurityCheckOptions>,
     ) -> Result<Self> {
         //! Loads a binary from a given file for capability analysis using the default binary security check options:
         //! ## Example
@@ -206,7 +206,8 @@ impl FileCapabilities {
         // Fetch security checks on a separate thread
         let mut security_opts = security_checks_opts.unwrap_or_default();
         security_opts.input_files = vec![PathBuf::from(&f)];
-        let security_checks_thread_handle = spawn(move || security::get_security_checks(&f, &security_opts));
+        let security_checks_thread_handle =
+            spawn(move || security::get_security_checks(&f, &security_opts));
         let security_checks = security_checks_thread_handle.join().unwrap()?;
 
         let mut file_capabilities;

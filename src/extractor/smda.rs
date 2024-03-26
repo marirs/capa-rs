@@ -9,7 +9,7 @@ use smda::{
     report::DisassemblyReport,
     Disassembler,
 };
-use std::{collections::HashMap};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 struct InstructionS {

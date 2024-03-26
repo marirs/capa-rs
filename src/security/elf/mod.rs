@@ -4,20 +4,18 @@
 // Licensed under the MIT license. This file may not be copied, modified,
 // or distributed except according to those terms.
 
-use std::collections::HashSet;
-
-use log::{debug, log_enabled, warn};
-
-use crate::Result;
-use crate::security::options::{
-    AddressSpaceLayoutRandomizationOption,
-    BinarySecurityOption, ELFFortifySourceOption, ELFImmediateBindingOption,
-    ELFReadOnlyAfterRelocationsOption, ELFStackProtectionOption, status::{ASLRCompatibilityLevel, HasSecurityStatus},
-};
-use crate::security::parser::BinaryParser;
-
 use self::checked_functions::function_is_checked_version;
 use self::needed_libc::NeededLibC;
+use crate::security::{
+    options::{
+        status::{ASLRCompatibilityLevel, HasSecurityStatus},
+        AddressSpaceLayoutRandomizationOption, BinarySecurityOption, ELFFortifySourceOption,
+        ELFImmediateBindingOption, ELFReadOnlyAfterRelocationsOption, ELFStackProtectionOption,
+    },
+    parser::BinaryParser,
+    Result,
+};
+use std::collections::HashSet;
 
 pub(crate) mod checked_functions;
 pub(crate) mod needed_libc;
@@ -41,7 +39,8 @@ pub(crate) fn analyze_binary(
 
     if !options.no_libc {
         if let Ok(fortify_source) =
-            ELFFortifySourceOption::new(options.libc_spec).check(parser, options) {
+            ELFFortifySourceOption::new(options.libc_spec).check(parser, options)
+        {
             result.push(fortify_source);
         }
     }
@@ -65,10 +64,10 @@ pub(crate) fn get_libc_functions_by_protection<'t>(
             if let Some(unchecked_function) = libc_ref.exports_function(imported_function) {
                 protected_functions.insert(unchecked_function);
             } else {
-                warn!(
-                    "Checked function '{}' is not exported by the C runtime library. This might indicate a C runtime mismatch.",
-                    imported_function
-                );
+                // warn!(
+                //     "Checked function '{}' is not exported by the C runtime library. This might indicate a C runtime mismatch.",
+                //     imported_function
+                // );
             }
         } else if let Some(unchecked_function) =
             libc_ref.exports_checked_version_of_function(imported_function)
@@ -82,10 +81,10 @@ pub(crate) fn get_libc_functions_by_protection<'t>(
 
 /// [`ET_EXEC`, `ET_DYN`, `PT_PHDR`](http://refspecs.linux-foundation.org/elf/TIS1.1.pdf).
 pub(crate) fn supports_aslr(elf: &goblin::elf::Elf) -> ASLRCompatibilityLevel {
-    debug!(
-        "Header type is 'ET_{}'.",
-        goblin::elf::header::et_to_str(elf.header.e_type)
-    );
+    // debug!(
+    //     "Header type is 'ET_{}'.",
+    //     goblin::elf::header::et_to_str(elf.header.e_type)
+    // );
 
     match elf.header.e_type {
         goblin::elf::header::ET_EXEC => {
@@ -94,37 +93,37 @@ pub(crate) fn supports_aslr(elf: &goblin::elf::Elf) -> ASLRCompatibilityLevel {
         }
 
         goblin::elf::header::ET_DYN => {
-            if log_enabled!(log::Level::Debug) {
-                if elf
-                    .program_headers
-                    .iter()
-                    .any(|ph| ph.p_type == goblin::elf::program_header::PT_PHDR)
-                {
-                    // Position-independent executable.
-                    debug!("Found type 'PT_PHDR' inside program headers section.");
-                } else if let Some(dynamic_section) = elf.dynamic.as_ref() {
-                    let dynamic_section_flags_include_pie = dynamic_section.dyns.iter().any(|e| {
-                        (e.d_tag == goblin::elf::dynamic::DT_FLAGS_1) && ((e.d_val & DF_1_PIE) != 0)
-                    });
-
-                    if dynamic_section_flags_include_pie {
-                        // Position-independent executable.
-                        debug!("Bit 'DF_1_PIE' is set in tag 'DT_FLAGS_1' inside dynamic linking information.");
-                    } else {
-                        // Shared library.
-                        debug!("Binary is a shared library with dynamic linking information.");
-                    }
-                } else {
-                    // Shared library.
-                    debug!("Binary is a shared library without dynamic linking information.");
-                }
-            }
+            // if log_enabled!(log::Level::Debug) {
+            //     if elf
+            //         .program_headers
+            //         .iter()
+            //         .any(|ph| ph.p_type == goblin::elf::program_header::PT_PHDR)
+            //     {
+            //         // Position-independent executable.
+            //         debug!("Found type 'PT_PHDR' inside program headers section.");
+            //     } else if let Some(dynamic_section) = elf.dynamic.as_ref() {
+            //         let dynamic_section_flags_include_pie = dynamic_section.dyns.iter().any(|e| {
+            //             (e.d_tag == goblin::elf::dynamic::DT_FLAGS_1) && ((e.d_val & DF_1_PIE) != 0)
+            //         });
+            //
+            //         if dynamic_section_flags_include_pie {
+            //             // Position-independent executable.
+            //             debug!("Bit 'DF_1_PIE' is set in tag 'DT_FLAGS_1' inside dynamic linking information.");
+            //         } else {
+            //             // Shared library.
+            //             debug!("Binary is a shared library with dynamic linking information.");
+            //         }
+            //     } else {
+            //         // Shared library.
+            //         debug!("Binary is a shared library without dynamic linking information.");
+            //     }
+            // }
 
             ASLRCompatibilityLevel::Supported
         }
 
         _ => {
-            debug!("Position-independence could not be determined.");
+            // debug!("Position-independence could not be determined.");
             ASLRCompatibilityLevel::Unknown
         }
     }
@@ -138,7 +137,7 @@ pub(crate) fn becomes_read_only_after_relocations(elf: &goblin::elf::Elf) -> boo
         .any(|ph| ph.p_type == goblin::elf::program_header::PT_GNU_RELRO);
 
     if r {
-        debug!("Found type 'PT_GNU_RELRO' inside program headers section.");
+        // debug!("Found type 'PT_GNU_RELRO' inside program headers section.");
     }
     r
 }
@@ -154,7 +153,7 @@ pub(crate) fn has_stack_protection(elf: &goblin::elf::Elf) -> bool {
         .any(|name| name == "__stack_chk_fail");
 
     if r {
-        debug!("Found function symbol '__stack_chk_fail' inside dynamic symbols section.");
+        // debug!("Found function symbol '__stack_chk_fail' inside dynamic symbols section.");
     }
     r
 }
@@ -196,9 +195,9 @@ pub(crate) fn dynamic_symbol_is_named_exported_function<'elf>(
 }
 
 /// Position Independent Executable.
-pub(crate) const DF_1_PIE: u64 = 0x08_00_00_00;
+pub(crate) const _DF_1_PIE: u64 = 0x08_00_00_00;
 
-pub(crate) fn symbol_is_named_function_or_unspecified<'elf>(
+pub(crate) fn _symbol_is_named_function_or_unspecified<'elf>(
     elf: &'elf goblin::elf::Elf,
     symbol: &goblin::elf::sym::Sym,
 ) -> Option<&'elf str> {
@@ -276,14 +275,14 @@ fn dynamic_linking_info_entry_requires_immediate_binding(
 ) -> bool {
     match dyn_entry.d_tag {
         goblin::elf::dynamic::DT_BIND_NOW => {
-            debug!("Found tag 'DT_BIND_NOW' inside dynamic linking information.");
+            // debug!("Found tag 'DT_BIND_NOW' inside dynamic linking information.");
             true
         }
 
         goblin::elf::dynamic::DT_FLAGS => {
             let r = (dyn_entry.d_val & goblin::elf::dynamic::DF_BIND_NOW) != 0;
             if r {
-                debug!("Bit 'DF_BIND_NOW' is set in tag 'DT_FLAGS' inside dynamic linking information.");
+                // debug!("Bit 'DF_BIND_NOW' is set in tag 'DT_FLAGS' inside dynamic linking information.");
             }
             r
         }
@@ -291,9 +290,9 @@ fn dynamic_linking_info_entry_requires_immediate_binding(
         goblin::elf::dynamic::DT_FLAGS_1 => {
             let r = (dyn_entry.d_val & goblin::elf::dynamic::DF_1_NOW) != 0;
             if r {
-                debug!(
-                    "Bit 'DF_1_NOW' is set in tag 'DT_FLAGS_1' inside dynamic linking information."
-                );
+                // debug!(
+                //     "Bit 'DF_1_NOW' is set in tag 'DT_FLAGS_1' inside dynamic linking information."
+                // );
             }
             r
         }

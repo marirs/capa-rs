@@ -1,15 +1,15 @@
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-
-use log::{debug, log_enabled};
+use crate::{
+    error::Error,
+    security::elf::checked_functions::{function_is_checked_version, CheckedFunction},
+    security::parser::BinaryParser,
+    LibCSpec, Result,
+};
 use regex::{Regex, RegexBuilder};
-
-use crate::{LibCSpec, Result};
-use crate::error::Error;
-use crate::security::parser::BinaryParser;
-
-use super::checked_functions::{CheckedFunction, function_is_checked_version};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    sync::OnceLock,
+};
 
 #[derive(Debug)]
 pub(crate) struct LibCResolver {
@@ -71,7 +71,7 @@ impl LibCResolver {
     }
 
     fn open_compatible_libc(&self, elf: &goblin::elf::Elf, file_name: &Path) -> Result<NeededLibC> {
-        debug!("Looking for libc '{}'.", file_name.display());
+        // debug!("Looking for libc '{}'.", file_name.display());
 
         if let Some(ld_so_cache) = self.ld_so_cache.as_ref() {
             let found_in_ld_so_cache = ld_so_cache
@@ -112,25 +112,25 @@ impl NeededLibC {
     pub(crate) fn from_spec(spec: LibCSpec) -> Self {
         let functions_with_checked_versions = spec.get_functions_with_checked_versions();
 
-        if log_enabled!(log::Level::Debug) {
-            debug!("C runtime library is assumed to conform to {}.", spec);
-
-            let mut text = String::default();
-            let mut iter = functions_with_checked_versions.iter();
-            if let Some(name) = iter.next() {
-                text.push_str(name);
-                for name in iter {
-                    text.push(' ');
-                    text.push_str(name);
-                }
-            } else {
-                text.push_str("(none)");
-            }
-            debug!(
-                "Functions with checked versions, presumably exported by the C runtime library: {}.",
-                text
-            );
-        }
+        // if log_enabled!(log::Level::Debug) {
+        //     debug!("C runtime library is assumed to conform to {}.", spec);
+        //
+        //     let mut text = String::default();
+        //     let mut iter = functions_with_checked_versions.iter();
+        //     if let Some(name) = iter.next() {
+        //         text.push_str(name);
+        //         for name in iter {
+        //             text.push(' ');
+        //             text.push_str(name);
+        //         }
+        //     } else {
+        //         text.push_str("(none)");
+        //     }
+        //     debug!(
+        //         "Functions with checked versions, presumably exported by the C runtime library: {}.",
+        //         text
+        //     );
+        // }
 
         Self {
             checked_functions: functions_with_checked_versions
@@ -149,10 +149,10 @@ impl NeededLibC {
         match parser.object() {
             goblin::Object::Elf(elf) => {
                 if elf.header.e_machine == other_elf.header.e_machine {
-                    debug!(
-                        "C runtime library file format is 'ELF'. Resolved to '{}'.",
-                        path.as_ref().display()
-                    );
+                    // debug!(
+                    //     "C runtime library file format is 'ELF'. Resolved to '{}'.",
+                    //     path.as_ref().display()
+                    // );
 
                     Ok(Self {
                         checked_functions: Self::get_checked_functions_elf(elf),
@@ -195,23 +195,23 @@ impl NeededLibC {
             .map(CheckedFunction::from_checked_name)
             .collect::<HashSet<CheckedFunction>>();
 
-        if log_enabled!(log::Level::Debug) {
-            let mut text = String::default();
-            let mut iter = checked_functions.iter();
-            if let Some(name) = iter.next() {
-                text.push_str(name.get_unchecked_name());
-                for name in iter {
-                    text.push(' ');
-                    text.push_str(name.get_unchecked_name());
-                }
-            } else {
-                text.push_str("(none)");
-            }
-            debug!(
-                "Functions with checked versions, exported by the C runtime library: {}.",
-                text
-            );
-        }
+        // if log_enabled!(log::Level::Debug) {
+        //     let mut text = String::default();
+        //     let mut iter = checked_functions.iter();
+        //     if let Some(name) = iter.next() {
+        //         text.push_str(name.get_unchecked_name());
+        //         for name in iter {
+        //             text.push(' ');
+        //             text.push_str(name.get_unchecked_name());
+        //         }
+        //     } else {
+        //         text.push_str("(none)");
+        //     }
+        //     debug!(
+        //         "Functions with checked versions, exported by the C runtime library: {}.",
+        //         text
+        //     );
+        // }
         checked_functions
     }
 
@@ -221,10 +221,7 @@ impl NeededLibC {
             .map(CheckedFunction::get_unchecked_name)
     }
 
-    pub(crate) fn exports_checked_version_of_function(
-        &self,
-        unchecked_name: &str,
-    ) -> Option<&str> {
+    pub(crate) fn exports_checked_version_of_function(&self, unchecked_name: &str) -> Option<&str> {
         self.checked_functions
             .get(&CheckedFunction::from_unchecked_name(unchecked_name))
             .map(CheckedFunction::get_unchecked_name)

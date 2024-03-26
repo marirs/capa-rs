@@ -1,10 +1,18 @@
-use crate::{BinarySecurityCheckOptions, LibCSpec, Result};
-use crate::security::{elf, pe};
-use crate::security::elf::needed_libc::{LibCResolver, NeededLibC};
-use crate::security::parser::BinaryParser;
-
 use self::status::{
     ELFFortifySourceStatus, HasSecurityStatus, PEControlFlowGuardLevel, YesNoUnknownStatus,
+};
+use crate::{
+    security::{
+        pe,
+        {
+            elf::{
+                self,
+                needed_libc::{LibCResolver, NeededLibC},
+            },
+            parser::BinaryParser,
+        },
+    },
+    BinarySecurityCheckOptions, LibCSpec, Result,
 };
 
 pub(crate) mod status;
@@ -87,7 +95,7 @@ impl<'t> BinarySecurityOption<'t> for DataExecutionPreventionOption {
                 mask: pe::IMAGE_DLLCHARACTERISTICS_NX_COMPAT,
                 present: true,
             }
-                .check(parser, options)
+            .check(parser, options)
         } else {
             Ok(Box::new(YesNoUnknownStatus::unknown("DATA-EXEC-PREVENT")))
         }
@@ -114,7 +122,7 @@ impl<'t> BinarySecurityOption<'t> for PERunsOnlyInAppContainerOption {
             mask: pe::IMAGE_DLLCHARACTERISTICS_APPCONTAINER,
             present: true,
         }
-            .check(parser, options)
+        .check(parser, options)
     }
 }
 
@@ -136,7 +144,7 @@ impl<'t> BinarySecurityOption<'t> for RequiresIntegrityCheckOption {
                 mask: pe::IMAGE_DLLCHARACTERISTICS_FORCE_INTEGRITY,
                 present: true,
             }
-                .check(parser, options)
+            .check(parser, options)
         } else {
             Ok(Box::new(YesNoUnknownStatus::unknown("VERIFY-DIGITAL-CERT")))
         }
@@ -166,7 +174,7 @@ impl<'t> BinarySecurityOption<'t> for PEEnableManifestHandlingOption {
             mask: pe::IMAGE_DLLCHARACTERISTICS_NO_ISOLATION,
             present: false,
         }
-            .check(parser, options)
+        .check(parser, options)
     }
 }
 
