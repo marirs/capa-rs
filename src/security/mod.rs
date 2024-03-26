@@ -11,7 +11,6 @@ mod pe;
 mod parser;
 pub(crate) mod options;
 pub(crate) mod elf;
-pub mod cmdline;
 
 pub fn get_security_checks(
     path: &impl AsRef<Path>,
