@@ -8,7 +8,7 @@
 Test it online: https://www.analyze.rs/
 
 capa detects capabilities in executable files. You run it against a PE, ELF, or shellcode file and it tells you what it thinks the program can do. 
-For example, it might suggest that the file is a backdoor, is capable of installing services, or relies on HTTP to communicate.
+For example, it might suggest that the file is a backdoor, is capable of installing services, or relies on HTTP to communicate. It also performs a binary security check to see if the binary is compiled with security features enabled.
 
 It is a port from https://github.com/mandiant/capa without IDA plugins, etc. Its just a capa library that gives out capability information. 
 The Library itself can be used in other applications. The rules are available here: `https://github.com/mandiant/capa-rules`
@@ -44,6 +44,29 @@ The example contains a `CLI` to output the extracted capabilities to `stdout`.
 +===============+===========================+
 | Process       | Terminate Process [C0018] |
 +---------------+---------------------------+
+
++-----------------------+-------------+
+|       Binary Security Checks        |
++=======================+=============+
+| ASLR                  | supported   |
++-----------------------+-------------+
+| CHECKSUM              | failed      |
++-----------------------+-------------+
+| CONSIDER-MANIFEST     | passed      |
++-----------------------+-------------+
+| CONTROL-FLOW-GUARD    | unsupported |
++-----------------------+-------------+
+| DATA-EXEC-PREVENT     | passed      |
++-----------------------+-------------+
+| HANDLES-ADDR-GT-2GB   | passed      |
++-----------------------+-------------+
+| RUNS-IN-APP-CONTAINER | failed      |
++-----------------------+-------------+
+| SAFE-SEH              | failed      |
++-----------------------+-------------+
+| VERIFY-DIGITAL-CERT   | failed      |
++-----------------------+-------------+
+
 
 +-----------------------------------------------+------------------------------------+
 | Capability                                    | Namespace                          |
