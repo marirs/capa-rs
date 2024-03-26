@@ -7,8 +7,8 @@ use std::path::Path;
 use log::debug;
 use memmap2::{Mmap, MmapOptions};
 
+use crate::error::Error;
 use crate::Result;
-use crate::error::{Error};
 
 pub(crate) struct BinaryParser {
     bytes: Mmap,
@@ -20,10 +20,10 @@ impl BinaryParser {
     pub(crate) fn open(path: impl AsRef<Path>) -> Result<Pin<Box<Self>>> {
         debug!("Opening binary file '{}'.", path.as_ref().display());
         let file =
-            fs::File::open(&path).map_err(|r| Error::IoError(r))?;
+            fs::File::open(&path).map_err(Error::IoError)?;
 
         let bytes = unsafe { MmapOptions::new().map(&file) }
-            .map_err(|r| Error::IoError(r))?;
+            .map_err(Error::IoError)?;
 
         let mut result = Box::pin(Self {
             bytes,
@@ -47,7 +47,7 @@ impl BinaryParser {
 
         debug!("Parsing binary file '{}'.", path.as_ref().display());
         let object =
-            goblin::Object::parse(bytes_ref).map_err(|source| Error::ParseError(source))?;
+            goblin::Object::parse(bytes_ref).map_err(Error::ParseError)?;
 
         result.as_mut().set_object(Some(object));
         Ok(result)
