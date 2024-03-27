@@ -3,9 +3,9 @@
 use std::collections::HashMap;
 
 use smda::{
-    Disassembler,
     function::{Function, Instruction},
     report::DisassemblyReport,
+    Disassembler,
 };
 
 use crate::{

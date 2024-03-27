@@ -153,7 +153,7 @@ impl BinarySecurityCheckOptions {
     pub fn new(
         libc: Option<PathBuf>,
         sysroot: Option<PathBuf>,
-        libc_spec: Option<LibCSpec>
+        libc_spec: Option<LibCSpec>,
     ) -> Self {
         //!
         //! Create some options to configure binary security checks.

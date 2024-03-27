@@ -2,8 +2,8 @@ use std::fs;
 use std::time::Instant;
 
 use clap::Parser;
-use prettytable::{Attr, Cell, color, format::Alignment, Row, Table};
-use serde_json::{Map, to_value, Value};
+use prettytable::{color, format::Alignment, Attr, Cell, Row, Table};
+use serde_json::{to_value, Map, Value};
 
 use capa::{BinarySecurityCheckOptions, FileCapabilities};
 
