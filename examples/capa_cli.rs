@@ -2,8 +2,8 @@ use std::fs;
 use std::time::Instant;
 
 use clap::Parser;
-use prettytable::{Attr, Cell, color, format::Alignment, Row, Table};
-use serde_json::{Map, to_value, Value};
+use prettytable::{color, format::Alignment, Attr, Cell, Row, Table};
+use serde_json::{to_value, Map, Value};
 
 use capa::{BinarySecurityCheckOptions, FileCapabilities};
 
@@ -53,7 +53,7 @@ struct CliOpts {
 
     /// Assume that input files do not use any C runtime libraries.
     #[clap(long, default_value = "false", value_name = "NO_LIBC")]
-    no_libc: bool
+    no_libc: bool,
 }
 
 fn main() {
@@ -69,9 +69,16 @@ fn main() {
     let no_libc = cli.no_libc;
     let security_check_opts = BinarySecurityCheckOptions::new(libc, sysroot, libc_spec, no_libc);
 
-
     let start = Instant::now();
-    match FileCapabilities::from_file(&filename, &rules_path, true, true, &|_s| {}, map_features, Some(security_check_opts)) {
+    match FileCapabilities::from_file(
+        &filename,
+        &rules_path,
+        true,
+        true,
+        &|_s| {},
+        map_features,
+        Some(security_check_opts),
+    ) {
         Err(e) => println!("{:?}", e),
         Ok(mut s) => {
             match to_value(&s) {
@@ -83,6 +90,13 @@ fn main() {
                     // print the file basic properties
                     if let Some(props) = data.get("properties") {
                         let tbl = get_properties(props, features);
+                        tbl.printstd();
+                    }
+                    println!();
+
+                    // print the Security Checks
+                    if let Some(security_checks) = data.get("security_checks") {
+                        let tbl = get_security_checks(security_checks);
                         tbl.printstd();
                     }
                     println!();
@@ -105,14 +119,6 @@ fn main() {
                             tbl.printstd();
                         }
                     }
-                    println!();
-                    
-                    // print the Security Checks
-                    if let Some(security_checks) = data.get("security_checks") {
-                        let tbl = get_security_checks(security_checks);
-                        tbl.printstd();
-                    }
-                    
                     println!();
 
                     // print the Capability/Namespace
@@ -260,9 +266,11 @@ fn get_mbc(mbc: &Map<String, Value>) -> Table {
 fn get_security_checks(security_checks: &Value) -> Table {
     let security_checks = security_checks.as_array().unwrap();
     let mut tbl = Table::new();
-    tbl.set_titles(Row::new(vec![
-        Cell::new_align("Binary Security Checks", Alignment::CENTER).with_hspan(2),
-    ]));
+    tbl.set_titles(Row::new(vec![Cell::new_align(
+        "Security Checks",
+        Alignment::CENTER,
+    )
+    .with_hspan(2)]));
     for check in security_checks {
         let check = check.as_object().unwrap();
         let check_name = check.get("name").unwrap().as_str().unwrap();
@@ -273,7 +281,15 @@ fn get_security_checks(security_checks: &Value) -> Table {
             Cell::new(check_name)
                 .with_style(Attr::ForegroundColor(color::YELLOW))
                 .with_style(Attr::Bold),
-            Cell::new(&status),
+            if status.eq_ignore_ascii_case("fail") || status.eq_ignore_ascii_case("unsupported") {
+                Cell::new(&status).with_style(Attr::ForegroundColor(color::RED))
+            } else if status.eq_ignore_ascii_case("Pass")
+                || status.eq_ignore_ascii_case("Supported")
+            {
+                Cell::new(&status).with_style(Attr::ForegroundColor(color::GREEN))
+            } else {
+                Cell::new(&status)
+            },
         ]));
     }
 

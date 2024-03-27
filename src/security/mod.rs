@@ -1,16 +1,14 @@
+use crate::{
+    error::Error,
+    security::{options::status::SecurityCheckStatus, parser::BinaryParser},
+    Result,
+};
 use std::path::Path;
 
-use log::debug;
-
-use crate::error::Error;
-use crate::Result;
-use crate::security::options::status::SecurityCheckStatus;
-use crate::security::parser::BinaryParser;
-
-mod pe;
-mod parser;
-pub(crate) mod options;
 pub(crate) mod elf;
+pub(crate) mod options;
+mod parser;
+mod pe;
 
 pub fn get_security_checks(
     path: &impl AsRef<Path>,
@@ -22,23 +20,23 @@ pub fn get_security_checks(
 
     let results = match parser.object() {
         Object::Elf(_elf) => {
-            debug!("Binary file format is 'ELF'.");
+            // "Binary file format is 'ELF'."
             elf::analyze_binary(&parser, options)
         }
 
         Object::PE(_pe) => {
-            debug!("Binary file format is 'PE'.");
+            // "Binary file format is 'PE'."
             pe::analyze_binary(&parser, options)
         }
 
         Object::Mach(_mach) => {
-            debug!("Binary file format is 'MACH'.");
+            // "Binary file format is 'MACH'."
             Err(Error::UnsupportedBinaryFormat {
                 format: "MACH".into(),
                 path: path.as_ref().into(),
             })
         }
-        
+
         Object::Unknown(_magic) => Err(Error::UnknownBinaryFormat(path.as_ref().into())),
 
         _ => Err(Error::UnknownBinaryFormat(path.as_ref().into())),
@@ -47,6 +45,6 @@ pub fn get_security_checks(
         .into_iter()
         .map(|r| r.get_security_check_status().unwrap())
         .collect::<Vec<_>>();
-    
+
     Ok(statuses)
 }

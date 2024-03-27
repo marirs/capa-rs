@@ -1,15 +1,12 @@
-use core::marker::PhantomPinned;
-use core::pin::Pin;
-use core::ptr::NonNull;
-use std::collections::HashSet;
+use crate::{
+    security::elf::{self, needed_libc::NeededLibC},
+    Result,
+};
+use core::{marker::PhantomPinned, pin::Pin, ptr::NonNull};
 use serde::{Deserialize, Serialize};
-
-use crate::Result;
-use crate::security::elf;
-use crate::security::elf::needed_libc::NeededLibC;
+use std::collections::HashSet;
 
 pub(crate) trait HasSecurityStatus {
-
     fn get_security_check_status(&self) -> Result<SecurityCheckStatus>;
 }
 
@@ -38,20 +35,18 @@ impl YesNoUnknownStatus {
 }
 
 impl HasSecurityStatus for YesNoUnknownStatus {
-    
     fn get_security_check_status(&self) -> Result<SecurityCheckStatus> {
         let (name, status) = match self.status {
-            Some(true) => (self.name, "passed"),
-            Some(false) => (self.name, "failed"),
-            None => (self.name, "unknown"),
+            Some(true) => (self.name, "Pass"),
+            Some(false) => (self.name, "Fail"),
+            None => (self.name, "Unknown"),
         };
 
         Ok(SecurityCheckStatus {
             name: name.to_string(),
-            status: status.to_string()
+            status: status.to_string(),
         })
     }
-
 }
 
 /// [Control Flow Guard](https://docs.microsoft.com/en-us/cpp/build/reference/guard-enable-guard-checks).
@@ -68,20 +63,18 @@ pub(crate) enum PEControlFlowGuardLevel {
 }
 
 impl HasSecurityStatus for PEControlFlowGuardLevel {
-
     fn get_security_check_status(&self) -> Result<SecurityCheckStatus> {
         let status = match *self {
-            PEControlFlowGuardLevel::Unknown => "unknown",
-            PEControlFlowGuardLevel::Unsupported => "unsupported",
-            PEControlFlowGuardLevel::Ineffective => "ineffective",
-            PEControlFlowGuardLevel::Supported => "supported",
+            PEControlFlowGuardLevel::Unknown => "Unknown",
+            PEControlFlowGuardLevel::Unsupported => "Unsupported",
+            PEControlFlowGuardLevel::Ineffective => "Ineffective",
+            PEControlFlowGuardLevel::Supported => "Supported",
         };
 
         Ok(SecurityCheckStatus {
             name: "CONTROL-FLOW-GUARD".to_string(),
-            status: status.to_string()
+            status: status.to_string(),
         })
-
     }
 }
 
@@ -108,20 +101,19 @@ pub(crate) enum ASLRCompatibilityLevel {
 impl HasSecurityStatus for ASLRCompatibilityLevel {
     fn get_security_check_status(&self) -> Result<SecurityCheckStatus> {
         let status = match *self {
-            ASLRCompatibilityLevel::Unknown => "unknown",
-            ASLRCompatibilityLevel::Unsupported => "unsupported",
-            ASLRCompatibilityLevel::Expensive => "expensive",
-            ASLRCompatibilityLevel::SupportedLowEntropyBelow2G => "low entropy below 2GB",
-            ASLRCompatibilityLevel::SupportedLowEntropy => "low entropy",
-            ASLRCompatibilityLevel::SupportedBelow2G => "below 2GB",
-            ASLRCompatibilityLevel::Supported => "supported",
+            ASLRCompatibilityLevel::Unknown => "Unknown",
+            ASLRCompatibilityLevel::Unsupported => "Unsupported",
+            ASLRCompatibilityLevel::Expensive => "Expensive",
+            ASLRCompatibilityLevel::SupportedLowEntropyBelow2G => "Low entropy below 2GB",
+            ASLRCompatibilityLevel::SupportedLowEntropy => "Low entropy",
+            ASLRCompatibilityLevel::SupportedBelow2G => "Below 2GB",
+            ASLRCompatibilityLevel::Supported => "Supported",
         };
 
         Ok(SecurityCheckStatus {
             name: "ASLR".to_string(),
-            status: status.to_string()
+            status: status.to_string(),
         })
-
     }
 }
 
@@ -191,7 +183,7 @@ impl HasSecurityStatus for Pin<Box<ELFFortifySourceStatus>> {
     fn get_security_check_status(&self) -> Result<SecurityCheckStatus> {
         let mut status = SecurityCheckStatus {
             name: "Fortify Source".to_string(),
-            status: "".to_string()
+            status: "".to_string(),
         };
 
         let mut separator = "";

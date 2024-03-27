@@ -1,19 +1,21 @@
+use crate::{
+    security::{
+        options::{
+            status::{ASLRCompatibilityLevel, HasSecurityStatus, PEControlFlowGuardLevel},
+            AddressSpaceLayoutRandomizationOption, BinarySecurityOption,
+            DataExecutionPreventionOption, PEControlFlowGuardOption,
+            PEEnableManifestHandlingOption, PEHandlesAddressesLargerThan2GBOption,
+            PEHasCheckSumOption, PERunsOnlyInAppContainerOption,
+            PESafeStructuredExceptionHandlingOption, RequiresIntegrityCheckOption,
+        },
+        parser::BinaryParser,
+    },
+    Result,
+};
 use core::mem;
-
 use goblin::pe::section_table::{IMAGE_SCN_CNT_INITIALIZED_DATA, IMAGE_SCN_MEM_READ};
-use log::debug;
 use memoffset::offset_of;
 use scroll::Pread;
-
-use crate::Result;
-use crate::security::options::{
-    AddressSpaceLayoutRandomizationOption, BinarySecurityOption, DataExecutionPreventionOption,
-    PEControlFlowGuardOption, PEEnableManifestHandlingOption,
-    PEHandlesAddressesLargerThan2GBOption, PEHasCheckSumOption, PERunsOnlyInAppContainerOption,
-    PESafeStructuredExceptionHandlingOption, RequiresIntegrityCheckOption,
-};
-use crate::security::options::status::{ASLRCompatibilityLevel, HasSecurityStatus, PEControlFlowGuardLevel};
-use crate::security::parser::BinaryParser;
 
 pub(crate) fn analyze_binary(
     parser: &BinaryParser,
@@ -171,17 +173,16 @@ pub(crate) type ImageLoadConfigDirectory64_SEHandlerCount_Type = u64;
 
 pub(crate) fn dll_characteristics_bit_is_set(
     pe: &goblin::pe::PE,
-    mask_name: &'static str,
+    _mask_name: &'static str,
     mask: u16,
 ) -> Option<bool> {
     pe.header.optional_header.map(|optional_header| {
-        let r = (optional_header.windows_fields.dll_characteristics & mask) != 0;
-        debug!(
-            "Bit '{}' is {} in 'DllCharacteristics' inside optional Windows header.",
-            mask_name,
-            if r { "set" } else { "cleared" }
-        );
-        r
+        //debug!(
+        //     "Bit '{}' is {} in 'DllCharacteristics' inside optional Windows header.",
+        //     mask_name,
+        //     if r { "set" } else { "cleared" }
+        // );
+        (optional_header.windows_fields.dll_characteristics & mask) != 0
     })
 }
 
@@ -200,7 +201,7 @@ pub(crate) fn supports_control_flow_guard(pe: &goblin::pe::PE) -> PEControlFlowG
         {
             PEControlFlowGuardLevel::Unsupported
         } else {
-            debug!("Bit 'IMAGE_DLLCHARACTERISTICS_GUARD_CF' is set in 'DllCharacteristics' inside optional Windows header.");
+            // "Bit 'IMAGE_DLLCHARACTERISTICS_GUARD_CF' is set in 'DllCharacteristics' inside optional Windows header."
 
             if (optional_header.windows_fields.dll_characteristics
                 & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE)
@@ -208,7 +209,7 @@ pub(crate) fn supports_control_flow_guard(pe: &goblin::pe::PE) -> PEControlFlowG
             {
                 PEControlFlowGuardLevel::Ineffective
             } else {
-                debug!("Bit 'IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE' is set in 'DllCharacteristics' inside optional Windows header.");
+                // "Bit 'IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE' is set in 'DllCharacteristics' inside optional Windows header."
                 PEControlFlowGuardLevel::Supported
             }
         }
@@ -227,9 +228,7 @@ pub(crate) fn has_check_sum(pe: &goblin::pe::PE) -> Option<bool> {
 pub(crate) fn handles_addresses_larger_than_2_gigabytes(pe: &goblin::pe::PE) -> bool {
     let r = (pe.header.coff_header.characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) != 0;
     if r {
-        debug!(
-            "Bit 'IMAGE_FILE_LARGE_ADDRESS_AWARE' is set in 'Characteristics' inside COFF header."
-        );
+        // "Bit 'IMAGE_FILE_LARGE_ADDRESS_AWARE' is set in 'Characteristics' inside COFF header."
     }
     r
 }
@@ -237,7 +236,7 @@ pub(crate) fn handles_addresses_larger_than_2_gigabytes(pe: &goblin::pe::PE) -> 
 pub(crate) fn supports_aslr(pe: &goblin::pe::PE) -> ASLRCompatibilityLevel {
     if (pe.header.coff_header.characteristics & IMAGE_FILE_RELOCS_STRIPPED) != 0 {
         // Base relocation information are absent. The loader cannot relocate the image.
-        debug!("Bit 'IMAGE_FILE_RELOCS_STRIPPED' is set in 'Characteristics' inside COFF header.");
+        // "Bit 'IMAGE_FILE_RELOCS_STRIPPED' is set in 'Characteristics' inside COFF header."
         ASLRCompatibilityLevel::Unsupported
     } else if let Some(optional_header) = pe.header.optional_header {
         if (optional_header.windows_fields.dll_characteristics
@@ -255,7 +254,7 @@ pub(crate) fn supports_aslr(pe: &goblin::pe::PE) -> ASLRCompatibilityLevel {
                 & IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA)
                 != 0
             {
-                debug!("Bit 'IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA' is set in 'DllCharacteristics' inside optional Windows header.");
+                // "Bit 'IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA' is set in 'DllCharacteristics' inside optional Windows header."
 
                 if handles_addresses_larger_than_2_gigabytes {
                     // High entropy ASLR.
@@ -311,7 +310,7 @@ fn has_pdata_section(pe: &goblin::pe::PE) -> bool {
             // `.pdata`, and false otherwise. For non UTF-8-valid names, `r` will be `false`.
             let r = section.name().map(|name| name == ".pdata").unwrap_or(false);
             if r {
-                debug!("Section '.pdata' found in the executable.");
+                // "Section '.pdata' found in the executable."
             }
             r
         } else {
@@ -338,7 +337,7 @@ fn has_safe_seh_handlers(parser: &BinaryParser, pe: &goblin::pe::PE) -> Option<b
         // Continue only if the load configuration table has some bytes.
         .filter(|load_config_table| load_config_table.size > 0)
         .and_then(|load_config_table| {
-            debug!("Reference to Image load configuration directory found in the executable.");
+            // "Reference to Image load configuration directory found in the executable."
 
             let load_config_table_end = load_config_table
                 .virtual_address
@@ -351,7 +350,7 @@ fn has_safe_seh_handlers(parser: &BinaryParser, pe: &goblin::pe::PE) -> Option<b
                     (section.characteristics & RDATA_CHARACTERISTICS) == RDATA_CHARACTERISTICS
                         && (load_config_table.virtual_address >= section.virtual_address)
                         && (load_config_table_end
-                        <= section.virtual_address.saturating_add(section.virtual_size))
+                            <= section.virtual_address.saturating_add(section.virtual_size))
                 })
                 // We still need `load_config_table`, so carry it forward to the next steps.
                 .map(|section| (section, load_config_table))
@@ -374,7 +373,7 @@ fn image_load_configuration_directory_has_safe_seh_handlers(
     section: &goblin::pe::section_table::SectionTable,
     load_config_table: goblin::pe::data_directories::DataDirectory,
 ) -> Option<bool> {
-    debug!("Image load configuration directory found in the executable.");
+    // "Image load configuration directory found in the executable."
 
     // Based on the architecture of the PE32/PE32+ file, find out relatively where and exactly
     // how large is the data representing the number of safe structured exception handlers.
@@ -410,7 +409,7 @@ fn image_load_configuration_directory_has_safe_seh_handlers(
                 >= offset_of_se_handler_count.saturating_add(size_of_se_handler_count)
         })
         .and_then(|_load_config_directory_size| {
-            debug!("Image load configuration directory defines 'SEHandlerCount'.");
+            // "Image load configuration directory defines 'SEHandlerCount'."
 
             if pe.is_64 {
                 // Read the number of safe structured exception handlers in a PE32+ executable.
@@ -432,15 +431,15 @@ fn image_load_configuration_directory_has_safe_seh_handlers(
                     // the PE32+ executable.
                     .map(ImageLoadConfigDirectory64_SEHandlerCount_Type::from)
             }
-                .ok()
+            .ok()
         })
         // Return `Some(true)` if the load configuration table references a least one safe
         // structured exception handler.
         .map(|se_handler_count| {
-            debug!(
-                "Image load configuration directory defines {} structured exceptions handlers.",
-                se_handler_count
-            );
+            // debug!(
+            //     "Image load configuration directory defines {} structured exceptions handlers.",
+            //     se_handler_count
+            // );
             se_handler_count > 0
         })
 }

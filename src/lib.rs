@@ -2,36 +2,33 @@
 
 extern crate core;
 
+use crate::security::options::status::SecurityCheckStatus;
+use consts::{FileFormat, Os};
 use core::fmt;
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
-    thread::spawn,
-};
-use std::collections::HashSet;
-use std::path::PathBuf;
-
+use sede::{from_hex, to_hex};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use smda::FileArchitecture;
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    path::PathBuf,
+    thread::spawn,
+};
 use yaml_rust::Yaml;
 
-use consts::{FileFormat, Os};
-use sede::{from_hex, to_hex};
-
 pub use crate::error::Error;
-use crate::security::options::status::SecurityCheckStatus;
 
 pub(crate) mod consts;
+mod error;
 mod extractor;
 pub mod rules;
-mod sede;
-mod error;
 mod security;
+mod sede;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-
 // If this changes, then update the command line reference.
+// Used for options for binary security checks.
 #[derive(Debug, Copy, Clone)]
 pub enum LibCSpec {
     LSB1,
@@ -49,6 +46,7 @@ pub enum LibCSpec {
     LSB5,
 }
 
+// Used for options for binary security checks.
 impl fmt::Display for LibCSpec {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let spec_name = match *self {
@@ -87,6 +85,7 @@ impl fmt::Display for LibCSpec {
     }
 }
 
+// Used for options for binary security checks.
 impl LibCSpec {
     pub(crate) fn get_functions_with_checked_versions(self) -> &'static [&'static str] {
         match self {
@@ -108,6 +107,7 @@ impl LibCSpec {
     }
 }
 
+// Used for options for binary security checks.
 impl From<String> for LibCSpec {
     fn from(value: String) -> Self {
         match value.as_str() {
@@ -143,15 +143,17 @@ pub struct BinarySecurityCheckOptions {
     /// Assume that input files do not use any C runtime libraries.
     pub(crate) no_libc: bool,
 
-    /// Binary files to analyze.
-    pub(crate) input_files: Vec<PathBuf>,
+    /// Binary file to analyze.
+    pub(crate) input_file: PathBuf,
 }
 
 impl BinarySecurityCheckOptions {
-    pub fn new(libc: Option<PathBuf>,
-               sysroot: Option<PathBuf>,
-               libc_spec: Option<LibCSpec>,
-               no_libc: bool) -> Self {
+    pub fn new(
+        libc: Option<PathBuf>,
+        sysroot: Option<PathBuf>,
+        libc_spec: Option<LibCSpec>,
+        no_libc: bool,
+    ) -> Self {
         //!
         //! Create some options to configure binary security checks.
         //! - libc: This is the path of the C runtime library file.
@@ -163,8 +165,7 @@ impl BinarySecurityCheckOptions {
             sysroot,
             libc_spec,
             no_libc,
-            input_files: Vec::new(),
-
+            input_file: PathBuf::new(),
         }
     }
 }
@@ -175,7 +176,6 @@ impl Default for BinarySecurityCheckOptions {
     }
 }
 
-
 impl FileCapabilities {
     pub fn from_file(
         file_name: &str,
@@ -184,7 +184,7 @@ impl FileCapabilities {
         resolve_tailcalls: bool,
         logger: &dyn Fn(&str),
         features_dump: bool,
-        security_checks_opts: Option<BinarySecurityCheckOptions>
+        security_checks_opts: Option<BinarySecurityCheckOptions>,
     ) -> Result<Self> {
         //! Loads a binary from a given file for capability analysis using the default binary security check options:
         //! ## Example
@@ -203,11 +203,10 @@ impl FileCapabilities {
         let rules_thread_handle = spawn(move || rules::RuleSet::new(&r));
         let rules = rules_thread_handle.join().unwrap()?;
 
-        // Fetch security checks on a separate thread
+        // Fetch security checks
         let mut security_opts = security_checks_opts.unwrap_or_default();
-        security_opts.input_files = vec![PathBuf::from(&f)];
-        let security_checks_thread_handle = spawn(move || security::get_security_checks(&f, &security_opts));
-        let security_checks = security_checks_thread_handle.join().unwrap()?;
+        security_opts.input_file = PathBuf::from(&f);
+        let security_checks = security::get_security_checks(&f, &security_opts)?;
 
         let mut file_capabilities;
         #[cfg(not(feature = "properties"))]
@@ -465,11 +464,11 @@ fn find_function_capabilities<'a>(
     map_features: &mut HashMap<rules::features::Feature, Vec<u64>>,
     features_dump: bool,
 ) -> Result<(
-    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
-    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<&'a rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<&'a rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     usize,
 )> {
-    let mut function_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
+    let mut function_features: HashMap<rules::features::Feature, Vec<u64>> = HashMap::new();
 
     for (feature, va) in extractor.extract_global_features()? {
         function_features.entry(feature).or_default().push(va);
@@ -534,8 +533,8 @@ fn find_function_capabilities<'a>(
     Ok((function_matches, bb_matches, function_features.len()))
 }
 fn aggregate_matches<'a, T: Clone>(
-    all_matches: &mut HashMap<&'a crate::rules::Rule, Vec<T>>,
-    new_matches: &HashMap<&'a crate::rules::Rule, Vec<T>>,
+    all_matches: &mut HashMap<&'a rules::Rule, Vec<T>>,
+    new_matches: &HashMap<&'a rules::Rule, Vec<T>>,
 ) {
     for (rule, res) in new_matches {
         all_matches.entry(rule).or_default().extend(res.clone());
@@ -543,19 +542,18 @@ fn aggregate_matches<'a, T: Clone>(
 }
 
 fn find_capabilities(
-    ruleset: &crate::rules::RuleSet,
-    extractor: &Box<dyn crate::extractor::Extractor>,
+    ruleset: &rules::RuleSet,
+    extractor: &Box<dyn extractor::Extractor>,
     logger: &dyn Fn(&str),
     features_dump: bool,
 ) -> Result<(
-    HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     HashMap<u64, usize>,
     HashMap<String, HashMap<String, HashSet<u64>>>,
 )> {
-    let mut all_function_matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
+    let mut all_function_matches: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
         HashMap::new();
-    let mut all_bb_matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
-        HashMap::new();
+    let mut all_bb_matches: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
 
     let mut meta = HashMap::new();
 
@@ -630,17 +628,17 @@ fn find_capabilities(
 }
 
 fn find_file_capabilities<'a>(
-    ruleset: &'a crate::rules::RuleSet,
-    extractor: &Box<dyn crate::extractor::Extractor>,
-    function_features: &HashMap<crate::rules::features::Feature, Vec<u64>>,
+    ruleset: &'a rules::RuleSet,
+    extractor: &Box<dyn extractor::Extractor>,
+    function_features: &HashMap<rules::features::Feature, Vec<u64>>,
     logger: &dyn Fn(&str),
-    map_features: &mut HashMap<crate::rules::features::Feature, Vec<u64>>,
+    map_features: &mut HashMap<rules::features::Feature, Vec<u64>>,
     features_dump: bool,
 ) -> Result<(
-    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<&'a rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     usize,
 )> {
-    let mut file_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
+    let mut file_features: HashMap<rules::features::Feature, Vec<u64>> = HashMap::new();
     for (feature, va) in itertools::chain!(
         extractor.extract_file_features()?,
         extractor.extract_global_features()?
@@ -655,7 +653,7 @@ fn find_file_capabilities<'a>(
             .extend(addresses.iter().cloned());
     }
 
-    let mut matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
+    let mut matches: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
     for rule_set in [&ruleset.file_rules, &ruleset.function_rules].iter() {
         for (rule, matched) in match_fn(rule_set, &file_features, &0, logger)?.1 {
             matches
@@ -798,15 +796,15 @@ pub struct FileCapabilities {
 }
 
 fn match_fn<'a>(
-    rules: &'a [crate::rules::Rule],
-    features: &HashMap<crate::rules::features::Feature, Vec<u64>>,
+    rules: &'a [rules::Rule],
+    features: &HashMap<rules::features::Feature, Vec<u64>>,
     va: &u64,
     logger: &dyn Fn(&str),
 ) -> Result<(
-    HashMap<crate::rules::features::Feature, Vec<u64>>,
-    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<rules::features::Feature, Vec<u64>>,
+    HashMap<&'a rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
 )> {
-    let mut results: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
+    let mut results: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
     let mut features = features.clone();
     for (_index, rule) in rules.iter().enumerate() {
         logger(&format!(
@@ -832,12 +830,12 @@ fn match_fn<'a>(
 }
 
 fn index_rule_matches(
-    features: &mut HashMap<crate::rules::features::Feature, Vec<u64>>,
-    rule: &crate::rules::Rule,
+    features: &mut HashMap<rules::features::Feature, Vec<u64>>,
+    rule: &rules::Rule,
     locations: Vec<u64>,
 ) -> Result<()> {
-    let matched_rule_feature = crate::rules::features::Feature::MatchedRule(
-        crate::rules::features::MatchedRuleFeature::new(&rule.name, "")?,
+    let matched_rule_feature = rules::features::Feature::MatchedRule(
+        rules::features::MatchedRuleFeature::new(&rule.name, "")?,
     );
 
     features

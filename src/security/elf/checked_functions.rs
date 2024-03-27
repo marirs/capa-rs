@@ -1,4 +1,3 @@
-
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(crate) struct CheckedFunction {
     checked_name: String,
