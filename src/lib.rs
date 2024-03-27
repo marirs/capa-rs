@@ -2,21 +2,23 @@
 
 extern crate core;
 
-use crate::security::options::status::SecurityCheckStatus;
-use consts::{FileFormat, Os};
 use core::fmt;
-use sede::{from_hex, to_hex};
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use smda::FileArchitecture;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     path::PathBuf,
     thread::spawn,
 };
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use smda::FileArchitecture;
 use yaml_rust::Yaml;
 
+use consts::{FileFormat, Os};
+use sede::{from_hex, to_hex};
+
 pub use crate::error::Error;
+use crate::security::options::status::SecurityCheckStatus;
 
 pub(crate) mod consts;
 mod error;
@@ -151,8 +153,7 @@ impl BinarySecurityCheckOptions {
     pub fn new(
         libc: Option<PathBuf>,
         sysroot: Option<PathBuf>,
-        libc_spec: Option<LibCSpec>,
-        no_libc: bool,
+        libc_spec: Option<LibCSpec>
     ) -> Self {
         //!
         //! Create some options to configure binary security checks.
@@ -164,7 +165,7 @@ impl BinarySecurityCheckOptions {
             libc,
             sysroot,
             libc_spec,
-            no_libc,
+            no_libc: false,
             input_file: PathBuf::new(),
         }
     }
@@ -172,7 +173,7 @@ impl BinarySecurityCheckOptions {
 
 impl Default for BinarySecurityCheckOptions {
     fn default() -> Self {
-        Self::new(None, None, None, false)
+        Self::new(None, None, None)
     }
 }
 

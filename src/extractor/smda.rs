@@ -1,15 +1,18 @@
 #![allow(dead_code, clippy::to_string_in_format_args)]
+
+use std::collections::HashMap;
+
+use smda::{
+    Disassembler,
+    function::{Function, Instruction},
+    report::DisassemblyReport,
+};
+
 use crate::{
     consts::{FileFormat, Os},
     error::Error,
     Result,
 };
-use smda::{
-    function::{Function, Instruction},
-    report::DisassemblyReport,
-    Disassembler,
-};
-use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 struct InstructionS {
@@ -1083,10 +1086,10 @@ pub fn read_bytes<'a>(
     let buffer_end = report.buffer.len();
     let end_of_string = rva + num_bytes as u64;
     if end_of_string > buffer_end as u64 {
-        return Err(Error::BufferOverflowError);
+        Ok(&report.buffer[rva as usize..])
+    } else {
+        Ok(&report.buffer[rva as usize..end_of_string as usize])
     }
-
-    Ok(&report.buffer[rva as usize..end_of_string as usize])
 }
 
 pub fn read_string(report: &DisassemblyReport, offset: &u64) -> Result<String> {
