@@ -1081,8 +1081,20 @@ pub fn read_bytes<'a>(
 ) -> Result<&'a [u8]> {
     let rva = offset - report.base_addr;
     let buffer_end = report.buffer.len();
-    let end_of_string = rva + num_bytes as u64;
+    let mut end_of_string = rva + num_bytes as u64;
+
+    // If end_of_string exceeds buffer_end, adjust it to buffer_end
     if end_of_string > buffer_end as u64 {
+        // println!(
+        //    "Buffer overflow error end_of_string: {} buffer_end: {}, rva: {}, num_bytes: {}. Force end.",
+        //     end_of_string, buffer_end, rva, num_bytes
+        // );
+        end_of_string = buffer_end as u64;
+    }
+
+    // Ensure that rva does not exceed the size of the buffer
+    if rva > buffer_end as u64 {
+        // println!("Offset out of buffer range rva: {} buffer_end: {}", rva, buffer_end);
         return Err(Error::BufferOverflowError);
     }
 
