@@ -19,7 +19,7 @@ petgraph = "0.6.2"
 regex = "1.5"
 fancy-regex = { git = "https://github.com/mnaza/fancy-regex.git" }
 serde = { version = "1", features = ["derive"] }
-smda = "0.2.7"
+smda = "0.2.8"
 thiserror = "1"
 walkdir = "2.3.2"
 yaml-rust = "0.4.5"
