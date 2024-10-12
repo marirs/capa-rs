@@ -18,7 +18,7 @@ use consts::{FileFormat, Os};
 use sede::{from_hex, to_hex};
 
 pub use crate::error::Error;
-use crate::security::options::status::SecurityCheckStatus;
+pub use crate::security::options::status::SecurityCheckStatus;
 
 pub(crate) mod consts;
 mod error;
