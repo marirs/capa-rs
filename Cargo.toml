@@ -1,6 +1,6 @@
 [package]
 name = "capa"
-version = "0.3.17"
+version = "0.3.18"
 description = "File capability extractor."
 authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>", "Jorge Alejandro Durán Royo<jorge.duran.royo@gmail.com>"]
 keywords = ["capa", "fce", "capability", "aslr", "reverse"]
@@ -13,30 +13,30 @@ edition = "2021"
 
 [dependencies]
 hex = "0.4.3"
-itertools = "0.12.1"
+itertools = "0.13.0"
 pdb = "0.8.0"
 petgraph = "0.6.2"
 regex = "1.5"
 fancy-regex = { git = "https://github.com/mnaza/fancy-regex.git" }
 serde = { version = "1", features = ["derive"] }
-smda = "0.2.8"
+smda = { git = "https://github.com/marirs/smda-rs.git" }
 thiserror = "1"
 walkdir = "2.3.2"
 yaml-rust = "0.4.5"
-goblin = { version = "0.8.0", features = ["alloc"] }
+goblin = { version = "0.9.1", features = ["alloc"] }
 maplit = "1"
 dnfile = { git = "https://github.com/marirs/dnfile-rs.git", branch = "master" }
-lazy_static = "1.4.0"
-parking_lot = "0.12.1"
-serde_json = "1.0.113"
-memoffset = "0.9.0"
-memmap2 = "0.9.4"
+lazy_static = "1"
+parking_lot = "0.12.3"
+serde_json = "1"
+memoffset = "0.9.1"
+memmap2 = "0.9.5"
 scroll = "0.12.0"
-once_cell = "1.19.0"
-dynamic-loader-cache = "0.1"
+once_cell = "1.20"
+dynamic-loader-cache = "0.2"
 
 [dev-dependencies]
-clap = { version = "4.0.27", features = ["cargo", "derive"] }
+clap = { version = "4.5", features = ["cargo", "derive"] }
 
 prettytable-rs = "0.10.0"
 
