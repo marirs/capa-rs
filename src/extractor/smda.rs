@@ -264,7 +264,7 @@ impl Extractor {
     }
 
     pub fn get_elf_os(elf: &goblin::elf::Elf) -> Result<Os> {
-        eprintln!("{}", elf.header.e_ident[7]);
+        // eprintln!("{}", elf.header.e_ident[7]);
         match elf.header.e_ident[7] {
             0x00 => Ok(Os::UNDEFINED),
             0x01 => Ok(Os::HPUX),
