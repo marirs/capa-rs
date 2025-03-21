@@ -1,15 +1,18 @@
 #![allow(dead_code, clippy::to_string_in_format_args)]
-use crate::{
-    consts::{FileFormat, Os},
-    error::Error,
-    Result,
-};
+
+use std::collections::HashMap;
+
 use smda::{
     function::{Function, Instruction},
     report::DisassemblyReport,
     Disassembler,
 };
-use std::{collections::HashMap, convert::TryInto};
+
+use crate::{
+    consts::{FileFormat, Os},
+    error::Error,
+    Result,
+};
 
 #[derive(Debug, Clone)]
 struct InstructionS {

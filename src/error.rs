@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("{0}")]
@@ -14,6 +16,39 @@ pub enum Error {
     PdbError(#[from] pdb::Error),
     #[error("{0}")]
     DnFileError(#[from] dnfile::error::Error),
+
+    #[error("binary format of file '{0}' is not recognized")]
+    UnknownBinaryFormat(PathBuf),
+
+    #[error("binary format of '{name}' is not {expected}")]
+    UnexpectedBinaryFormat {
+        expected: &'static str,
+        name: PathBuf,
+    },
+
+    #[error("architecture of '{0}' is unexpected")]
+    UnexpectedBinaryArchitecture(PathBuf),
+
+    #[error("binary format '{format}' of file '{path}' is recognized but unsupported")]
+    UnsupportedBinaryFormat { format: String, path: PathBuf },
+
+    #[error("dependent C runtime library is not recognized. Consider specifying --sysroot, --libc, --libc-spec or --no-libc")]
+    UnrecognizedNeededLibC,
+
+    #[error("dependent C runtime library '{0}' was not found")]
+    NotFoundNeededLibC(PathBuf),
+
+    #[error(transparent)]
+    FromBytesWithNul(#[from] core::ffi::FromBytesWithNulError),
+
+    #[error(transparent)]
+    FromBytesUntilNul(#[from] core::ffi::FromBytesUntilNulError),
+
+    #[error(transparent)]
+    Scroll(#[from] scroll::Error),
+
+    #[error(transparent)]
+    DynamicLoaderCache(#[from] dynamic_loader_cache::Error),
 
     #[error("{0}")]
     IoError(#[from] std::io::Error),

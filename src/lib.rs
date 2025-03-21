@@ -1,24 +1,181 @@
 #![allow(clippy::type_complexity, clippy::borrowed_box)]
-pub(crate) mod consts;
-mod extractor;
-pub mod rules;
-mod sede;
-use consts::{FileFormat, Os};
-use sede::{from_hex, to_hex};
-use serde::{Deserialize, Serialize};
-use smda::FileArchitecture;
-use std::collections::HashSet;
+
+extern crate core;
+
+use core::fmt;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    path::PathBuf,
     thread::spawn,
 };
 
-mod error;
-pub use crate::error::Error;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use smda::FileArchitecture;
 use yaml_rust::Yaml;
 
+use consts::{FileFormat, Os};
+use sede::{from_hex, to_hex};
+
+pub use crate::error::Error;
+use crate::security::options::status::SecurityCheckStatus;
+
+pub(crate) mod consts;
+mod error;
+mod extractor;
+pub mod rules;
+mod security;
+mod sede;
+
 pub type Result<T> = std::result::Result<T, Error>;
+
+// If this changes, then update the command line reference.
+// Used for options for binary security checks.
+#[derive(Debug, Copy, Clone)]
+pub enum LibCSpec {
+    LSB1,
+    LSB1dot1,
+    LSB1dot2,
+    LSB1dot3,
+    LSB2,
+    LSB2dot0dot1,
+    LSB2dot1,
+    LSB3,
+    LSB3dot1,
+    LSB3dot2,
+    LSB4,
+    LSB4dot1,
+    LSB5,
+}
+
+// Used for options for binary security checks.
+impl fmt::Display for LibCSpec {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let spec_name = match *self {
+            LibCSpec::LSB1
+            | LibCSpec::LSB1dot1
+            | LibCSpec::LSB1dot2
+            | LibCSpec::LSB1dot3
+            | LibCSpec::LSB2
+            | LibCSpec::LSB2dot0dot1
+            | LibCSpec::LSB2dot1
+            | LibCSpec::LSB3
+            | LibCSpec::LSB3dot1
+            | LibCSpec::LSB3dot2
+            | LibCSpec::LSB4
+            | LibCSpec::LSB4dot1
+            | LibCSpec::LSB5 => "Linux Standard Base",
+        };
+
+        let spec_version = match *self {
+            LibCSpec::LSB1 => "1.0.0",
+            LibCSpec::LSB1dot1 => "1.1.0",
+            LibCSpec::LSB1dot2 => "1.2.0",
+            LibCSpec::LSB1dot3 => "1.3.0",
+            LibCSpec::LSB2 => "2.0.0",
+            LibCSpec::LSB2dot0dot1 => "2.0.1",
+            LibCSpec::LSB2dot1 => "2.1.0",
+            LibCSpec::LSB3 => "3.0.0",
+            LibCSpec::LSB3dot1 => "3.1.0",
+            LibCSpec::LSB3dot2 => "3.2.0",
+            LibCSpec::LSB4 => "4.0.0",
+            LibCSpec::LSB4dot1 => "4.1.0",
+            LibCSpec::LSB5 => "5.0.0",
+        };
+
+        write!(f, "{spec_name} {spec_version}")
+    }
+}
+
+// Used for options for binary security checks.
+impl LibCSpec {
+    pub(crate) fn get_functions_with_checked_versions(self) -> &'static [&'static str] {
+        match self {
+            LibCSpec::LSB1
+            | LibCSpec::LSB1dot1
+            | LibCSpec::LSB1dot2
+            | LibCSpec::LSB1dot3
+            | LibCSpec::LSB2
+            | LibCSpec::LSB2dot0dot1
+            | LibCSpec::LSB2dot1
+            | LibCSpec::LSB3
+            | LibCSpec::LSB3dot1
+            | LibCSpec::LSB3dot2 => &[],
+
+            LibCSpec::LSB4 | LibCSpec::LSB4dot1 | LibCSpec::LSB5 => {
+                security::elf::checked_functions::LSB_4_0_0_FUNCTIONS_WITH_CHECKED_VERSIONS
+            }
+        }
+    }
+}
+
+// Used for options for binary security checks.
+impl From<String> for LibCSpec {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "1.0.0" => LibCSpec::LSB1,
+            "1.1.0" => LibCSpec::LSB1dot1,
+            "1.2.0" => LibCSpec::LSB1dot2,
+            "1.3.0" => LibCSpec::LSB1dot3,
+            "2.0.0" => LibCSpec::LSB2,
+            "2.0.1" => LibCSpec::LSB2dot0dot1,
+            "2.1.0" => LibCSpec::LSB2dot1,
+            "3.0.0" => LibCSpec::LSB3,
+            "3.1.0" => LibCSpec::LSB3dot1,
+            "3.2.0" => LibCSpec::LSB3dot2,
+            "4.0.0" => LibCSpec::LSB4,
+            "4.1.0" => LibCSpec::LSB4dot1,
+            "5.0.0" => LibCSpec::LSB5,
+            _ => LibCSpec::LSB5,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BinarySecurityCheckOptions {
+    /// Path of the C runtime library file.
+    pub(crate) libc: Option<PathBuf>,
+
+    /// Path of the system root for finding the corresponding C runtime library.
+    pub(crate) sysroot: Option<PathBuf>,
+
+    /// Use an internal list of checked functions as specified by a specification.
+    pub(crate) libc_spec: Option<LibCSpec>,
+
+    /// Assume that input files do not use any C runtime libraries.
+    pub(crate) no_libc: bool,
+
+    /// Binary file to analyze.
+    pub(crate) input_file: PathBuf,
+}
+
+impl BinarySecurityCheckOptions {
+    pub fn new(
+        libc: Option<PathBuf>,
+        sysroot: Option<PathBuf>,
+        libc_spec: Option<LibCSpec>,
+    ) -> Self {
+        //!
+        //! Create some options to configure binary security checks.
+        //! - libc: This is the path of the C runtime library file.
+        //! - sysroot:  The path of the system root for finding the corresponding C runtime library.
+        //! - libc_spec: Use an internal list of checked functions as specified by a specification.
+        //! - no_libc: Assume that input files do not use any C runtime libraries.
+        Self {
+            libc,
+            sysroot,
+            libc_spec,
+            no_libc: false,
+            input_file: PathBuf::new(),
+        }
+    }
+}
+
+impl Default for BinarySecurityCheckOptions {
+    fn default() -> Self {
+        Self::new(None, None, None)
+    }
+}
 
 impl FileCapabilities {
     pub fn from_file(
@@ -28,15 +185,16 @@ impl FileCapabilities {
         resolve_tailcalls: bool,
         logger: &dyn Fn(&str),
         features_dump: bool,
+        security_checks_opts: Option<BinarySecurityCheckOptions>,
     ) -> Result<Self> {
-        //! Loads a binary from a given file for capability analysis
+        //! Loads a binary from a given file for capability analysis using the default binary security check options:
         //! ## Example
         //! ```rust
         //! use capa::FileCapabilities;
         //!
         //! let rules_path = "./rules";
         //! let file_to_analyse = "./demo.exe";
-        //! let result = FileCapabilities::from_file(file_to_analyse, rules_path, true, true, &|_s| {}, false);
+        //! let result = FileCapabilities::from_file(file_to_analyse, rules_path, true, true, &|_s| {}, false, Some(Default::default()));
         //! println!("{:?}", result);
         //! ```
         let f = file_name.to_string();
@@ -45,6 +203,11 @@ impl FileCapabilities {
         let extractor = get_file_extractors(&f, format, &buffer, high_accuracy, resolve_tailcalls)?;
         let rules_thread_handle = spawn(move || rules::RuleSet::new(&r));
         let rules = rules_thread_handle.join().unwrap()?;
+
+        // Fetch security checks
+        let mut security_opts = security_checks_opts.unwrap_or_default();
+        security_opts.input_file = PathBuf::from(&f);
+        let security_checks = security::get_security_checks(&f, &security_opts)?;
 
         let mut file_capabilities;
         #[cfg(not(feature = "properties"))]
@@ -57,6 +220,7 @@ impl FileCapabilities {
         }
         #[cfg(not(feature = "verbose"))]
         {
+            file_capabilities.security_checks = BTreeSet::from_iter(security_checks);
             let (capabilities, _counts, _map_features) =
                 find_capabilities(&rules, &extractor, logger, features_dump)?;
             if features_dump {
@@ -66,6 +230,7 @@ impl FileCapabilities {
         }
         #[cfg(feature = "verbose")]
         {
+            file_capabilities.security_checks = BTreeSet::from_iter(security_checks);
             let (capabilities, counts, _map_features) =
                 find_capabilities(&rules, &extractor, logger, features_dump)?;
             if features_dump {
@@ -96,6 +261,7 @@ impl FileCapabilities {
             #[cfg(feature = "verbose")]
             functions_capabilities: BTreeMap::new(),
             tags: BTreeSet::new(),
+            security_checks: BTreeSet::new(),
             map_features: HashMap::new(),
             capabilities_associations: BTreeMap::new(),
         })
@@ -292,18 +458,18 @@ impl FileCapabilities {
 }
 
 fn find_function_capabilities<'a>(
-    ruleset: &'a crate::rules::RuleSet,
-    extractor: &Box<dyn crate::extractor::Extractor>,
+    ruleset: &'a rules::RuleSet,
+    extractor: &Box<dyn extractor::Extractor>,
     f: &Box<dyn extractor::Function>,
     logger: &dyn Fn(&str),
-    map_features: &mut HashMap<crate::rules::features::Feature, Vec<u64>>,
+    map_features: &mut HashMap<rules::features::Feature, Vec<u64>>,
     features_dump: bool,
 ) -> Result<(
-    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
-    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<&'a rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<&'a rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     usize,
 )> {
-    let mut function_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
+    let mut function_features: HashMap<rules::features::Feature, Vec<u64>> = HashMap::new();
 
     for (feature, va) in extractor.extract_global_features()? {
         function_features.entry(feature).or_default().push(va);
@@ -368,8 +534,8 @@ fn find_function_capabilities<'a>(
     Ok((function_matches, bb_matches, function_features.len()))
 }
 fn aggregate_matches<'a, T: Clone>(
-    all_matches: &mut HashMap<&'a crate::rules::Rule, Vec<T>>,
-    new_matches: &HashMap<&'a crate::rules::Rule, Vec<T>>,
+    all_matches: &mut HashMap<&'a rules::Rule, Vec<T>>,
+    new_matches: &HashMap<&'a rules::Rule, Vec<T>>,
 ) {
     for (rule, res) in new_matches {
         all_matches.entry(rule).or_default().extend(res.clone());
@@ -377,19 +543,18 @@ fn aggregate_matches<'a, T: Clone>(
 }
 
 fn find_capabilities(
-    ruleset: &crate::rules::RuleSet,
-    extractor: &Box<dyn crate::extractor::Extractor>,
+    ruleset: &rules::RuleSet,
+    extractor: &Box<dyn extractor::Extractor>,
     logger: &dyn Fn(&str),
     features_dump: bool,
 ) -> Result<(
-    HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     HashMap<u64, usize>,
     HashMap<String, HashMap<String, HashSet<u64>>>,
 )> {
-    let mut all_function_matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
+    let mut all_function_matches: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
         HashMap::new();
-    let mut all_bb_matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
-        HashMap::new();
+    let mut all_bb_matches: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
 
     let mut meta = HashMap::new();
 
@@ -464,17 +629,17 @@ fn find_capabilities(
 }
 
 fn find_file_capabilities<'a>(
-    ruleset: &'a crate::rules::RuleSet,
-    extractor: &Box<dyn crate::extractor::Extractor>,
-    function_features: &HashMap<crate::rules::features::Feature, Vec<u64>>,
+    ruleset: &'a rules::RuleSet,
+    extractor: &Box<dyn extractor::Extractor>,
+    function_features: &HashMap<rules::features::Feature, Vec<u64>>,
     logger: &dyn Fn(&str),
-    map_features: &mut HashMap<crate::rules::features::Feature, Vec<u64>>,
+    map_features: &mut HashMap<rules::features::Feature, Vec<u64>>,
     features_dump: bool,
 ) -> Result<(
-    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<&'a rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     usize,
 )> {
-    let mut file_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
+    let mut file_features: HashMap<rules::features::Feature, Vec<u64>> = HashMap::new();
     for (feature, va) in itertools::chain!(
         extractor.extract_file_features()?,
         extractor.extract_global_features()?
@@ -489,7 +654,7 @@ fn find_file_capabilities<'a>(
             .extend(addresses.iter().cloned());
     }
 
-    let mut matches: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
+    let mut matches: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
     for rule_set in [&ruleset.file_rules, &ruleset.function_rules].iter() {
         for (rule, matched) in match_fn(rule_set, &file_features, &0, logger)?.1 {
             matches
@@ -626,20 +791,21 @@ pub struct FileCapabilities {
     #[cfg(feature = "verbose")]
     pub functions_capabilities: BTreeMap<u64, FunctionCapabilities>,
     pub tags: BTreeSet<String>,
+    pub security_checks: BTreeSet<SecurityCheckStatus>,
     pub map_features: HashMap<String, HashMap<String, HashSet<u64>>>,
     pub capabilities_associations: BTreeMap<String, CapabilityAssociation>,
 }
 
 fn match_fn<'a>(
-    rules: &'a [crate::rules::Rule],
-    features: &HashMap<crate::rules::features::Feature, Vec<u64>>,
+    rules: &'a [rules::Rule],
+    features: &HashMap<rules::features::Feature, Vec<u64>>,
     va: &u64,
     logger: &dyn Fn(&str),
 ) -> Result<(
-    HashMap<crate::rules::features::Feature, Vec<u64>>,
-    HashMap<&'a crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
+    HashMap<rules::features::Feature, Vec<u64>>,
+    HashMap<&'a rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
 )> {
-    let mut results: HashMap<&crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
+    let mut results: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
     let mut features = features.clone();
     for (_index, rule) in rules.iter().enumerate() {
         logger(&format!(
@@ -665,12 +831,12 @@ fn match_fn<'a>(
 }
 
 fn index_rule_matches(
-    features: &mut HashMap<crate::rules::features::Feature, Vec<u64>>,
-    rule: &crate::rules::Rule,
+    features: &mut HashMap<rules::features::Feature, Vec<u64>>,
+    rule: &rules::Rule,
     locations: Vec<u64>,
 ) -> Result<()> {
-    let matched_rule_feature = crate::rules::features::Feature::MatchedRule(
-        crate::rules::features::MatchedRuleFeature::new(&rule.name, "")?,
+    let matched_rule_feature = rules::features::Feature::MatchedRule(
+        rules::features::MatchedRuleFeature::new(&rule.name, "")?,
     );
 
     features

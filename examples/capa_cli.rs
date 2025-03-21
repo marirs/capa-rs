@@ -1,9 +1,11 @@
-use capa::FileCapabilities;
+use std::fs;
+use std::time::Instant;
+
 use clap::Parser;
 use prettytable::{color, format::Alignment, Attr, Cell, Row, Table};
 use serde_json::{to_value, Map, Value};
-use std::fs;
-use std::time::Instant;
+
+use capa::{BinarySecurityCheckOptions, FileCapabilities};
 
 #[derive(Parser)]
 #[clap(
@@ -36,6 +38,18 @@ struct CliOpts {
     /// filter map_features
     #[clap(short = 'f', long, value_name = "FILTER_MAP_FEATURES")]
     filter_map_features: Option<String>,
+
+    /// Path of the C runtime library file.
+    #[clap(long, value_name = "LIBC")]
+    libc: Option<String>,
+
+    /// Path of the system root for finding the corresponding C runtime library.
+    #[clap(long, value_name = "SYSROOT")]
+    sysroot: Option<String>,
+
+    /// Use an internal list of checked functions as specified by a specification. Provide the version of the specification. eg 3.2.0
+    #[clap(long, value_name = "LIBC_SPEC")]
+    libc_spec: Option<String>,
 }
 
 fn main() {
@@ -45,9 +59,21 @@ fn main() {
     let verbose = cli.verbose;
     let map_features = cli.map_features;
     let json_path = cli.output;
+    let libc = cli.libc.map(|s| s.into());
+    let sysroot = cli.sysroot.map(|s| s.into());
+    let libc_spec = cli.libc_spec.map(|s| s.into());
+    let security_check_opts = BinarySecurityCheckOptions::new(libc, sysroot, libc_spec);
 
     let start = Instant::now();
-    match FileCapabilities::from_file(&filename, &rules_path, true, true, &|_s| {}, map_features) {
+    match FileCapabilities::from_file(
+        &filename,
+        &rules_path,
+        true,
+        true,
+        &|_s| {},
+        map_features,
+        Some(security_check_opts),
+    ) {
         Err(e) => println!("{:?}", e),
         Ok(mut s) => {
             match to_value(&s) {
@@ -59,6 +85,13 @@ fn main() {
                     // print the file basic properties
                     if let Some(props) = data.get("properties") {
                         let tbl = get_properties(props, features);
+                        tbl.printstd();
+                    }
+                    println!();
+
+                    // print the Security Checks
+                    if let Some(security_checks) = data.get("security_checks") {
+                        let tbl = get_security_checks(security_checks);
                         tbl.printstd();
                     }
                     println!();
@@ -219,6 +252,39 @@ fn get_mbc(mbc: &Map<String, Value>) -> Table {
                 .with_style(Attr::ForegroundColor(color::RED))
                 .with_style(Attr::Bold),
             Cell::new(&behaviours.join("\n")),
+        ]));
+    }
+
+    tbl
+}
+
+fn get_security_checks(security_checks: &Value) -> Table {
+    let security_checks = security_checks.as_array().unwrap();
+    let mut tbl = Table::new();
+    tbl.set_titles(Row::new(vec![Cell::new_align(
+        "Security Checks",
+        Alignment::CENTER,
+    )
+    .with_hspan(2)]));
+    for check in security_checks {
+        let check = check.as_object().unwrap();
+        let check_name = check.get("name").unwrap().as_str().unwrap();
+        let v = check.get("status").unwrap();
+        let status = v.as_str().unwrap().to_string();
+
+        tbl.add_row(Row::new(vec![
+            Cell::new(check_name)
+                .with_style(Attr::ForegroundColor(color::YELLOW))
+                .with_style(Attr::Bold),
+            if status.eq_ignore_ascii_case("fail") || status.eq_ignore_ascii_case("unsupported") {
+                Cell::new(&status).with_style(Attr::ForegroundColor(color::RED))
+            } else if status.eq_ignore_ascii_case("Pass")
+                || status.eq_ignore_ascii_case("Supported")
+            {
+                Cell::new(&status).with_style(Attr::ForegroundColor(color::GREEN))
+            } else {
+                Cell::new(&status)
+            },
         ]));
     }
 
