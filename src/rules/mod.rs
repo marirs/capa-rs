@@ -70,6 +70,7 @@ pub enum Scope {
     Process,
     Thread,
     Call,
+    SpanOfCalls
 }
 
 impl TryFrom<&Yaml> for Scope {
@@ -78,6 +79,7 @@ impl TryFrom<&Yaml> for Scope {
         Ok(match value.as_str() {
             Some("global") => Scope::Global,
             Some("function") => Scope::Function,
+            Some("span of calls") => Scope::SpanOfCalls,
             Some("file") => Scope::File,
             Some("basic block") => Scope::BasicBlock,
             Some("instruction") => Scope::Instruction,
@@ -132,7 +134,8 @@ impl TryFrom<&Yaml> for DynamicScope {
             | Scope::Global
             | Scope::Process
             | Scope::Thread
-            | Scope::Call => Ok(Self { scope }),
+            | Scope::Call
+            | Scope::SpanOfCalls => Ok(Self { scope }),
             _ => Err(Error::InvalidDynamicScope(line!())),
         }
     }
@@ -273,15 +276,13 @@ impl Rule {
                     let bitness = Rule::parse_int(&parts[1].trim()[1..])? as u32;
                     return Ok(RuleFeatureType::Offset(bitness));
                 }
-                if key.starts_with("operand[") && key.ends_with("].number") {
-                    let index =
-                        (key["operand[".len()..key.len() - "].number".len()]).parse::<usize>()?;
-                    return Ok(RuleFeatureType::OperandNumber(index));
+                if let Some(rest) = key.strip_prefix("operand[").and_then(|s| s.strip_suffix("].number")) {
+                    let idx = rest.parse::<usize>().map_err(|_| Error::InvalidRule(line!(), key.to_string()))?;
+                    return Ok(RuleFeatureType::OperandNumber(idx));
                 }
-                if key.starts_with("operand[") && key.ends_with("].offset") {
-                    let index =
-                        (key["operand[".len()..key.len() - "].offset".len()]).parse::<usize>()?;
-                    return Ok(RuleFeatureType::OperandOffset(index));
+                if let Some(rest) = key.strip_prefix("operand[").and_then(|s| s.strip_suffix("].offset")) {
+                    let idx = rest.parse::<usize>().map_err(|_| Error::InvalidRule(line!(), key.to_string()))?;
+                    return Ok(RuleFeatureType::OperandOffset(idx));
                 }
                 Err(Error::InvalidRule(line!(), key.to_string()))
             }
@@ -597,42 +598,49 @@ impl Rule {
                     ));
                 }
                 "call" => {
-                    if [Scope::File, Scope::Process, Scope::Thread].contains(&scopes.r#static.scope)
-                        || [Scope::File, Scope::Process, Scope::Thread]
-                            .contains(&scopes.dynamic.scope)
-                    {
-                        let mut params = vec![];
-                        let mut description = "".to_string();
-                        let val = vval
-                            .as_vec()
-                            .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-                        for vv in val {
-                            let p = Rule::build_statements(
-                                vv,
-                                &Scopes {
-                                    r#static: StaticScope { scope: Scope::Call },
-                                    dynamic: DynamicScope { scope: Scope::None },
-                                },
-                            )?;
-                            match p {
-                                StatementElement::Description(s) => description = s.value,
-                                _ => params.push(p),
+                    let mut params = vec![];
+                    let mut description = "".to_string();
+
+                    match vval {
+                        Yaml::Array(arr) => {
+                            for vv in arr {
+                                let p = Rule::build_statements(
+                                    vv,
+                                    &Scopes {
+                                        r#static: StaticScope { scope: Scope::Call },
+                                        dynamic: DynamicScope { scope: Scope::SpanOfCalls },
+                                    },
+                                )?;
+                                match p {
+                                    StatementElement::Description(s) => description = s.value,
+                                    _ => params.push(p),
+                                }
                             }
                         }
-                        if params.len() != 1 {
-                            return Err(Error::InvalidRule(
-                                line!(),
-                                format!("{:?}: {:?}", key, vval),
-                            ));
+                        Yaml::Hash(_) => {
+                            let p = Rule::build_statements(
+                                vval,
+                                &Scopes {
+                                    r#static: StaticScope { scope: Scope::Call },
+                                    dynamic: DynamicScope { scope: Scope::SpanOfCalls },
+                                },
+                            )?;
+                            params.push(p);
                         }
-                        return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
-                            SubscopeStatement::new(Scope::Call, params[0].clone(), &description)?,
-                        ))));
+                        _ => return Err(Error::InvalidRule(line!(), format!("call expects array or hash: {:?}", vval))),
                     }
-                    return Err(Error::InvalidRule(
-                        line!(),
-                        format!("{:?}: {:?}", key, vval),
-                    ));
+
+                    if params.is_empty() {
+                        return Err(Error::InvalidRule(line!(), format!("call must have at least one condition: {:?}", vval)));
+                    }
+
+                    return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
+                        SubscopeStatement::new(
+                            Scope::Call,
+                            StatementElement::Statement(Box::new(Statement::And(AndStatement::new(params, &description)?))),
+                            &description
+                        )?,
+                    ))));
                 }
 
                 "function" => {
@@ -677,32 +685,50 @@ impl Rule {
                     ));
                 }
                 "basic block" => {
-                    if Scope::Function == scopes.r#static.scope
-                        || Scope::Function == scopes.dynamic.scope
+                    if [Scope::Function, Scope::BasicBlock].contains(&scopes.r#static.scope)
+                        || [Scope::Function, Scope::BasicBlock].contains(&scopes.dynamic.scope)
                     {
                         let mut params = vec![];
                         let mut description = "".to_string();
-                        let val = vval
-                            .as_vec()
-                            .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-                        for vv in val {
-                            let p = Rule::build_statements(vv, scopes)?;
-                            match p {
-                                StatementElement::Description(s) => description = s.value,
-                                _ => params.push(p),
+
+                        match vval {
+                            Yaml::Array(arr) => {
+                                for vv in arr {
+                                    let p = Rule::build_statements(
+                                        vv,
+                                        &Scopes {
+                                            r#static: StaticScope { scope: Scope::BasicBlock },
+                                            dynamic: DynamicScope { scope: Scope::None },
+                                        },
+                                    )?;
+                                    match p {
+                                        StatementElement::Description(s) => description = s.value,
+                                        _ => params.push(p),
+                                    }
+                                }
                             }
+                            Yaml::Hash(_) => {
+                                let p = Rule::build_statements(
+                                    vval,
+                                    &Scopes {
+                                        r#static: StaticScope { scope: Scope::BasicBlock },
+                                        dynamic: DynamicScope { scope: Scope::None },
+                                    },
+                                )?;
+                                params.push(p);
+                            }
+                            _ => return Err(Error::InvalidRule(line!(), format!("basic block expects array or hash: {:?}", vval))),
                         }
-                        if params.len() != 1 {
-                            return Err(Error::InvalidRule(
-                                line!(),
-                                format!("{:?}: {:?}", key, vval),
-                            ));
+
+                        if params.is_empty() {
+                            return Err(Error::InvalidRule(line!(), format!("basic block must have at least one condition: {:?}", vval)));
                         }
+
                         return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
                             SubscopeStatement::new(
                                 Scope::BasicBlock,
-                                params[0].clone(),
-                                &description,
+                                StatementElement::Statement(Box::new(Statement::And(AndStatement::new(params, &description)?))),
+                                &description
                             )?,
                         ))));
                     }
@@ -727,20 +753,34 @@ impl Rule {
                                 _ => params.push(p),
                             }
                         }
-                        //                        if params.len() != 1 {
-                        //                            return Err(Error::InvalidRule(
-                        //                                line!(),
-                        //                                format!("{:?}: {:?}", key, vval),
-                        //                            ));
-                        //                        }
+
+                        // Special case: if there's only one parameter, create subscope with just that parameter
+                        if params.len() == 1 {
+                            return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
+                                SubscopeStatement::new(
+                                    Scope::Instruction,
+                                    params[0].clone(),
+                                    &description,
+                                )?,
+                            ))));
+                        }
+
+                        // For multiple parameters, combine them with AND logic first
+                        let params_and = StatementElement::Statement(Box::new(Statement::And(
+                            AndStatement::new(params, &description)?,
+                        )));
+
+                        // Wrap the AND statement in an instruction subscope
                         return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
                             SubscopeStatement::new(
                                 Scope::Instruction,
-                                params[0].clone(),
+                                params_and,
                                 &description,
                             )?,
                         ))));
                     }
+
+                    // Return error if scope is invalid for instruction statements
                     return Err(Error::InvalidRule(
                         line!(),
                         format!("{:?},  {:?}: {:?}", scopes, key, vval),

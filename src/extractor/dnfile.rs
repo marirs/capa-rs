@@ -8,7 +8,7 @@ use dnfile::{
     DnPe,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, BTreeMap,  HashSet},
     sync::Arc,
 };
 
@@ -51,8 +51,8 @@ impl super::Function for Function {
         self.f.offset as u64
     }
 
-    fn get_blocks(&self) -> Result<HashMap<u64, Vec<Box<dyn super::Instruction>>>> {
-        let mut res = HashMap::<u64, Vec<Box<dyn super::Instruction>>>::new();
+    fn get_blocks(&self) -> Result<BTreeMap<u64, Vec<Box<dyn super::Instruction>>>> {
+        let mut res = BTreeMap::<u64, Vec<Box<dyn super::Instruction>>>::new();
         let mut insts: Vec<Box<dyn super::Instruction>> = vec![];
         for i in &self.f.instructions {
             insts.push(Box::new(Instruction { i: i.clone() }));
@@ -162,7 +162,7 @@ impl super::Extractor for Extractor {
         Ok(ss)
     }
 
-    fn get_functions(&self) -> Result<std::collections::HashMap<u64, Box<dyn super::Function>>> {
+    fn get_functions(&self) -> Result<std::collections::BTreeMap<u64, Box<dyn super::Function>>> {
         let mut methods: std::collections::HashMap<u64, Function> =
             std::collections::HashMap::new();
         let mut calls_to_map = HashMap::new();
@@ -201,7 +201,7 @@ impl super::Extractor for Extractor {
         Ok(methods
             .into_iter()
             .map(|(a, b)| (a, Box::new(b) as Box<dyn super::Function>))
-            .collect::<HashMap<u64, Box<dyn super::Function>>>())
+            .collect::<BTreeMap<u64, Box<dyn super::Function>>>())
     }
 
     fn extract_function_features(
@@ -224,7 +224,7 @@ impl super::Extractor for Extractor {
     fn get_basic_blocks(
         &self,
         f: &Box<dyn super::Function>,
-    ) -> Result<std::collections::HashMap<u64, Vec<Box<dyn super::Instruction>>>> {
+    ) -> Result<std::collections::BTreeMap<u64, Vec<Box<dyn super::Instruction>>>> {
         f.get_blocks()
     }
 
