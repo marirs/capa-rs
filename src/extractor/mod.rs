@@ -13,7 +13,7 @@ pub trait Function {
     fn inrefs(&self) -> &Vec<u64>;
     fn blockrefs(&self) -> &std::collections::HashMap<u64, Vec<u64>>;
     fn offset(&self) -> u64;
-    fn get_blocks(&self) -> Result<std::collections::HashMap<u64, Vec<Box<dyn Instruction>>>>;
+    fn get_blocks(&self) -> Result<std::collections::BTreeMap<u64, Vec<Box<dyn Instruction>>>>;
     fn as_any(&self) -> &dyn std::any::Any;
 }
 
@@ -23,7 +23,7 @@ pub trait Extractor {
     fn bitness(&self) -> u32;
     fn extract_global_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>>;
     fn extract_file_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>>;
-    fn get_functions(&self) -> Result<std::collections::HashMap<u64, Box<dyn Function>>>;
+    fn get_functions(&self) -> Result<std::collections::BTreeMap<u64, Box<dyn Function>>>;
     fn extract_function_features(
         &self,
         f: &Box<dyn Function>,
@@ -31,7 +31,7 @@ pub trait Extractor {
     fn get_basic_blocks(
         &self,
         f: &Box<dyn Function>,
-    ) -> Result<std::collections::HashMap<u64, Vec<Box<dyn Instruction>>>>;
+    ) -> Result<std::collections::BTreeMap<u64, Vec<Box<dyn Instruction>>>>;
     fn get_instructions<'a>(
         &self,
         f: &Box<dyn Function>,

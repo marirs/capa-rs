@@ -1,6 +1,6 @@
 #![allow(dead_code, clippy::to_string_in_format_args)]
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use smda::{
     function::{Function, Instruction},
@@ -46,8 +46,8 @@ impl super::Function for FunctionS {
         self.f.offset
     }
 
-    fn get_blocks(&self) -> Result<HashMap<u64, Vec<Box<dyn super::Instruction>>>> {
-        let mut res = HashMap::<u64, Vec<Box<dyn super::Instruction>>>::new();
+    fn get_blocks(&self) -> Result<BTreeMap<u64, Vec<Box<dyn super::Instruction>>>> {
+        let mut res = BTreeMap::<u64, Vec<Box<dyn super::Instruction>>>::new();
         for (u, b) in self.f.get_blocks()? {
             let mut instr: Vec<Box<dyn super::Instruction>> = vec![];
             for i in b {
@@ -121,8 +121,8 @@ impl super::Extractor for Extractor {
         Ok(res)
     }
 
-    fn get_functions(&self) -> Result<HashMap<u64, Box<dyn super::Function>>> {
-        let mut res = HashMap::<u64, Box<dyn super::Function>>::new();
+    fn get_functions(&self) -> Result<BTreeMap<u64, Box<dyn super::Function>>> {
+        let mut res = BTreeMap::<u64, Box<dyn super::Function>>::new();
         for (u, f) in self.report.get_functions()? {
             res.insert(*u, Box::new(FunctionS { f: f.clone() }));
         }
@@ -166,7 +166,7 @@ impl super::Extractor for Extractor {
     fn get_basic_blocks(
         &self,
         f: &Box<dyn super::Function>,
-    ) -> Result<HashMap<u64, Vec<Box<dyn super::Instruction>>>> {
+    ) -> Result<BTreeMap<u64, Vec<Box<dyn super::Instruction>>>> {
         f.get_blocks()
     }
 

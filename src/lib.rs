@@ -18,13 +18,13 @@ use consts::{FileFormat, Os};
 use sede::{from_hex, to_hex};
 
 pub use crate::error::Error;
-pub use crate::security::options::status::SecurityCheckStatus;
+use crate::security::options::status::SecurityCheckStatus;
 
 pub(crate) mod consts;
 mod error;
 mod extractor;
 pub mod rules;
-pub mod security;
+mod security;
 mod sede;
 
 pub type Result<T> = std::result::Result<T, Error>;
