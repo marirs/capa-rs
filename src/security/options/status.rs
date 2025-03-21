@@ -17,8 +17,8 @@ pub(crate) struct YesNoUnknownStatus {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
 pub struct SecurityCheckStatus {
-    pub(crate) name: String,
-    pub(crate) status: String,
+    pub name: String,
+    pub status: String,
 }
 
 impl YesNoUnknownStatus {

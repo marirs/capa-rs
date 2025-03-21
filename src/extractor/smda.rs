@@ -264,6 +264,7 @@ impl Extractor {
     }
 
     pub fn get_elf_os(elf: &goblin::elf::Elf) -> Result<Os> {
+        // eprintln!("{}", elf.header.e_ident[7]);
         match elf.header.e_ident[7] {
             0x00 => Ok(Os::UNDEFINED),
             0x01 => Ok(Os::HPUX),
@@ -282,7 +283,7 @@ impl Extractor {
             0x0F => Ok(Os::AROS),
             0x10 => Ok(Os::FENIXOS),
             0x11 => Ok(Os::CLOUD),
-            _ => Err(Error::UnsupportedOsError),
+            _ => Ok(Os::ARCH_SPECIFIC),
         }
     }
     pub fn extract_os(&self) -> Result<Os> {

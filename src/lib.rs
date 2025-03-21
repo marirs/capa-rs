@@ -18,13 +18,13 @@ use consts::{FileFormat, Os};
 use sede::{from_hex, to_hex};
 
 pub use crate::error::Error;
-use crate::security::options::status::SecurityCheckStatus;
+pub use crate::security::options::status::SecurityCheckStatus;
 
 pub(crate) mod consts;
 mod error;
 mod extractor;
 pub mod rules;
-mod security;
+pub mod security;
 mod sede;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -245,7 +245,7 @@ impl FileCapabilities {
     fn new(
         #[cfg(feature = "properties")] extractor: &Box<dyn extractor::Extractor>,
     ) -> Result<FileCapabilities> {
-        Ok(FileCapabilities {
+        let ss = FileCapabilities {
             #[cfg(feature = "properties")]
             properties: Properties {
                 format: FileCapabilities::get_format(extractor)?,
@@ -264,7 +264,8 @@ impl FileCapabilities {
             security_checks: BTreeSet::new(),
             map_features: HashMap::new(),
             capabilities_associations: BTreeMap::new(),
-        })
+        };
+        Ok(ss)
     }
 
     fn update_capabilities(

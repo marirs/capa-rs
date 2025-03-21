@@ -1203,7 +1203,7 @@ impl RegexFeature {
         let rr = match fancy_regex::Regex::new(&rre) {
             Ok(s) => s,
             Err(e) => {
-                println!("{:?}", e);
+                // println!("{:?}", e);
                 return Err(Error::FancyRegexError(Box::new(e)));
             }
         };

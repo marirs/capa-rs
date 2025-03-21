@@ -41,6 +41,7 @@ pub enum Os {
     FENIXOS,
     CLOUD,
     UNDEFINED,
+    ARCH_SPECIFIC,
 }
 
 impl Display for Os {
@@ -65,6 +66,7 @@ impl Display for Os {
             Os::FENIXOS => write!(f, "FenixOS"),
             Os::CLOUD => write!(f, "Cloud"),
             Os::UNDEFINED => write!(f, "undefined"),
+            Os::ARCH_SPECIFIC => write!(f, "Architecture-specific"),
         }
     }
 }
