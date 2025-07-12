@@ -258,6 +258,8 @@ impl super::Extractor for Extractor {
         ss.extend(self.extract_insn_namespace_features(&f.f, &insn.i)?);
         ss.extend(self.extract_insn_class_features(&f.f, &insn.i)?);
         ss.extend(self.extract_unmanaged_call_characteristic_features(&f.f, &insn.i)?);
+        ss.extend(self.extract_file_format()?);
+        ss.extend(self.extract_global_features()?);
         Ok(ss)
     }
 }

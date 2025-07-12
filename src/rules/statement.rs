@@ -1,4 +1,6 @@
+use std::collections::{HashMap, HashSet};
 use crate::{rules::features::Feature, Error, Result};
+use crate::rules::Scope;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum StatementElement {
@@ -10,7 +12,7 @@ pub enum StatementElement {
 impl StatementElement {
     pub fn evaluate(
         &self,
-        features: &std::collections::HashMap<Feature, Vec<u64>>,
+        features: &HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
         match self {
             StatementElement::Statement(s) => s.evaluate(features),
@@ -43,7 +45,7 @@ impl Statement {
     }
     pub fn evaluate(
         &self,
-        features: &std::collections::HashMap<Feature, Vec<u64>>,
+        features: &HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
         match self {
             Statement::And(s) => s.evaluate(features),
@@ -78,7 +80,7 @@ impl AndStatement {
     }
     pub fn evaluate(
         &self,
-        features: &std::collections::HashMap<Feature, Vec<u64>>,
+        features: &HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
         let mut res = true;
         for child in &self.children {
@@ -110,7 +112,7 @@ impl OrStatement {
     }
     pub fn evaluate(
         &self,
-        features: &std::collections::HashMap<Feature, Vec<u64>>,
+        features: &HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
         let mut res = false;
         for child in &self.children {
@@ -138,7 +140,7 @@ impl NotStatement {
     }
     pub fn evaluate(
         &self,
-        features: &std::collections::HashMap<Feature, Vec<u64>>,
+        features: &HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
         Ok((!self.child.evaluate(features)?.0, vec![]))
     }
@@ -172,7 +174,7 @@ impl SomeStatement {
     }
     pub fn evaluate(
         &self,
-        features: &std::collections::HashMap<Feature, Vec<u64>>,
+        features: &HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
         let mut res = 0;
         for child in &self.children {
@@ -211,7 +213,7 @@ impl RangeStatement {
     }
     pub fn evaluate(
         &self,
-        features: &std::collections::HashMap<Feature, Vec<u64>>,
+        features: &HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
         if let StatementElement::Feature(f) = &self.child {
             let count = match features.get(f) {
@@ -228,15 +230,56 @@ impl RangeStatement {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct SubscopeInstructionEvaluator;
+
+impl SubscopeInstructionEvaluator {
+    pub fn evaluate(
+        statement: &StatementElement,
+        features: &HashMap<Feature, Vec<u64>>,
+    ) -> Result<(bool, Vec<u64>)> {
+        let mut addr_to_features: HashMap<u64, HashSet<&Feature>> = HashMap::new();
+
+        for (feature, addrs) in features.iter() {
+            for addr in addrs {
+                addr_to_features.entry(*addr).or_default().insert(feature);
+            }
+        }
+
+        if let StatementElement::Statement(stmt) = statement {
+            if let Statement::And(and_stmt) = stmt.as_ref() {
+                for (_addr, feature_set) in addr_to_features.iter() {
+                    let mut matched = true;
+                    for elem in &and_stmt.children {
+                        if let StatementElement::Feature(f) = elem {
+                            if !feature_set.iter().any(|feat| *feat == f.as_ref()) {
+                                matched = false;
+                                break;
+                            }
+                        } else {
+                            matched = false;
+                            break;
+                        }
+                    }
+                    if matched {
+                        return Ok((true, vec![]));
+                    }
+                }
+            }
+        }
+
+        Ok((false, vec![]))
+    }
+}
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct SubscopeStatement {
     child: StatementElement,
-    scope: crate::rules::Scope,
+    scope: Scope,
     description: String,
 }
 
 impl SubscopeStatement {
     pub fn new(
-        scope: crate::rules::Scope,
+        scope: Scope,
         params: StatementElement,
         description: &str,
     ) -> Result<SubscopeStatement> {
@@ -251,11 +294,16 @@ impl SubscopeStatement {
     }
     pub fn evaluate(
         &self,
-        features: &std::collections::HashMap<Feature, Vec<u64>>,
+        features: &HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        self.child.evaluate(features)
-        //        Err(Error::SubscopeEvaluationError)
+        match self.scope {
+            Scope::Instruction => {
+                SubscopeInstructionEvaluator::evaluate(&self.child, features)
+            }
+            _ => self.child.evaluate(features),
+        }
     }
+
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -271,7 +319,7 @@ impl Description {
     }
     pub fn evaluate(
         &self,
-        _features: &std::collections::HashMap<Feature, Vec<u64>>,
+        _features: &HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
         Err(Error::DescriptionEvaluationError)
     }

@@ -41,6 +41,8 @@ pub enum Os {
     FENIXOS,
     CLOUD,
     UNDEFINED,
+    ANDROID,
+    #[allow(non_camel_case_types)]
     ARCH_SPECIFIC,
 }
 
@@ -66,11 +68,12 @@ impl Display for Os {
             Os::FENIXOS => write!(f, "FenixOS"),
             Os::CLOUD => write!(f, "Cloud"),
             Os::UNDEFINED => write!(f, "undefined"),
+            Os::ANDROID => write!(f, "Android"),
             Os::ARCH_SPECIFIC => write!(f, "Architecture-specific"),
         }
     }
 }
-
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Endian {
     _Big,

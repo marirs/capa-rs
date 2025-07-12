@@ -23,7 +23,7 @@ smda = { git = "https://github.com/marirs/smda-rs.git" }
 thiserror = "2.0.12"
 walkdir = "2.5.0"
 yaml-rust = "0.4.5"
-goblin = { version = "0.9.3", features = ["alloc"] }
+goblin = { version = "0.10.0", features = ["alloc"] }
 maplit = "1.0.2"
 dnfile = { git = "https://github.com/marirs/dnfile-rs.git", branch = "master" }
 lazy_static = "1.5.0"

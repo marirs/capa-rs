@@ -1,6 +1,16 @@
 #![allow(dead_code, clippy::to_string_in_format_args)]
 
 use std::collections::{BTreeMap, HashMap};
+use lazy_static::lazy_static;
+use regex::Regex;
+
+lazy_static! {
+    static ref RE_NUMBER_HEX_SPACED: Regex = Regex::new(r"(?P<sign>[+\-]) (?P<num>0x[a-fA-F0-9]+)").unwrap();
+    static ref RE_NUMBER_INT_SPACED: Regex = Regex::new(r"(?P<sign>[+\-]) (?P<num>[0-9]+)").unwrap();
+
+    static ref RE_NUMBER_HEX: Regex = Regex::new(r"(?P<sign>[+\-])(?P<num>0x[a-fA-F0-9]+)").unwrap();
+    static ref RE_NUMBER_INT: Regex = Regex::new(r"(?P<sign>[+\-])(?P<num>[0-9]+)").unwrap();
+}
 
 use smda::{
     function::{Function, Instruction},
@@ -236,6 +246,8 @@ impl super::Extractor for Extractor {
         res.extend(self.extract_insn_segment_access_features(&f.f, &insn.i)?);
         res.extend(self.extract_function_calls_from(&f.f, &insn.i)?);
         res.extend(self.extract_function_indirect_call_characteristic_features(&f.f, &insn.i)?);
+        res.extend(self.extract_file_format()?);
+        res.extend(self.extract_global_features()?);
         Ok(res)
     }
 }
@@ -264,9 +276,8 @@ impl Extractor {
     }
 
     pub fn get_elf_os(elf: &goblin::elf::Elf) -> Result<Os> {
-        // eprintln!("{}", elf.header.e_ident[7]);
         match elf.header.e_ident[7] {
-            0x00 => Ok(Os::UNDEFINED),
+            0x00 => Ok(Os::LINUX),
             0x01 => Ok(Os::HPUX),
             0x02 => Ok(Os::NETBSD),
             0x03 => Ok(Os::LINUX),
@@ -283,7 +294,10 @@ impl Extractor {
             0x0F => Ok(Os::AROS),
             0x10 => Ok(Os::FENIXOS),
             0x11 => Ok(Os::CLOUD),
-            _ => Ok(Os::ARCH_SPECIFIC),
+            _ => {
+                // For Unknown ELF OS, also assume Linux as fallback
+                Ok(Os::LINUX)
+            }
         }
     }
     pub fn extract_os(&self) -> Result<Os> {
@@ -692,7 +706,7 @@ impl Extractor {
         if let Some(o) = &insn.operands {
             let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
             for (i, operand) in operands.iter().enumerate() {
-                if !operand.contains("ptr") {
+                if !insn.mnemonic.contains("lea") && !operand.contains("ptr") {
                     continue;
                 }
                 //NOTE not sure
@@ -702,11 +716,9 @@ impl Extractor {
                     continue;
                 }
                 let mut number = 0;
-                let re_number_hex =
-                    regex::Regex::new(r"(?P<sign>[+\-]) (?P<num>0x[a-fA-F0-9]+)").unwrap();
-                let re_number_int = regex::Regex::new(r"(?P<sign>[+\-]) (?P<num>[0-9])").unwrap();
-                let number_hex = re_number_hex.captures(operand);
-                let number_int = re_number_int.captures(operand);
+
+                let number_hex = RE_NUMBER_HEX_SPACED.captures(operand);
+                let number_int = RE_NUMBER_INT_SPACED.captures(operand);
                 if let Some(n) = number_hex {
                     number = i128::from_str_radix(&n["num"][2..], 16)?;
                     if &n["sign"] == "-" {
@@ -730,6 +742,15 @@ impl Extractor {
                     ),
                     insn.offset,
                 ));
+
+                if insn.mnemonic.contains("lea") {
+                    res.push((
+                        crate::rules::features::Feature::Number(
+                            crate::rules::features::NumberFeature::new(f.bitness, &number, "")?,
+                        ),
+                        insn.offset,
+                    ));
+                }
             }
         }
         Ok(res)
@@ -790,13 +811,42 @@ impl Extractor {
     }
 
     fn parse_operand_to_number(&self, operand: &str) -> Option<i128> {
+        let operand = operand.trim();
+
+        // case 1: if operand is like 0x1234
         if let Some(x) = operand.strip_prefix("0x") {
-            i128::from_str_radix(x, 16).ok()
-        } else if let Some(stripped_operand) = operand.strip_suffix('h') {
-            i128::from_str_radix(stripped_operand, 16).ok()
-        } else {
-            i128::from_str_radix(operand, 16).ok()
+            return i128::from_str_radix(x, 16).ok();
         }
+
+        // case 2: if operand is like 1234h
+        if let Some(stripped_operand) = operand.strip_suffix('h') {
+            return i128::from_str_radix(stripped_operand, 16).ok();
+        }
+
+        // case 3: if operand is like +0x1234
+        //if start with sign apply this logic
+        if operand.starts_with('-') || operand.starts_with('+') {
+            if let Some(captures) = RE_NUMBER_HEX.captures(operand) {
+                let sign = &captures["sign"];
+                let number = &captures["num"];
+                let value = i128::from_str_radix(number, 16).ok()?;
+                return Some(if sign == "-" { -value } else { value });
+            }
+            if let Some(captures) = RE_NUMBER_INT.captures(operand) {
+                let sign = &captures["sign"];
+                let number = &captures["num"];
+                let value = number.parse::<i128>().ok()?;
+                return Some(if sign == "-" { -value } else { value });
+            }
+        }
+
+        // case 4: if operand is like 1234
+        if let Ok(val) = operand.parse::<i128>() {
+            return Some(val);
+        }
+
+        // case 5: if operand is like 0x1234
+        i128::from_str_radix(operand, 16).ok()
     }
 
     pub fn extract_insn_number_features(
@@ -814,12 +864,25 @@ impl Extractor {
 
             for (i, operand) in operands.iter().enumerate() {
                 if let Some(s) = self.parse_operand_to_number(operand) {
-                    res.push((
-                        crate::rules::features::Feature::Number(
-                            crate::rules::features::NumberFeature::new(f.bitness, &s, "")?,
-                        ),
-                        insn.offset,
-                    ));
+                    if s >= 0
+                    {
+                        res.push((
+                            crate::rules::features::Feature::Number(
+                                crate::rules::features::NumberFeature::new(f.bitness, &s, "")?,
+                            ),
+                            insn.offset,
+                        ));
+                    }
+                    else
+                    {
+                        let masked_value = (s as u32) as i128;  // Convierte a u32 y de vuelta a i128
+                        res.push((
+                            crate::rules::features::Feature::Number(
+                                crate::rules::features::NumberFeature::new(f.bitness, &masked_value, "")?,
+                            ),
+                            insn.offset,
+                        ));
+                    }
                     res.push((
                         crate::rules::features::Feature::OperandNumber(
                             crate::rules::features::OperandNumberFeature::new(&i, &s, "")?,
@@ -838,50 +901,125 @@ impl Extractor {
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        if f.apirefs.contains_key(&insn.offset) {
-            let (dll, api) = &f.apirefs[&insn.offset];
-            for name in generate_symbols(dll, api)? {
-                res.push((
-                    crate::rules::features::Feature::Api(crate::rules::features::ApiFeature::new(
-                        &name, "",
-                    )?),
-                    insn.offset,
-                ));
+        let va = self.report.base_addr + insn.offset;
+
+        if let Some((dll, api)) = f.apirefs.get(&insn.offset) {
+            if let Some(api_name) = api {
+                let highest_addr = self.find_highest_address_for_symbol(api_name);
+                if let Some(addr) = highest_addr {
+                    self.push_api_features(&mut res, dll, api, addr)?;
+                } else {
+                    self.push_api_features(&mut res, dll, api, va)?;
+                }
+            } else {
+                self.push_api_features(&mut res, dll, api, va)?;
             }
-        } else if f.outrefs.contains_key(&insn.offset) {
-            let mut current_function = f;
-            let mut current_instruction = insn;
-            for _index in 0..5 {
-                //}THUNK_CHAIN_DEPTH_DELTA
-                if current_function.outrefs[&current_instruction.offset].len() == 1 {
-                    let target = current_function.outrefs[&current_instruction.offset][0];
-                    if let Ok(referenced_function) = self.report.get_function(target) {
-                        //# TODO SMDA: implement this function for both jmp and call, checking if function has 1 instruction which refs an API
-                        if referenced_function.is_api_thunk()? {
-                            if referenced_function.apirefs.contains_key(&target) {
-                                let (dll, api) = &referenced_function.apirefs[&target];
-                                for name in generate_symbols(dll, api)? {
-                                    res.push((
-                                        crate::rules::features::Feature::Api(
-                                            crate::rules::features::ApiFeature::new(&name, "")?,
-                                        ),
-                                        insn.offset,
-                                    ));
-                                }
-                            }
-                        } else if referenced_function.get_num_instructions()? == 1
-                            && referenced_function.get_num_outrefs()? == 1
-                        {
-                            current_function = referenced_function;
-                            current_instruction = referenced_function.get_instructions()?[0];
-                        }
-                    } else {
-                        return Ok(res);
+            return Ok(res);
+        }
+
+        if let Some(targets) = f.outrefs.get(&insn.offset) {
+            let mut api_candidates = Vec::new();
+
+            for target in targets.iter().rev() {
+                if let Some((dll, api)) = self.report.addr_to_api.get(target) {
+                    api_candidates.push((*target, dll.clone(), api.clone()));
+                }
+            }
+
+            if !api_candidates.is_empty() {
+                let best_candidate = api_candidates.iter().max_by_key(|(addr, _, _)| *addr).unwrap();
+                let (mut best_addr, dll, api) = best_candidate.clone();
+
+                // FIX: api es Option<String>, desenvolverlo
+                if let Some(api_name) = &api {
+                    if let Some(highest) = self.find_highest_address_for_symbol(api_name) {
+                        best_addr = highest;
                     }
+                }
+
+                self.push_api_features(&mut res, &dll, &api, best_addr)?;
+                return Ok(res);
+            }
+        }
+
+        // fallback: thunk chain resolution
+        let mut current_function = f;
+        let mut current_instruction = insn;
+
+        for _ in 0..5 {
+            if let Some(targets) = current_function.outrefs.get(&current_instruction.offset) {
+                if targets.len() != 1 {
+                    break;
+                }
+
+                let chain_target = targets[0];
+                let referenced_function = match self.report.get_function(chain_target) {
+                    Ok(func) => func,
+                    Err(_) => break,
+                };
+
+                if referenced_function.is_api_thunk()? {
+                    if let Some((dll, api)) = referenced_function.apirefs.get(&chain_target) {
+                        if let Some(api_name) = api {
+                            if let Some(highest) = self.find_highest_address_for_symbol(api_name) {
+                                self.push_api_features(&mut res, dll, api, highest)?;
+                                return Ok(res);
+                            }
+                        }
+
+                        self.push_api_features(&mut res, dll, api, chain_target)?;
+                    }
+                    break;
+                }
+
+                if referenced_function.get_num_instructions()? == 1
+                    && referenced_function.get_num_outrefs()? == 1
+                {
+                    current_function = referenced_function;
+                    current_instruction = referenced_function.get_instructions()?[0];
+                }
+                else
+                {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        Ok(res)
+    }
+
+    fn find_highest_address_for_symbol(&self, symbol_name: &str) -> Option<u64> {
+        let mut addresses = Vec::new();
+
+        for (addr, (_, api)) in &self.report.addr_to_api {
+            if let Some(api_name) = api {
+                if api_name == symbol_name {
+                    addresses.push(*addr);
                 }
             }
         }
-        Ok(res)
+
+        addresses.into_iter().max()
+    }
+
+    fn push_api_features(
+        &self,
+        res: &mut Vec<(crate::rules::features::Feature, u64)>,
+        dll: &Option<String>,
+        api: &Option<String>,
+        va: u64,
+    ) -> Result<()> {
+        for name in generate_symbols(dll, api)? {
+            res.push((
+                crate::rules::features::Feature::Api(
+                    crate::rules::features::ApiFeature::new(&name, "")?,
+                ),
+                va,
+            ));
+        }
+        Ok(())
     }
 
     fn xor_static(data: &[u8], i: u8) -> Result<Vec<u8>> {
@@ -950,40 +1088,47 @@ impl Extractor {
 
         let pblen = pbytes.len();
         let mut todo = vec![];
+
+        // Buscar patrones MZ XORed
         for (mzx, pex, key) in mz_xor {
-            if let Some(ff) = pbytes[offset as usize..]
+            if let Some(relative_pos) = pbytes[offset as usize..]
                 .windows(mzx.len())
                 .position(|window| window == mzx)
             {
-                todo.push((ff, mzx, pex, key));
+                let absolute_pos = offset as usize + relative_pos;  // ← CORREGIR: posición absoluta
+                todo.push((absolute_pos, mzx, pex, key));
             }
         }
+
         let mut res = vec![];
         while let Some((off, mzx, pex, key)) = todo.pop() {
-            // println!("{}", todo.len());
-
-            //The MZ header has one field we will check
-            //e_lfanew is at 0x3c
-            let e_lfanew = off + 0x3C;
-            if pblen < (e_lfanew + 4) {
+            // The MZ header has one field we will check
+            let e_lfanew_offset = off + 0x3C;
+            if e_lfanew_offset + 4 > pblen {
                 continue;
             }
 
-            let ppp: [u8; 4] = Extractor::xor_static(&pbytes[e_lfanew..e_lfanew + 4], key)?
+            let ppp: [u8; 4] = Extractor::xor_static(&pbytes[e_lfanew_offset..e_lfanew_offset + 4], key)?
                 .try_into()
-                .map_err(|_| Error::InvalidRule(line!(), "aaa".to_string()))?;
-            let newoff = u32::from_le_bytes(ppp);
-            if let Some(ff) = pbytes[off + 1..]
-                .windows(mzx.len())
-                .position(|window| window == mzx)
-            {
-                todo.push((ff, mzx, pex.clone(), key));
+                .map_err(|_| Error::InvalidRule(line!(), "Failed to parse e_lfanew".to_string()))?;
+
+            let pe_offset_value = u32::from_le_bytes(ppp);
+
+            if off + 1 < pblen {
+                if let Some(relative_pos) = pbytes[off + 1..]
+                    .windows(mzx.len())
+                    .position(|window| window == mzx)
+                {
+                    let next_absolute_pos = off + 1 + relative_pos;  // ← CORREGIR: posición absoluta
+                    todo.push((next_absolute_pos, mzx, pex.clone(), key));
+                }
             }
-            let peoff = off + newoff as usize;
-            if pblen < (peoff + 2) {
+
+            let pe_header_offset = off + pe_offset_value as usize;
+            if pe_header_offset + 2 > pblen {
                 continue;
             }
-            if pbytes[peoff..peoff + 2] == pex {
+            if pbytes[pe_header_offset..pe_header_offset + 2] == pex {
                 res.push((off as u64, key as u64));
             }
         }
@@ -1021,32 +1166,49 @@ pub fn get_operands(ins: &Instruction) -> Result<(String, String)> {
     Ok(("".to_string(), "".to_string()))
 }
 
+fn clean_dll_name(dll_name: &str) -> String {
+    let mut clean = dll_name.to_string();
+
+    // Remove common prefixes
+    if clean.ends_with(".so.6") {
+        clean = clean[..clean.len() - 5].to_string();
+    } else if clean.ends_with(".so") {
+        clean = clean[..clean.len() - 3].to_string();
+    } else if clean.ends_with(".dll") {
+        clean = clean[..clean.len() - 4].to_string();
+    }
+
+    clean
+}
+
+
 pub fn generate_symbols(dll: &Option<String>, symbol: &Option<String>) -> Result<Vec<String>> {
     let mut res = vec![];
-    let mut dll_name = dll
-        .clone()
-        .ok_or_else(|| Error::InvalidRule(line!(), file!().to_string()))?;
-    if dll_name.ends_with(".dll") {
-        dll_name = dll_name[..dll_name.len() - 4].to_string();
-    }
-    let symbol_name = symbol
-        .clone()
-        .ok_or_else(|| Error::InvalidRule(line!(), file!().to_string()))?;
-    res.push(format!("{}.{}", dll_name, symbol_name));
+    let symbol_name = symbol.clone().ok_or_else(|| Error::InvalidRule(line!(), file!().to_string()))?;
 
-    if &symbol_name[..1] != "#" {
+    // Add simple symbol if it does not start with #
+    if !symbol_name.starts_with('#') {
         res.push(symbol_name.clone());
     }
 
-    //TODO
-    if symbol_name.ends_with('A') || symbol_name.ends_with('W') {
-        res.push(format!(
-            "{}.{}",
-            dll_name,
-            symbol_name[..symbol_name.len() - 1].to_string()
-        ));
-        if &symbol_name[..1] != "#" {
-            res.push(symbol_name[..symbol_name.len() - 1].to_string());
+    // DLL.symbol
+    if let Some(dll_ref) = dll {
+        let dll_clean = clean_dll_name(dll_ref);
+        let dll_symbol = format!("{}.{}", dll_clean, symbol_name);
+        if dll_symbol != symbol_name {
+            res.push(dll_symbol);
+        }
+    }
+
+    // A/W variants para APIs Windows
+    if !symbol_name.starts_with("_Z") && (symbol_name.ends_with('A') || symbol_name.ends_with('W')) {
+        let base_name = &symbol_name[..symbol_name.len() - 1];
+        if !res.contains(&base_name.to_string()) {
+            res.push(base_name.to_string());
+        }
+        if let Some(dll_ref) = dll {
+            let dll_clean = clean_dll_name(dll_ref);
+            res.push(format!("{}.{}", dll_clean, base_name));
         }
     }
     Ok(res)
@@ -1142,7 +1304,7 @@ pub fn detect_ascii_len(report: &DisassemblyReport, offset: &u64) -> Result<usiz
     let ascii_len = report.buffer[rva as usize..]
         .iter()
         .take_while(|&&ch| ch != 0 && ch.is_ascii())
-        .take_while(|&&ch| b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+, -./:;<=>?@[\\]^_`{|}~ ".contains(&ch))
+        .take_while(|&&ch| b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+, -./:;<=>?@[\\]^_`{|}~ \r\n".contains(&ch))
         .count();
 
     if rva + ascii_len as u64 >= buffer_len {
@@ -1160,7 +1322,7 @@ pub fn detect_unicode_len(report: &DisassemblyReport, offset: &u64) -> Result<us
     let mut rva = offset - report.base_addr;
     let mut ch = report.buffer[rva as usize];
     let mut second_char = report.buffer[rva as usize + 1];
-    while ch < 127 && b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+, -./:;<=>?@[\\]^_`{|}~ ".contains(&ch) && second_char == 0{
+    while ch < 127 && b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+, -./:;<=>?@[\\]^_`{|}~ \r\n".contains(&ch) && second_char == 0{
         unicode_len += 2;
         rva += 2;
         ch = report.buffer[rva as usize];

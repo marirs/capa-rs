@@ -100,4 +100,6 @@ pub enum Error {
     NoiImplementedError,
     #[error("Buffer overflow error")]
     BufferOverflowError,
+    #[error("Match rule not found: {0}")]
+    MatchRuleNotFound(String),
 }

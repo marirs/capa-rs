@@ -156,12 +156,12 @@ impl Feature {
                 &value.get_bytes()?,
                 description,
             )?)),
-            crate::rules::RuleFeatureType::Number(s) => Ok(Feature::Number(NumberFeature::new(
+            RuleFeatureType::Number(s) => Ok(Feature::Number(NumberFeature::new(
                 s,
                 &value.get_int()?,
                 description,
             )?)),
-            crate::rules::RuleFeatureType::Offset(s) => Ok(Feature::Offset(OffsetFeature::new(
+            RuleFeatureType::Offset(s) => Ok(Feature::Offset(OffsetFeature::new(
                 s,
                 &value.get_int()?,
                 description,
@@ -171,7 +171,7 @@ impl Feature {
                 description,
             )?)),
             RuleFeatureType::BasicBlock => Ok(Feature::BasicBlock(BasicBlockFeature::new()?)),
-            crate::rules::RuleFeatureType::Characteristic => Ok(Feature::Characteristic(
+            RuleFeatureType::Characteristic => Ok(Feature::Characteristic(
                 CharacteristicFeature::new(&value.get_str()?, description)?,
             )),
             RuleFeatureType::Export => Ok(Feature::Export(ExportFeature::new(
@@ -587,8 +587,8 @@ impl MnemonicFeature {
     }
 }
 
-impl std::hash::Hash for MnemonicFeature {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl Hash for MnemonicFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         "mnemonic_feature".hash(state);
         self.value.hash(state);
     }
@@ -634,8 +634,8 @@ impl OffsetFeature {
     }
 }
 
-impl std::hash::Hash for OffsetFeature {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl Hash for OffsetFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         "offset_feature".hash(state);
         self.value.hash(state);
     }
@@ -684,8 +684,8 @@ impl OperandOffsetFeature {
     }
 }
 
-impl std::hash::Hash for OperandOffsetFeature {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl Hash for OperandOffsetFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         "operand_offset_feature".hash(state);
         self.index.hash(state);
         self.value.hash(state);
@@ -739,8 +739,8 @@ impl NumberFeature {
     }
 }
 
-impl std::hash::Hash for NumberFeature {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl Hash for NumberFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         "number_feature".hash(state);
         self.value.hash(state);
     }
@@ -789,8 +789,8 @@ impl OperandNumberFeature {
     }
 }
 
-impl std::hash::Hash for OperandNumberFeature {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl Hash for OperandNumberFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         "operand_number_feature".hash(state);
         self.index.hash(state);
         self.value.hash(state);
@@ -1203,7 +1203,7 @@ impl RegexFeature {
         let rr = match fancy_regex::Regex::new(&rre) {
             Ok(s) => s,
             Err(e) => {
-                // println!("{:?}", e);
+                println!("{:?}", e);
                 return Err(Error::FancyRegexError(Box::new(e)));
             }
         };
@@ -1246,8 +1246,8 @@ impl RegexFeature {
     }
 }
 
-impl std::hash::Hash for RegexFeature {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl Hash for RegexFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         "regex_feature".hash(state);
         self.value.hash(state);
     }
@@ -1336,8 +1336,8 @@ impl BytesFeature {
     }
 }
 
-impl std::hash::Hash for BytesFeature {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl Hash for BytesFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         "bytes_feature".hash(state);
         self.value.hash(state);
     }
@@ -1390,8 +1390,8 @@ impl ArchFeature {
     }
 }
 
-impl std::hash::Hash for ArchFeature {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl Hash for ArchFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         "arch_feature".hash(state);
         self.value.to_lowercase().hash(state);
     }
@@ -1440,8 +1440,8 @@ impl NamespaceFeature {
     }
 }
 
-impl std::hash::Hash for NamespaceFeature {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl Hash for NamespaceFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         "namespace_feature".hash(state);
         self.value.to_lowercase().hash(state);
     }
@@ -1490,8 +1490,8 @@ impl ClassFeature {
     }
 }
 
-impl std::hash::Hash for ClassFeature {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl Hash for ClassFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         "class_feature".hash(state);
         self.value.to_lowercase().hash(state);
     }
@@ -1544,8 +1544,8 @@ impl OsFeature {
     }
 }
 
-impl std::hash::Hash for OsFeature {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl Hash for OsFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         "os_feature".hash(state);
         self.value.to_lowercase().hash(state);
     }
@@ -1598,8 +1598,8 @@ impl FormatFeature {
     }
 }
 
-impl std::hash::Hash for FormatFeature {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl Hash for FormatFeature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         "format_feature".hash(state);
         self.value.to_lowercase().hash(state);
     }

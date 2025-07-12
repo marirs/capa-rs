@@ -202,7 +202,10 @@ impl FileCapabilities {
         let (format, buffer) = get_format(&f)?;
         let extractor = get_file_extractors(&f, format, &buffer, high_accuracy, resolve_tailcalls)?;
         let rules_thread_handle = spawn(move || rules::RuleSet::new(&r));
-        let rules = rules_thread_handle.join().unwrap()?;
+        let rules = match rules_thread_handle.join() {
+            Ok(Ok(rules)) => rules,
+            Ok(Err(_)) | Err(_) => return Err(Error::DescriptionEvaluationError),
+        };
 
         // Fetch security checks
         let mut security_opts = security_checks_opts.unwrap_or_default();
@@ -655,15 +658,7 @@ fn find_file_capabilities<'a>(
             .extend(addresses.iter().cloned());
     }
 
-    let mut matches: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
-    for rule_set in [&ruleset.file_rules, &ruleset.function_rules].iter() {
-        for (rule, matched) in match_fn(rule_set, &file_features, &0, logger)?.1 {
-            matches
-                .entry(rule)
-                .or_default()
-                .extend(matched.iter().cloned());
-        }
-    }
+    let (_, matches) = match_fn(&ruleset.file_rules, &file_features, &0x0, logger)?;
 
     if features_dump {
         map_features.extend(file_features.clone());

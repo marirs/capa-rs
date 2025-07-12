@@ -19,6 +19,46 @@ fn translate_com_features(_name: &str, _com_type: &ComType) -> Vec<StatementElem
     vec![]
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandType {
+    And,
+    Or,
+    Not,
+    Optional,
+    Process,
+    Thread,
+    Call,
+    Function,
+    BasicBlock,
+    Instruction,
+    Description,
+    CountOrMore,
+    Count,
+    Feature,
+    ComType,
+}
+
+impl CommandType {
+    pub fn from_str(s: &str) -> Result<Self> {
+        match s {
+            "and" => Ok(CommandType::And),
+            "or" => Ok(CommandType::Or),
+            "not" => Ok(CommandType::Not),
+            "optional" => Ok(CommandType::Optional),
+            "process" => Ok(CommandType::Process),
+            "thread" => Ok(CommandType::Thread),
+            "call" => Ok(CommandType::Call),
+            "function" => Ok(CommandType::Function),
+            "basic block" => Ok(CommandType::BasicBlock),
+            "instruction" => Ok(CommandType::Instruction),
+            "description" => Ok(CommandType::Description),
+            s if s.ends_with(" or more") => Ok(CommandType::CountOrMore),
+            s if s.starts_with("count(") && s.ends_with(')') => Ok(CommandType::Count),
+            s if s.starts_with("com/") => Ok(CommandType::ComType),
+            _ => Ok(CommandType::Feature),
+        }
+    }
+}
 #[derive(Debug)]
 pub enum Value {
     Str(String),
@@ -313,8 +353,8 @@ impl Rule {
             }
             _ => {
                 let v; // = "";
-                       //other features can have inline descriptions, like `number: 10 = CONST_FOO`.
-                       //in this case, the RHS will be like `10 = CONST_FOO` or some other string
+                //other features can have inline descriptions, like `number: 10 = CONST_FOO`.
+                //in this case, the RHS will be like `10 = CONST_FOO` or some other string
                 if s.contains(" = ") {
                     if description.is_some() {
                         // there is already a description passed in as a sub node, like:
@@ -429,363 +469,266 @@ impl Rule {
         })
     }
 
+    pub fn extract_elements_and_description(
+        vals: &[Yaml],
+        scopes: &Scopes,
+    ) -> Result<(Vec<StatementElement>, String)> {
+        let mut description = String::new();
+
+        let params = vals.iter()
+            .map(|vv| Rule::build_statements(vv, scopes))
+            .filter_map(|result| match result {
+                Ok(StatementElement::Description(s)) => {
+                    description = s.value.clone();
+                    None
+                },
+                Ok(elem) => Some(Ok(elem)),
+                Err(e) => Some(Err(e))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok((params, description))
+    }
+
+    fn wrap_and_subscope(
+        scope: Scope,
+        params: Vec<StatementElement>,
+        description: &str,
+    ) -> Result<StatementElement> {
+        Ok(StatementElement::Statement(Box::new(Statement::Subscope(
+            SubscopeStatement::new(
+                scope,
+                StatementElement::Statement(Box::new(Statement::And(
+                    AndStatement::new(params, description)?,
+                ))),
+                description,
+            )?,
+        ))))
+    }
+
     pub fn build_statements(dd: &Yaml, scopes: &Scopes) -> Result<StatementElement> {
         let d = dd
             .as_hash()
             .ok_or_else(|| Error::InvalidRule(line!(), "statement need to be hash".to_string()))?;
 
         if let Some((key, vval)) = d.into_iter().next() {
-            match key
+            let key_str = key
                 .as_str()
-                .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", key)))?
-            {
-                "description" => {
+                .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", key)))?;
+
+            let command_type = CommandType::from_str(key_str)?;
+
+            match command_type {
+                CommandType::Description => {
                     let val = vval
                         .as_str()
                         .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                     return Ok(StatementElement::Description(Box::new(Description::new(
                         val,
                     )?)));
-                }
-                "and" => {
-                    let mut params = vec![];
-                    let mut description = "".to_string();
+                },
+                CommandType::And => {
                     let val = vval
                         .as_vec()
                         .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-                    for vv in val {
-                        let p = Rule::build_statements(vv, scopes)?;
-                        match p {
-                            StatementElement::Description(s) => description = s.value,
-                            _ => params.push(p),
-                        }
-                    }
+                    let (params, description) = Rule::extract_elements_and_description(val, scopes)?;
                     return Ok(StatementElement::Statement(Box::new(Statement::And(
                         AndStatement::new(params, &description)?,
                     ))));
-                }
-                "or" => {
-                    let mut params = vec![];
-                    let mut description = "".to_string();
+                },
+                CommandType::Or => {
                     let val = vval
                         .as_vec()
                         .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-                    for vv in val {
-                        let p = Rule::build_statements(vv, scopes)?;
-                        match p {
-                            StatementElement::Description(s) => description = s.value,
-                            _ => params.push(p),
-                        }
-                    }
+                    let (params, description) = Rule::extract_elements_and_description(val, scopes)?;
                     return Ok(StatementElement::Statement(Box::new(Statement::Or(
                         OrStatement::new(params, &description)?,
                     ))));
-                }
-                "not" => {
-                    let mut params = vec![];
-                    let mut description = "".to_string();
+                },
+                CommandType::Not => {
                     let val = vval
                         .as_vec()
                         .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-                    for vv in val {
-                        let p = Rule::build_statements(vv, scopes)?;
-                        match p {
-                            StatementElement::Description(s) => description = s.value,
-                            _ => params.push(p),
-                        }
-                    }
+                    let (params, description) = Rule::extract_elements_and_description(val, scopes)?;
                     return Ok(StatementElement::Statement(Box::new(Statement::Not(
                         NotStatement::new(params[0].clone(), &description)?,
                     ))));
-                }
-                "optional" => {
-                    let mut params = vec![];
-                    let mut description = "".to_string();
+                },
+                CommandType::Optional => {
                     let val = vval
                         .as_vec()
                         .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-                    for vv in val {
-                        let p = Rule::build_statements(vv, scopes)?;
-                        match p {
-                            StatementElement::Description(s) => description = s.value,
-                            _ => params.push(p),
-                        }
-                    }
+                    let (params, description) = Rule::extract_elements_and_description(val, scopes)?;
                     return Ok(StatementElement::Statement(Box::new(Statement::Some(
                         SomeStatement::new(0, params, &description)?,
                     ))));
-                }
-                "process" => {
+                },
+                CommandType::Process => {
                     if [Scope::File].contains(&scopes.r#static.scope)
                         || [Scope::File].contains(&scopes.dynamic.scope)
                     {
-                        let mut params = vec![];
-                        let mut description = "".to_string();
                         let val = vval
                             .as_vec()
                             .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-                        for vv in val {
-                            let p = Rule::build_statements(
-                                vv,
-                                &Scopes {
-                                    r#static: StaticScope {
-                                        scope: Scope::Process,
-                                    },
-                                    dynamic: DynamicScope { scope: Scope::None },
-                                },
-                            )?;
-                            match p {
-                                StatementElement::Description(s) => description = s.value,
-                                _ => params.push(p),
-                            }
-                        }
+
+                        let process_scope = Scopes {
+                            r#static: StaticScope { scope: Scope::Process },
+                            dynamic: DynamicScope { scope: Scope::None },
+                        };
+
+                        let (params, description) =
+                            Rule::extract_elements_and_description(val, &process_scope)?;
+
                         if params.len() != 1 {
                             return Err(Error::InvalidRule(
                                 line!(),
-                                format!("{:?}: {:?}", key, vval),
+                                format!("process must have exactly one condition: {:?}", vval),
                             ));
                         }
-                        return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
-                            SubscopeStatement::new(
-                                Scope::Process,
-                                params[0].clone(),
-                                &description,
-                            )?,
-                        ))));
+
+                        return Rule::wrap_and_subscope(Scope::Process, params, &description);
                     }
+
                     return Err(Error::InvalidRule(
                         line!(),
                         format!("{:?}: {:?}", key, vval),
                     ));
-                }
-                "thread" => {
+                },
+                CommandType::Thread => {
                     if [Scope::File, Scope::Process].contains(&scopes.r#static.scope)
                         || [Scope::File, Scope::Process].contains(&scopes.dynamic.scope)
                     {
-                        let mut params = vec![];
-                        let mut description = "".to_string();
+                        let thread_scope = Scopes {
+                            r#static: StaticScope { scope: Scope::Thread },
+                            dynamic: DynamicScope { scope: Scope::None },
+                        };
+
                         let val = vval
                             .as_vec()
                             .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-                        for vv in val {
-                            let p = Rule::build_statements(
-                                vv,
-                                &Scopes {
-                                    r#static: StaticScope {
-                                        scope: Scope::Thread,
-                                    },
-                                    dynamic: DynamicScope { scope: Scope::None },
-                                },
-                            )?;
-                            match p {
-                                StatementElement::Description(s) => description = s.value,
-                                _ => params.push(p),
-                            }
-                        }
+
+                        let (params, description) = Rule::extract_elements_and_description(val, &thread_scope)?;
+
                         if params.len() != 1 {
                             return Err(Error::InvalidRule(
                                 line!(),
-                                format!("{:?}: {:?}", key, vval),
+                                format!("process must have exactly one condition: {:?}", vval),
                             ));
                         }
-                        return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
-                            SubscopeStatement::new(Scope::Thread, params[0].clone(), &description)?,
-                        ))));
+                        return Rule::wrap_and_subscope(Scope::Thread, params, &description);
                     }
+
                     return Err(Error::InvalidRule(
                         line!(),
                         format!("{:?}: {:?}", key, vval),
                     ));
-                }
-                "call" => {
-                    let mut params = vec![];
-                    let mut description = "".to_string();
+                },
+                CommandType::Call => {
+                    let call_scope = Scopes {
+                        r#static: StaticScope { scope: Scope::Call },
+                        dynamic: DynamicScope { scope: Scope::SpanOfCalls },
+                    };
 
-                    match vval {
-                        Yaml::Array(arr) => {
-                            for vv in arr {
-                                let p = Rule::build_statements(
-                                    vv,
-                                    &Scopes {
-                                        r#static: StaticScope { scope: Scope::Call },
-                                        dynamic: DynamicScope { scope: Scope::SpanOfCalls },
-                                    },
-                                )?;
-                                match p {
-                                    StatementElement::Description(s) => description = s.value,
-                                    _ => params.push(p),
-                                }
-                            }
+                    let val_list = match vval {
+                        Yaml::Array(arr) => arr.as_slice(),
+                        Yaml::Hash(_) => std::slice::from_ref(vval),
+                        _ => {
+                            return Err(Error::InvalidRule(
+                                line!(),
+                                format!("call expects array or hash: {:?}", vval),
+                            ))
                         }
-                        Yaml::Hash(_) => {
-                            let p = Rule::build_statements(
-                                vval,
-                                &Scopes {
-                                    r#static: StaticScope { scope: Scope::Call },
-                                    dynamic: DynamicScope { scope: Scope::SpanOfCalls },
-                                },
-                            )?;
-                            params.push(p);
-                        }
-                        _ => return Err(Error::InvalidRule(line!(), format!("call expects array or hash: {:?}", vval))),
+                    };
+
+                    let (params, description) = Rule::extract_elements_and_description(val_list, &call_scope)?;
+
+                    if params.len() != 1 {
+                        return Err(Error::InvalidRule(
+                            line!(),
+                            format!("process must have exactly one condition: {:?}", vval),
+                        ));
                     }
 
-                    if params.is_empty() {
-                        return Err(Error::InvalidRule(line!(), format!("call must have at least one condition: {:?}", vval)));
-                    }
-
-                    return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
-                        SubscopeStatement::new(
-                            Scope::Call,
-                            StatementElement::Statement(Box::new(Statement::And(AndStatement::new(params, &description)?))),
-                            &description
-                        )?,
-                    ))));
-                }
-
-                "function" => {
+                    return Rule::wrap_and_subscope(Scope::Call, params, &description);
+                },
+                CommandType::Function => {
                     if Scope::File == scopes.r#static.scope || Scope::File == scopes.dynamic.scope {
-                        let mut params = vec![];
-                        let mut description = "".to_string();
+                        let function_scope = Scopes {
+                            r#static: StaticScope { scope: Scope::Function },
+                            dynamic: DynamicScope { scope: Scope::None },
+                        };
+
                         let val = vval
                             .as_vec()
                             .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-                        for vv in val {
-                            let p = Rule::build_statements(
-                                vv,
-                                &Scopes {
-                                    r#static: StaticScope {
-                                        scope: Scope::Function,
-                                    },
-                                    dynamic: DynamicScope { scope: Scope::None },
-                                },
-                            )?;
-                            match p {
-                                StatementElement::Description(s) => description = s.value,
-                                _ => params.push(p),
-                            }
-                        }
+
+                        let (params, description) = Rule::extract_elements_and_description(val, &function_scope)?;
+
                         if params.len() != 1 {
-                            return Err(Error::InvalidRule(
-                                line!(),
-                                format!("{:?}: {:?}", key, vval),
-                            ));
+                            return Err(Error::InvalidRule(line!(), format!("{:?}: {:?}", key, vval)));
                         }
+
                         return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
-                            SubscopeStatement::new(
-                                Scope::Function,
-                                params[0].clone(),
-                                &description,
-                            )?,
+                            SubscopeStatement::new(Scope::Function, params[0].clone(), &description)?,
                         ))));
                     }
-                    return Err(Error::InvalidRule(
-                        line!(),
-                        format!("{:?}: {:?}", key, vval),
-                    ));
-                }
-                "basic block" => {
+
+                    return Err(Error::InvalidRule(line!(), format!("{:?}: {:?}", key, vval)));
+                },
+                CommandType::BasicBlock => {
                     if [Scope::Function, Scope::BasicBlock].contains(&scopes.r#static.scope)
                         || [Scope::Function, Scope::BasicBlock].contains(&scopes.dynamic.scope)
                     {
-                        let mut params = vec![];
-                        let mut description = "".to_string();
+                        let bb_scope = Scopes {
+                            r#static: StaticScope { scope: Scope::BasicBlock },
+                            dynamic: DynamicScope { scope: Scope::None },
+                        };
 
-                        match vval {
-                            Yaml::Array(arr) => {
-                                for vv in arr {
-                                    let p = Rule::build_statements(
-                                        vv,
-                                        &Scopes {
-                                            r#static: StaticScope { scope: Scope::BasicBlock },
-                                            dynamic: DynamicScope { scope: Scope::None },
-                                        },
-                                    )?;
-                                    match p {
-                                        StatementElement::Description(s) => description = s.value,
-                                        _ => params.push(p),
-                                    }
-                                }
+                        let val_list = match vval {
+                            Yaml::Array(arr) => arr.as_slice(),
+                            Yaml::Hash(_) => std::slice::from_ref(vval),
+                            _ => {
+                                return Err(Error::InvalidRule(
+                                    line!(),
+                                    format!("basic block expects array or hash: {:?}", vval),
+                                ))
                             }
-                            Yaml::Hash(_) => {
-                                let p = Rule::build_statements(
-                                    vval,
-                                    &Scopes {
-                                        r#static: StaticScope { scope: Scope::BasicBlock },
-                                        dynamic: DynamicScope { scope: Scope::None },
-                                    },
-                                )?;
-                                params.push(p);
-                            }
-                            _ => return Err(Error::InvalidRule(line!(), format!("basic block expects array or hash: {:?}", vval))),
-                        }
+                        };
+
+                        let (params, description) = Rule::extract_elements_and_description(val_list, &bb_scope)?;
 
                         if params.is_empty() {
                             return Err(Error::InvalidRule(line!(), format!("basic block must have at least one condition: {:?}", vval)));
                         }
 
-                        return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
-                            SubscopeStatement::new(
-                                Scope::BasicBlock,
-                                StatementElement::Statement(Box::new(Statement::And(AndStatement::new(params, &description)?))),
-                                &description
-                            )?,
-                        ))));
+                        return Rule::wrap_and_subscope(Scope::BasicBlock, params, &description);
                     }
-                    return Err(Error::InvalidRule(
-                        line!(),
-                        format!("{:?}: {:?}", key, vval),
-                    ));
-                }
-                "instruction" => {
+
+                    return Err(Error::InvalidRule(line!(), format!("{:?}: {:?}", key, vval)));
+                },
+                CommandType::Instruction => {
                     if [Scope::BasicBlock, Scope::Function].contains(&scopes.r#static.scope)
                         || [Scope::BasicBlock, Scope::Function].contains(&scopes.dynamic.scope)
                     {
-                        let mut params = vec![];
-                        let mut description = "".to_string();
+                        let instruction_scope = Scopes {
+                            r#static: StaticScope { scope: Scope::Instruction },
+                            dynamic: DynamicScope { scope: Scope::None },
+                        };
+
                         let val = vval
                             .as_vec()
                             .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-                        for vv in val {
-                            let p = Rule::build_statements(vv, scopes)?;
-                            match p {
-                                StatementElement::Description(s) => description = s.value,
-                                _ => params.push(p),
-                            }
-                        }
 
-                        // Special case: if there's only one parameter, create subscope with just that parameter
-                        if params.len() == 1 {
-                            return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
-                                SubscopeStatement::new(
-                                    Scope::Instruction,
-                                    params[0].clone(),
-                                    &description,
-                                )?,
-                            ))));
-                        }
+                        let (params, description) = Rule::extract_elements_and_description(val, &instruction_scope)?;
 
-                        // For multiple parameters, combine them with AND logic first
-                        let params_and = StatementElement::Statement(Box::new(Statement::And(
-                            AndStatement::new(params, &description)?,
-                        )));
-
-                        // Wrap the AND statement in an instruction subscope
-                        return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
-                            SubscopeStatement::new(
-                                Scope::Instruction,
-                                params_and,
-                                &description,
-                            )?,
-                        ))));
+                        return Rule::wrap_and_subscope(Scope::Instruction, params, &description);
                     }
 
-                    // Return error if scope is invalid for instruction statements
                     return Err(Error::InvalidRule(
                         line!(),
                         format!("{:?},  {:?}: {:?}", scopes, key, vval),
                     ));
-                }
+                },
                 _ => {
                     let kkey = key.as_str().ok_or_else(|| {
                         Error::InvalidRule(line!(), format!("{:?} must be string", key))
@@ -1019,6 +962,7 @@ pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
     Ok(rules)
 }
 
+
 #[derive(Debug)]
 pub struct RuleSet {
     pub rules: Vec<Rule>,
@@ -1040,6 +984,10 @@ impl RuleSet {
             file_rules: file_rules.iter().map(|r| (*r).clone()).collect(),
         })
     }
+}
+
+pub fn get_instruction_rules(rules: &[Rule]) -> Result<Vec<&Rule>> {
+    get_rules_for_scope(rules, &Scope::Instruction)
 }
 
 pub fn get_basic_block_rules(rules: &[Rule]) -> Result<Vec<&Rule>> {
@@ -1092,7 +1040,18 @@ pub fn get_rules_and_dependencies<'a>(rules: &'a [Rule], rule_name: &str) -> Res
     ) -> Result<()> {
         want.push(rule.name.clone());
         for dep in rule.get_dependencies(namespaces)? {
-            rec(want, rules_by_name[&dep], rules_by_name, namespaces)?;
+            match rules_by_name.get(&dep) {
+                Some(dep_rule) => {
+                    rec(want, dep_rule, rules_by_name, namespaces)?;
+                }
+                None => {
+                    eprintln!("Rule not found: {}", dep);
+                    return Err(Error::MatchRuleNotFound(format!(
+                        "Rule '{}' not found in the rules set",
+                        dep
+                    )));
+                }
+            }
         }
         Ok(())
     }
@@ -1103,11 +1062,13 @@ pub fn get_rules_and_dependencies<'a>(rules: &'a [Rule], rule_name: &str) -> Res
         &rules_by_name,
         &namespaces,
     )?;
+
     for (_, rule) in rules_by_name {
         if wanted.contains(&rule.name) {
             res.push(rule)
         }
     }
+
     Ok(res)
 }
 
@@ -1121,88 +1082,45 @@ pub fn get_rules_with_scope<'a>(rules: Vec<&'a Rule>, scope: &Scope) -> Result<V
     Ok(res)
 }
 
+fn generate_namespace_paths(namespace: &str) -> Vec<String> {
+    namespace.split('/')
+        .scan(String::new(), |state, part| {
+            if !state.is_empty() {
+                state.push('/');
+            }
+            state.push_str(part);
+            Some(state.clone())
+        })
+        .collect()
+}
+
 pub fn index_rules_by_namespace(rules: &[Rule]) -> Result<HashMap<String, Vec<&Rule>>> {
     let mut namespaces: HashMap<String, Vec<&Rule>> = HashMap::new();
+
     for rule in rules {
-        if rule
-            .meta
-            .contains_key(&yaml_rust::Yaml::String("namespace".to_string()))
-        {
-            match &rule.meta[&yaml_rust::Yaml::String("namespace".to_string())] {
-                yaml_rust::Yaml::String(namespace) => {
-                    let mut ns = Some(namespace.clone());
-                    while let Some(nss) = ns {
-                        match namespaces.get_mut(&nss) {
-                            Some(n) => {
-                                n.push(rule);
-                            }
-                            _ => {
-                                namespaces.insert(nss.clone(), vec![rule]);
-                            }
-                        }
-                        let parts: Vec<&str> = nss.split('/').collect();
-                        if parts.len() == 1 {
-                            ns = None;
-                        } else {
-                            let mut nsss = "".to_string();
-                            for item in parts.iter().take(parts.len() - 1) {
-                                nsss += "/";
-                                nsss += item;
-                            }
-                            ns = Some(nsss[1..].to_string());
-                        }
-                    }
-                }
-                _ => {
-                    continue;
-                }
+        if let Some(Yaml::String(namespace)) = rule.meta.get(&Yaml::String("namespace".to_string())) {
+            for path in generate_namespace_paths(namespace) {
+                namespaces.entry(path).or_insert_with(Vec::new).push(rule);
             }
         }
     }
+
     Ok(namespaces)
 }
 
 pub fn index_rules_by_namespace2<'a>(rules: &[&'a Rule]) -> Result<HashMap<String, Vec<&'a Rule>>> {
-    let mut namespaces: HashMap<String, Vec<&Rule>> = HashMap::new();
-    for rule in rules {
-        if rule
-            .meta
-            .contains_key(&yaml_rust::Yaml::String("namespace".to_string()))
-        {
-            match &rule.meta[&yaml_rust::Yaml::String("namespace".to_string())] {
-                yaml_rust::Yaml::String(namespace) => {
-                    let mut ns = Some(namespace.clone());
-                    while let Some(nss) = ns {
-                        match namespaces.get_mut(&nss) {
-                            Some(n) => {
-                                n.push(rule);
-                            }
-                            _ => {
-                                namespaces.insert(nss.clone(), vec![rule]);
-                            }
-                        }
-                        let parts: Vec<&str> = nss.split('/').collect();
-                        if parts.len() == 1 {
-                            ns = None;
-                        } else {
-                            let mut nsss = "".to_string();
-                            for item in parts.iter().take(parts.len() - 1) {
-                                nsss += "/";
-                                nsss += item;
-                            }
-                            ns = Some(nsss[1..].to_string());
-                        }
-                    }
-                }
-                _ => {
-                    continue;
-                }
+    let mut namespaces: HashMap<String, Vec<&'a Rule>> = HashMap::new();
+
+    for &rule in rules {
+        if let Some(Yaml::String(namespace)) = rule.meta.get(&Yaml::String("namespace".to_string())) {
+            for path in generate_namespace_paths(namespace) {
+                namespaces.entry(path).or_insert_with(Vec::new).push(rule);
             }
         }
     }
+
     Ok(namespaces)
 }
-
 pub fn topologically_order_rules(rules: Vec<&Rule>) -> Result<Vec<&Rule>> {
     //# we evaluate `rules` multiple times, so if its a generator, realize it into a list.
     let namespaces = index_rules_by_namespace2(&rules)?;
