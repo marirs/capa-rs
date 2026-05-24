@@ -19,13 +19,13 @@ petgraph = "0.7.1"
 regex = "1.11.1"
 fancy-regex = "0.18"
 serde = { version = "1", features = ["derive"] }
-smda = { git = "https://github.com/marirs/smda-rs.git" }
+smda = "0.2"
 thiserror = "2.0.12"
 walkdir = "2.5.0"
 yaml-rust = "0.4.5"
 goblin = { version = "0.10.0", features = ["alloc"] }
 maplit = "1.0.2"
-dnfile = { git = "https://github.com/marirs/dnfile-rs.git", branch = "master" }
+dnfile = "0.2"
 lazy_static = "1.5.0"
 parking_lot = "0.12.3"
 serde_json = "1.0.140"
