@@ -1231,7 +1231,7 @@ impl RegexFeature {
         let mut ll = vec![];
         for (feature, locations) in features {
             if let Feature::String(s) = feature {
-                if let Ok(Some(_)) = self.re.find(s.value.as_bytes()) {
+                if let Ok(Some(_)) = self.re.find(&s.value) {
                     //                    eprintln!("true {}\t{}", self.re.as_str(), s.value);
                     ll.extend(locations);
                 } else {
