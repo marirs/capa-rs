@@ -18,7 +18,14 @@ pub trait Function {
 }
 
 pub trait Extractor {
+    // 0.4.0: `get_base_address` and `format` are only consumed by the
+    // properties-feature-gated `FileCapabilities::new`. With
+    // `--no-default-features` they'd warn as unused trait methods —
+    // they're still part of the trait contract so downstream impls
+    // need them, but cargo's reachability analysis can't see that.
+    #[allow(dead_code)]
     fn get_base_address(&self) -> Result<u64>;
+    #[allow(dead_code)]
     fn format(&self) -> FileFormat;
     fn bitness(&self) -> u32;
     fn extract_global_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>>;

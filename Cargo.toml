@@ -1,6 +1,6 @@
 [package]
 name = "capa"
-version = "0.3.21"
+version = "0.4.0"
 description = "File capability extractor."
 authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>", "Jorge Alejandro Durán Royo<jorge.duran.royo@gmail.com>"]
 keywords = ["capa", "fce", "capability", "aslr", "reverse"]
@@ -46,12 +46,11 @@ memmap2 = "0.9.5"
 scroll = "0.13"
 once_cell = "1.21.1"
 dynamic-loader-cache = "0.2.2"
-# 0.3.21: ouroboros lets `Extractor` own both `buf: Vec<u8>` and a
-# `DisassemblyReport<'_>` borrowing from it. Keeps the existing
-# `Extractor::new(path, …)` public API working without exposing
-# smda's `'a` lifetime to capa-rs callers. The full zero-copy refactor
-# (caller owns the buffer) is deferred to 0.4.0.
-ouroboros = "0.18"
+# 0.3.21 introduced ouroboros as a self-referential wrapper around
+# `buf: Vec<u8>` + `DisassemblyReport<'_>` so the public Extractor::new
+# could keep its 0.3.20 signature. 0.4.0 completes the zero-copy
+# refactor — `Extractor<'a>` takes `&'a [u8]` from the caller and
+# borrows the smda/dnfile reports directly. The ouroboros dep is gone.
 # 0.3.21: iced-x86 is already in the transitive dep tree via smda.
 # Pulling it in directly lets the smda extractor compare instructions
 # against typed `Mnemonic` / `FlowControl` enums instead of re-formatting

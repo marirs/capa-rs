@@ -28,7 +28,12 @@ use serde_json::{Value, json};
 use smda::FileArchitecture;
 use yaml_rust::Yaml;
 
-use consts::{FileFormat, Os};
+use consts::FileFormat;
+// 0.4.0: `Os` is referenced only by the properties-gated
+// `FileCapabilities::get_os` — gating the import avoids the
+// `--no-default-features` unused-import warning.
+#[cfg(feature = "properties")]
+use consts::Os;
 use sede::{from_hex, to_hex};
 
 pub use crate::error::Error;
@@ -191,38 +196,146 @@ impl Default for BinarySecurityCheckOptions {
     }
 }
 
-impl FileCapabilities {
-    pub fn from_file(
-        file_name: &str,
-        rule_path: &str,
-        high_accuracy: bool,
-        resolve_tailcalls: bool,
-        logger: &dyn Fn(&str),
-        features_dump: bool,
-        security_checks_opts: Option<BinarySecurityCheckOptions>,
-    ) -> Result<Self> {
-        //! Loads a binary from a given file for capability analysis using the default binary security check options:
-        //! ## Example
-        //! ```rust
-        //! use capa::FileCapabilities;
-        //!
-        //! let rules_path = "./rules";
-        //! let file_to_analyse = "./demo.exe";
-        //! let result = FileCapabilities::from_file(file_to_analyse, rules_path, true, true, &|_s| {}, false, Some(Default::default()));
-        //! println!("{:?}", result);
-        //! ```
-        let f = file_name.to_string();
-        let r = rule_path.to_string();
+/// 0.4.0: default no-op logger used when [`AnalyzeBuilder::logger`]
+/// is not called. Defined as a free fn (not a closure) so its
+/// reference has `'static` lifetime — that lets `AnalyzeBuilder`
+/// hold a `&'static dyn Fn(&str)` by default without forcing
+/// callers to provide one.
+fn noop_logger(_: &str) {}
+
+/// 0.4.0: chained builder for [`FileCapabilities`] analysis. The
+/// 0.3.x positional `from_file` / `from_buffer` entry points are
+/// gone — `.rules(...)` is the only required setter; everything
+/// else has a sensible default.
+///
+/// ## File analysis
+/// ```ignore
+/// use capa::{BinarySecurityCheckOptions, FileCapabilities};
+///
+/// let fc = FileCapabilities::analyze()
+///     .rules("./capa-rules")
+///     .high_accuracy(true)
+///     .resolve_tailcalls(true)
+///     .security_checks(BinarySecurityCheckOptions::default())
+///     .from_file("Sample.exe")?;
+/// # Ok::<(), capa::Error>(())
+/// ```
+///
+/// ## Shellcode / raw buffer
+/// ```ignore
+/// use capa::FileCapabilities;
+///
+/// let shellcode = std::fs::read("payload.bin")?;
+/// let fc = FileCapabilities::analyze()
+///     .rules("./capa-rules")
+///     .high_accuracy(true)
+///     .from_buffer(&shellcode, 0x1000, 64)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub struct AnalyzeBuilder<'a> {
+    rules: Option<String>,
+    high_accuracy: bool,
+    resolve_tailcalls: bool,
+    logger: &'a dyn Fn(&str),
+    features_dump: bool,
+    security_checks: Option<BinarySecurityCheckOptions>,
+}
+
+impl<'a> Default for AnalyzeBuilder<'a> {
+    fn default() -> Self {
+        AnalyzeBuilder {
+            rules: None,
+            high_accuracy: false,
+            resolve_tailcalls: false,
+            // `&noop_logger` is `&'static dyn Fn(&str)`, coerces to
+            // the builder's `'a`.
+            logger: &noop_logger,
+            features_dump: false,
+            security_checks: None,
+        }
+    }
+}
+
+impl<'a> AnalyzeBuilder<'a> {
+    /// Construct a builder with all defaults. Equivalent to
+    /// [`FileCapabilities::analyze`].
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// **Required.** Path to a checked-out
+    /// [capa-rules](https://github.com/mandiant/capa-rules) directory.
+    /// Terminal methods return [`Error::BuilderMissingRules`] if this
+    /// was never called.
+    pub fn rules(mut self, path: impl Into<String>) -> Self {
+        self.rules = Some(path.into());
+        self
+    }
+
+    /// Default: `false`. Enables smda's slower but more thorough
+    /// function-candidate sweep. Matches smda's `SmdaConfig::high_accuracy`.
+    pub fn high_accuracy(mut self, on: bool) -> Self {
+        self.high_accuracy = on;
+        self
+    }
+
+    /// Default: `false`. Asks smda to resolve tail calls
+    /// (`jmp <function>`) as function boundaries.
+    pub fn resolve_tailcalls(mut self, on: bool) -> Self {
+        self.resolve_tailcalls = on;
+        self
+    }
+
+    /// Default: a no-op. Progress callback — capa-rs calls it with
+    /// short status strings during the analysis hot loop. Wire it to a
+    /// progress bar / log sink if you want visibility into long
+    /// analyses.
+    pub fn logger(mut self, logger: &'a dyn Fn(&str)) -> Self {
+        self.logger = logger;
+        self
+    }
+
+    /// Default: `false`. When `true`, the resulting `FileCapabilities`
+    /// has its `map_features` field populated — every feature that
+    /// matched a rule, by address. Disabled by default because it
+    /// roughly doubles peak memory.
+    pub fn features_dump(mut self, on: bool) -> Self {
+        self.features_dump = on;
+        self
+    }
+
+    /// Default: `None` — security checks are run with default options
+    /// for [`from_file`](Self::from_file) regardless. Override to point
+    /// at a specific libc / sysroot / spec.
+    /// Ignored by [`from_buffer`](Self::from_buffer): shellcode has no
+    /// PE/ELF headers for the security checklist to inspect.
+    pub fn security_checks(mut self, opts: BinarySecurityCheckOptions) -> Self {
+        self.security_checks = Some(opts);
+        self
+    }
+
+    /// Terminal — analyse a binary on disk. Routes through capa-rs's
+    /// magic-byte format detection (PE → dnfile-then-smda, ELF →
+    /// smda, Mach-O → smda) and runs the binary security checklist.
+    pub fn from_file(self, file_name: impl AsRef<str>) -> Result<FileCapabilities> {
+        let rule_path = self.rules.ok_or(Error::BuilderMissingRules)?;
+        let f = file_name.as_ref().to_string();
         let (format, buffer) = get_format(&f)?;
-        let extractor = get_file_extractors(&f, format, &buffer, high_accuracy, resolve_tailcalls)?;
-        let rules_thread_handle = spawn(move || rules::RuleSet::new(&r));
+        let extractor = get_file_extractors(
+            &f,
+            format,
+            &buffer,
+            self.high_accuracy,
+            self.resolve_tailcalls,
+        )?;
+        let rules_thread_handle = spawn(move || rules::RuleSet::new(&rule_path));
         let rules = match rules_thread_handle.join() {
             Ok(Ok(rules)) => rules,
             Ok(Err(_)) | Err(_) => return Err(Error::DescriptionEvaluationError),
         };
 
-        // Fetch security checks
-        let mut security_opts = security_checks_opts.unwrap_or_default();
+        // Security checks — defaults if caller didn't override.
+        let mut security_opts = self.security_checks.unwrap_or_default();
         security_opts.input_file = PathBuf::from(&f);
         let security_checks = security::get_security_checks(&f, &security_opts)?;
 
@@ -233,14 +346,16 @@ impl FileCapabilities {
         }
         #[cfg(feature = "properties")]
         {
-            file_capabilities = FileCapabilities::new(&extractor)?;
+            // PDB metadata is parsed from the raw buffer (returns
+            // None for non-PE / no-debug-dir inputs).
+            file_capabilities = FileCapabilities::new(&extractor, Some(&buffer))?;
         }
         #[cfg(not(feature = "verbose"))]
         {
             file_capabilities.security_checks = BTreeSet::from_iter(security_checks);
             let (capabilities, _counts, _map_features) =
-                find_capabilities(&rules, &extractor, logger, features_dump)?;
-            if features_dump {
+                find_capabilities(&rules, &extractor, self.logger, self.features_dump)?;
+            if self.features_dump {
                 file_capabilities.map_features = _map_features;
             }
             file_capabilities.update_capabilities(&capabilities)?;
@@ -249,8 +364,8 @@ impl FileCapabilities {
         {
             file_capabilities.security_checks = BTreeSet::from_iter(security_checks);
             let (capabilities, counts, _map_features) =
-                find_capabilities(&rules, &extractor, logger, features_dump)?;
-            if features_dump {
+                find_capabilities(&rules, &extractor, self.logger, self.features_dump)?;
+            if self.features_dump {
                 file_capabilities.map_features = _map_features;
             }
             file_capabilities.update_capabilities(&capabilities, &counts)?;
@@ -259,9 +374,102 @@ impl FileCapabilities {
         Ok(file_capabilities)
     }
 
-    fn new(
-        #[cfg(feature = "properties")] extractor: &Box<dyn extractor::Extractor>,
+    /// Terminal — analyse a raw byte buffer (shellcode, unpacked
+    /// module, memory dump). Bypasses magic-byte format detection,
+    /// dnfile, and the security-checks pipeline. `bitness` must be 32
+    /// or 64; `base_addr` is the VA the buffer is treated as mapped to
+    /// (pass `0` if the caller has no preference).
+    pub fn from_buffer(self, raw: &[u8], base_addr: u64, bitness: u32) -> Result<FileCapabilities> {
+        let rule_path = self.rules.ok_or(Error::BuilderMissingRules)?;
+        // Construct the extractor directly via smda's parse_buffer —
+        // get_file_extractors routes on PE/ELF/Mach-O magic, which
+        // a raw buffer doesn't have.
+        let extractor: Box<dyn extractor::Extractor + '_> =
+            Box::new(extractor::smda::Extractor::from_buffer(
+                raw,
+                base_addr,
+                bitness,
+                self.high_accuracy,
+                self.resolve_tailcalls,
+            )?);
+
+        let rules_thread_handle = spawn(move || rules::RuleSet::new(&rule_path));
+        let rules = match rules_thread_handle.join() {
+            Ok(Ok(rules)) => rules,
+            Ok(Err(_)) | Err(_) => return Err(Error::DescriptionEvaluationError),
+        };
+
+        let mut file_capabilities;
+        #[cfg(not(feature = "properties"))]
+        {
+            file_capabilities = FileCapabilities::new()?;
+        }
+        #[cfg(feature = "properties")]
+        {
+            // PDB extraction skipped (no PE header in raw shellcode).
+            file_capabilities = FileCapabilities::new(&extractor, None)?;
+        }
+
+        #[cfg(not(feature = "verbose"))]
+        {
+            let (capabilities, _counts, _map_features) =
+                find_capabilities(&rules, &extractor, self.logger, self.features_dump)?;
+            if self.features_dump {
+                file_capabilities.map_features = _map_features;
+            }
+            file_capabilities.update_capabilities(&capabilities)?;
+        }
+        #[cfg(feature = "verbose")]
+        {
+            let (capabilities, counts, _map_features) =
+                find_capabilities(&rules, &extractor, self.logger, self.features_dump)?;
+            if self.features_dump {
+                file_capabilities.map_features = _map_features;
+            }
+            file_capabilities.update_capabilities(&capabilities, &counts)?;
+        }
+
+        Ok(file_capabilities)
+    }
+}
+
+impl FileCapabilities {
+    /// 0.4.0: entry point to the [`AnalyzeBuilder`]. Replaces the
+    /// 0.3.x positional `from_file` / `from_buffer` constructors.
+    ///
+    /// ```ignore
+    /// use capa::FileCapabilities;
+    ///
+    /// let fc = FileCapabilities::analyze()
+    ///     .rules("./capa-rules")
+    ///     .high_accuracy(true)
+    ///     .from_file("Sample.exe")?;
+    /// # Ok::<(), capa::Error>(())
+    /// ```
+    pub fn analyze<'a>() -> AnalyzeBuilder<'a> {
+        AnalyzeBuilder::new()
+    }
+
+    fn new<'a>(
+        // 0.4.0: trait object now carries the buffer lifetime through.
+        // Implicit `+ 'static` bound was forcing the input buffer in
+        // `from_file` to outlive the function, which the compiler
+        // rejected. Explicit `'a` lets the borrow scope match.
+        #[cfg(feature = "properties")] extractor: &Box<dyn extractor::Extractor + 'a>,
+        // 0.4.0: optional input bytes for PDB / debug-directory parsing.
+        // `None` for `from_buffer` (shellcode has no PE header to
+        // parse a debug directory out of); `Some` for `from_file`.
+        // `smda::xmetadata::parse_pe` is internally a no-op on
+        // non-PE / no-debug-dir inputs, so passing the bytes
+        // unconditionally is safe even for ELF / Mach-O.
+        #[cfg(feature = "properties")] raw: Option<&[u8]>,
     ) -> Result<FileCapabilities> {
+        #[cfg(feature = "properties")]
+        let (pdb_guid, pdb_age, pdb_filename) = raw
+            .and_then(smda::xmetadata::parse_pe)
+            .map(|m| (m.pdb_guid, m.pdb_age, m.pdb_filename))
+            .unwrap_or_default();
+
         let ss = FileCapabilities {
             #[cfg(feature = "properties")]
             properties: Properties {
@@ -269,6 +477,9 @@ impl FileCapabilities {
                 arch: FileCapabilities::get_arch(extractor)?,
                 os: FileCapabilities::get_os(extractor)?,
                 base_address: extractor.get_base_address()? as usize,
+                pdb_guid,
+                pdb_age,
+                pdb_filename,
             },
             attacks: BTreeMap::new(),
             mbc: BTreeMap::new(),
@@ -454,11 +665,23 @@ impl FileCapabilities {
         serde_json::to_string(&fc_json)
     }
 
-    fn get_format(extractor: &Box<dyn extractor::Extractor>) -> Result<FileFormat> {
+    // 0.4.0: trait-object parameters carry an explicit `'_` (anonymous
+    // lifetime) — without it the compiler infers `+ 'static`, which
+    // forces the smda/dnfile report (and the underlying buffer) to
+    // outlive the call. The actual borrow scope is much narrower:
+    // these helpers don't hold onto `extractor` past the call boundary.
+    //
+    // 0.4.0: gated on `properties` — these are only called from
+    // `FileCapabilities::new`'s properties-feature-gated body.
+    // Without the gate, building `--no-default-features` produces
+    // dead-code warnings.
+    #[cfg(feature = "properties")]
+    fn get_format(extractor: &Box<dyn extractor::Extractor + '_>) -> Result<FileFormat> {
         Ok(extractor.format())
     }
 
-    fn get_arch(extractor: &Box<dyn extractor::Extractor>) -> Result<FileArchitecture> {
+    #[cfg(feature = "properties")]
+    fn get_arch(extractor: &Box<dyn extractor::Extractor + '_>) -> Result<FileArchitecture> {
         if extractor.bitness() == 32 {
             return Ok(FileArchitecture::I386);
         } else if extractor.bitness() == 64 {
@@ -467,7 +690,13 @@ impl FileCapabilities {
         Err(Error::UnsupportedArchError)
     }
 
-    fn get_os(extractor: &Box<dyn extractor::Extractor>) -> Result<Os> {
+    #[cfg(feature = "properties")]
+    fn get_os(extractor: &Box<dyn extractor::Extractor + '_>) -> Result<Os> {
+        // 0.4.0: Mach-O routes to LINUX as a placeholder — capa's Os
+        // enum doesn't yet model macOS / Darwin. The format-level
+        // `format: macho` rule filter still works; only the
+        // OS-tagged matches are affected, and most existing rules
+        // use format, not os, for platform discrimination.
         match extractor.format() {
             FileFormat::PE | FileFormat::DOTNET => Ok(Os::WINDOWS),
             _ => Ok(Os::LINUX),
@@ -475,9 +704,15 @@ impl FileCapabilities {
     }
 }
 
+// 0.4.0: extractor parameter explicitly carries `'_` (anonymous
+// lifetime). Without it the trait object would be inferred as
+// `+ 'static`, which would force the caller's input buffer in
+// `FileCapabilities::from_file` to outlive the function — and the
+// buffer is a local `Vec<u8>` that doesn't. The borrow scope is
+// the function body, which `'_` correctly captures.
 fn find_function_capabilities<'a>(
     ruleset: &'a rules::RuleSet,
-    extractor: &Box<dyn extractor::Extractor>,
+    extractor: &Box<dyn extractor::Extractor + '_>,
     f: &Box<dyn extractor::Function>,
     logger: &dyn Fn(&str),
     map_features: &mut HashMap<rules::features::Feature, Vec<u64>>,
@@ -560,9 +795,12 @@ fn aggregate_matches<'a, T: Clone>(
     }
 }
 
+// 0.4.0: extractor parameter explicitly carries `'_` to allow
+// non-`'static` trait objects — see `find_function_capabilities` for
+// the underlying reason.
 fn find_capabilities(
     ruleset: &rules::RuleSet,
-    extractor: &Box<dyn extractor::Extractor>,
+    extractor: &Box<dyn extractor::Extractor + '_>,
     logger: &dyn Fn(&str),
     features_dump: bool,
 ) -> Result<(
@@ -646,9 +884,12 @@ fn find_capabilities(
     Ok((matches, meta, map_features_string))
 }
 
+// 0.4.0: extractor parameter explicitly carries `'_` to allow
+// non-`'static` trait objects — see `find_function_capabilities` for
+// the underlying reason.
 fn find_file_capabilities<'a>(
     ruleset: &'a rules::RuleSet,
-    extractor: &Box<dyn extractor::Extractor>,
+    extractor: &Box<dyn extractor::Extractor + '_>,
     function_features: &HashMap<rules::features::Feature, Vec<u64>>,
     logger: &dyn Fn(&str),
     map_features: &mut HashMap<rules::features::Feature, Vec<u64>>,
@@ -712,6 +953,19 @@ pub struct Properties {
     pub os: Os,
     #[serde(serialize_with = "to_hex", deserialize_with = "from_hex")]
     pub base_address: usize,
+    // 0.4.0: PDB debug metadata surfaced from smda's xmetadata block.
+    // Populated only for PE inputs that carry a CodeView debug
+    // directory entry. `None` for ELF/Mach-O/shellcode, and for PEs
+    // built without /DEBUG. Serialized only when present so existing
+    // JSON consumers that don't know about these fields don't see
+    // surprise `null`s. Symbol-server lookups (Microsoft SymSrv,
+    // Mozilla, Chromium) key off `{pdb_filename, pdb_guid + pdb_age}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pdb_guid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pdb_age: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pdb_filename: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Attacks {
@@ -872,25 +1126,57 @@ fn index_rule_matches(
 
 fn get_format(f: &str) -> Result<(FileFormat, Vec<u8>)> {
     let buffer = std::fs::read(f)?;
+    // 0.4.0: Mach-O detection added. Magic bytes cover the four Mach-O
+    // flavours: 32-bit and 64-bit, both little-endian (Intel/ARM native)
+    // and big-endian (PowerPC / fat-arch byte-swapped). Fat (universal)
+    // binaries are not yet routed here — smda's Mach-O loader picks the
+    // matching slice itself when called via `from_file` on a fat binary.
     if buffer.starts_with(b"MZ") {
         Ok((FileFormat::PE, buffer))
     } else if buffer.starts_with(b"\x7fELF") {
         Ok((FileFormat::ELF, buffer))
+    } else if is_macho_magic(&buffer) {
+        Ok((FileFormat::Macho, buffer))
     } else {
         Err(Error::UnsupportedFormatError)
     }
 }
 
-fn get_file_extractors(
+/// 0.4.0: returns true if `buf` starts with any Mach-O magic — thin
+/// 32-bit (`feedface`), thin 64-bit (`feedfacf`), or the byte-swapped
+/// variants for the opposite endianness. Fat/universal magics
+/// (`cafebabe`, `bebafeca`) are intentionally excluded here — smda's
+/// Mach-O loader handles slice selection when given the fat file.
+fn is_macho_magic(buf: &[u8]) -> bool {
+    if buf.len() < 4 {
+        return false;
+    }
+    matches!(
+        &buf[..4],
+        b"\xfe\xed\xfa\xce"  // MH_MAGIC      (32-bit, host-endian)
+        | b"\xce\xfa\xed\xfe" // MH_CIGAM      (32-bit, swapped)
+        | b"\xfe\xed\xfa\xcf" // MH_MAGIC_64   (64-bit, host-endian)
+        | b"\xcf\xfa\xed\xfe" // MH_CIGAM_64   (64-bit, swapped)
+    )
+}
+
+/// 0.4.0: returns `Box<dyn extractor::Extractor + 'a>` — the boxed
+/// extractor borrows from `data` for the lifetime `'a`. dnfile's
+/// `Extractor::new` likewise switched from `(file_path: &str)` (which
+/// read internally) to `(data: &'a [u8])` (which borrows). The caller
+/// reads the file once into a `Vec<u8>` and passes `&buf` here.
+fn get_file_extractors<'a>(
     f: &str,
     format: FileFormat,
-    data: &[u8],
+    data: &'a [u8],
     high_accuracy: bool,
     resolve_tailcalls: bool,
-) -> Result<Box<dyn extractor::Extractor>> {
+) -> Result<Box<dyn extractor::Extractor + 'a>> {
     match format {
         FileFormat::PE => {
-            if let Ok(e) = extractor::dnfile::Extractor::new(f) {
+            // PE first tries dnfile (managed/.NET). If dnfile rejects
+            // the file (native PE, not a CLR image), fall back to smda.
+            if let Ok(e) = extractor::dnfile::Extractor::new(data) {
                 Ok(Box::new(e))
             } else {
                 Ok(Box::new(extractor::smda::Extractor::new(
@@ -901,7 +1187,10 @@ fn get_file_extractors(
                 )?))
             }
         }
-        FileFormat::ELF => Ok(Box::new(extractor::smda::Extractor::new(
+        // 0.4.0: ELF and Mach-O both route through smda — smda 0.5's
+        // loader dispatches on magic bytes internally and produces a
+        // unified DisassemblyReport regardless of source format.
+        FileFormat::ELF | FileFormat::Macho => Ok(Box::new(extractor::smda::Extractor::new(
             f,
             high_accuracy,
             resolve_tailcalls,

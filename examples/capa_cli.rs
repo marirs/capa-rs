@@ -70,15 +70,18 @@ fn main() {
     let security_check_opts = BinarySecurityCheckOptions::new(libc, sysroot, libc_spec);
 
     let start = Instant::now();
-    match FileCapabilities::from_file(
-        &filename,
-        &rules_path,
-        true,
-        true,
-        &|_s| {},
-        map_features,
-        Some(security_check_opts),
-    ) {
+    // 0.4.0: chained AnalyzeBuilder replaces the 0.3.x positional
+    // `FileCapabilities::from_file(...)`. Same arguments, just
+    // self-documenting at call sites — and no more counting bool
+    // positions.
+    match FileCapabilities::analyze()
+        .rules(rules_path)
+        .high_accuracy(true)
+        .resolve_tailcalls(true)
+        .features_dump(map_features)
+        .security_checks(security_check_opts)
+        .from_file(filename)
+    {
         Err(e) => println!("{:?}", e),
         Ok(mut s) => {
             match to_value(&s) {
@@ -181,11 +184,22 @@ fn get_properties(props: &Value, features: Option<&Value>) -> Table {
         Cell::new_align("File Properties", Alignment::CENTER).with_hspan(2),
     ]));
     for (k, v) in meta {
+        // 0.4.0: Properties now contains numeric `pdb_age` alongside
+        // string fields — `v.as_str().unwrap()` would panic on it.
+        // Fall back to JSON serialization for non-string scalars so
+        // the table renders for any future Properties addition.
+        let rendered = match v {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            Value::Bool(b) => b.to_string(),
+            Value::Null => String::new(),
+            other => other.to_string(),
+        };
         tbl.add_row(Row::new(vec![
             Cell::new(k)
                 .with_style(Attr::ForegroundColor(color::BRIGHT_BLUE))
                 .with_style(Attr::Bold),
-            Cell::new(v.as_str().unwrap()),
+            Cell::new(&rendered),
         ]));
     }
     if let Some(f) = features {

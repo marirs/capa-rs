@@ -104,4 +104,9 @@ pub enum Error {
     BufferOverflowError,
     #[error("Match rule not found: {0}")]
     MatchRuleNotFound(String),
+    // 0.4.0: AnalyzeBuilder terminal called without .rules(path).
+    // The capa-rules path is fundamental to analysis — no rules,
+    // nothing to match capabilities against.
+    #[error("AnalyzeBuilder: .rules(path) must be called before .from_file() / .from_buffer()")]
+    BuilderMissingRules,
 }

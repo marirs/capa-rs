@@ -1,7 +1,6 @@
 #![allow(dead_code, clippy::to_string_in_format_args)]
 
 use lazy_static::lazy_static;
-use ouroboros::self_referencing;
 use regex::Regex;
 use std::collections::{BTreeMap, HashMap};
 
@@ -90,29 +89,25 @@ impl super::Function for FunctionS {
 /// exposing smda's lifetime to capa-rs callers. The full zero-copy
 /// refactor (caller owns the buffer, `Extractor<'a>` takes `&'a [u8]`)
 /// is deferred to capa 0.4.0.
-#[self_referencing]
-struct ExtractorInner {
-    buf: Vec<u8>,
-    #[borrows(buf)]
-    #[covariant]
-    report: DisassemblyReport<'this>,
-}
-
-pub struct Extractor {
-    inner: ExtractorInner,
+pub struct Extractor<'a> {
+    report: DisassemblyReport<'a>,
+    buf: &'a [u8],
     path: String,
 }
 
-impl std::fmt::Debug for Extractor {
+impl std::fmt::Debug for Extractor<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Extractor")
             .field("path", &self.path)
-            .field("functions", &self.inner.borrow_report().functions.len())
+            .field("functions", &self.report.functions.len())
             .finish_non_exhaustive()
     }
 }
 
-impl super::Extractor for Extractor {
+// 0.4.0: lifetime parameter named `'data` (not `'a`) so it doesn't
+// collide with the trait method `fn get_instructions<'a>` which uses
+// `'a` for its own borrow scope.
+impl<'data> super::Extractor for Extractor<'data> {
     fn is_dot_net(&self) -> bool {
         false
     }
@@ -122,17 +117,18 @@ impl super::Extractor for Extractor {
     }
 
     fn format(&self) -> FileFormat {
-        // 0.3.21: smda 0.5.0 made `FileFormat` `#[non_exhaustive]` and
-        // added `MachO` + `Buffer` variants. Capa-rs's own FileFormat
-        // doesn't yet model those (deferred to 0.4.0 alongside the
-        // shellcode / Mach-O product surface), so fall back to a
-        // reasonable default. `Buffer` is reported as PE because
-        // raw-buffer entry isn't reachable from capa-rs's
-        // `FileCapabilities::from_file` path today.
+        // 0.4.0: capa-rs `FileFormat` gained `Macho` to mirror smda 0.5's
+        // `MachO` variant — capa rules that filter on `format: macho` now
+        // fire correctly. `Buffer` (shellcode / raw memory) has no
+        // PE/ELF/Mach-O equivalent in the file-format sense; report as
+        // PE so the rules engine still runs and OS-tagged matches behave
+        // sensibly. Shellcode-specific routing happens at the
+        // `FileCapabilities::from_buffer` entry point.
         match self.report().format {
             smda::FileFormat::PE => FileFormat::PE,
             smda::FileFormat::ELF => FileFormat::ELF,
-            smda::FileFormat::MachO | smda::FileFormat::Buffer => FileFormat::PE,
+            smda::FileFormat::MachO => FileFormat::Macho,
+            smda::FileFormat::Buffer => FileFormat::PE,
             _ => FileFormat::PE,
         }
     }
@@ -299,47 +295,72 @@ impl super::Extractor for Extractor {
     }
 }
 
-impl Extractor {
+impl<'data> Extractor<'data> {
+    /// 0.4.0: takes `&'data [u8]` borrowed from the caller. The
+    /// returned `Extractor<'data>` borrows from that slice for the
+    /// lifetime `'data` — no internal clone of the file bytes, no
+    /// ouroboros wrapper. Pre-0.4.0 the data was deep-copied into an
+    /// owned Vec; that extra ~10–50 MB peak allocation per
+    /// analyse-call is gone now.
     pub fn new(
         path: &str,
         high_accuracy: bool,
         resolve_tailcalls: bool,
-        data: &[u8],
-    ) -> Result<Extractor> {
-        // 0.3.21: smda 0.5.0 collapsed positional bool args into
-        // SmdaConfig + the new `parse(&buf, &cfg)` entry point. We
-        // build the config once and pass through; future analysis
-        // knobs (timeout, confidence threshold, …) land here without
-        // touching the public Extractor::new signature.
+        data: &'data [u8],
+    ) -> Result<Extractor<'data>> {
         let cfg = SmdaConfig::new()
             .path(path)
             .high_accuracy(high_accuracy)
             .resolve_tailcalls(resolve_tailcalls);
-        let inner = ExtractorInnerTryBuilder {
-            buf: data.to_owned(),
-            report_builder: |buf: &Vec<u8>| Disassembler::parse(buf, &cfg),
-        }
-        .try_build()?;
+        let report = Disassembler::parse(data, &cfg)?;
         Ok(Extractor {
-            inner,
+            report,
+            buf: data,
             path: path.to_string(),
         })
     }
 
-    /// Borrowed view onto the smda report. Use this everywhere instead
-    /// of touching the inner ouroboros wrapper directly.
-    pub(crate) fn report(&self) -> &DisassemblyReport<'_> {
-        self.inner.borrow_report()
+    /// 0.4.0: raw-buffer constructor for shellcode / unpacked modules /
+    /// memory dumps — no PE/ELF/Mach-O header parsing. Routes through
+    /// smda's `parse_buffer` (added in smda 0.4.2 N11, public in 0.5.0).
+    /// The resulting `DisassemblyReport` has
+    /// `format = smda::FileFormat::Buffer`, which the trait's
+    /// `format()` impl downgrades to `FileFormat::PE` for rule-engine
+    /// compatibility. `bitness` must be 32 or 64; `base_addr` is the
+    /// virtual address the buffer is treated as mapped to.
+    pub fn from_buffer(
+        data: &'data [u8],
+        base_addr: u64,
+        bitness: u32,
+        high_accuracy: bool,
+        resolve_tailcalls: bool,
+    ) -> Result<Extractor<'data>> {
+        let cfg = SmdaConfig::new()
+            .high_accuracy(high_accuracy)
+            .resolve_tailcalls(resolve_tailcalls);
+        let report = Disassembler::parse_buffer(data, base_addr, bitness, &cfg)?;
+        Ok(Extractor {
+            report,
+            buf: data,
+            // Synthetic path — no real file backs a buffer-mode
+            // extractor. Kept stable so `Debug` output is uniform.
+            path: "<buffer>".to_string(),
+        })
+    }
+
+    /// Borrowed view onto the smda report.
+    pub(crate) fn report(&self) -> &DisassemblyReport<'data> {
+        &self.report
     }
 
     /// Raw input bytes — the file content `Extractor::new` was given.
     pub fn get_buf(&self) -> Result<&[u8]> {
-        Ok(self.inner.borrow_buf().as_slice())
+        Ok(self.buf)
     }
 
     /// Alias of [`get_buf`] for in-file convenience.
     fn buf(&self) -> &[u8] {
-        self.inner.borrow_buf().as_slice()
+        self.buf
     }
 
     pub fn get_elf_os(elf: &goblin::elf::Elf) -> Result<Os> {
@@ -368,6 +389,17 @@ impl Extractor {
         }
     }
     pub fn extract_os(&self) -> Result<Os> {
+        // 0.4.0: Mach-O and Buffer (shellcode) sources don't survive
+        // `goblin::Object::parse` as PE/ELF — short-circuit those off
+        // smda's already-classified `report.format` before calling
+        // goblin. Mach-O reports as LINUX as a placeholder since the
+        // `Os` enum has no Darwin variant; Buffer assumes Windows
+        // because most analysed shellcode targets Win32.
+        match self.report().format {
+            smda::FileFormat::MachO => return Ok(Os::LINUX),
+            smda::FileFormat::Buffer => return Ok(Os::WINDOWS),
+            _ => {}
+        }
         match goblin::Object::parse(self.buf())? {
             goblin::Object::Elf(elf) => Extractor::get_elf_os(&elf),
             goblin::Object::PE(_) => Ok(Os::WINDOWS),
@@ -404,19 +436,24 @@ impl Extractor {
     }
 
     fn extract_file_format(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-        let mut res = vec![];
-        res.push((
+        // 0.4.0: Mach-O and Buffer added. capa rules that filter on
+        // `format: macho` now fire correctly. Shellcode is reported as
+        // `pe` to keep PE-targeted rules matchable — most analysed
+        // shellcode payloads target Win32 and Python upstream behaves
+        // the same way (its `disassembleBuffer` defaults to PE rules).
+        let fmt = match self.report().format {
+            smda::FileFormat::PE => "pe",
+            smda::FileFormat::ELF => "elf",
+            smda::FileFormat::MachO => "macho",
+            smda::FileFormat::Buffer => "pe",
+            _ => "pe",
+        };
+        Ok(vec![(
             crate::rules::features::Feature::Format(crate::rules::features::FormatFeature::new(
-                if let smda::FileFormat::PE = self.report().format {
-                    "pe"
-                } else {
-                    "elf"
-                },
-                "",
+                fmt, "",
             )?),
             0,
-        ));
-        Ok(res)
+        )])
     }
 
     fn extract_file_embedded_pe(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {

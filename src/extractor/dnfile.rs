@@ -7,7 +7,6 @@ use dnfile::{
     },
     stream::meta_data_tables::mdtables::{codedindex::*, *},
 };
-use ouroboros::self_referencing;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
@@ -108,33 +107,30 @@ enum Callee {
     Method(DnMethod),
 }
 
-/// 0.3.21: dnfile 0.4.0 made `DnPe<'a>` borrow from the input bytes
-/// (zero-copy heaps + reader borrows). Same ouroboros pattern as the
-/// smda extractor — `buf: Vec<u8>` owned by the Extractor, `pe`
-/// borrows from it via `#[borrows(buf)]`, and a `pe()` accessor hides
-/// the wrapper from the rest of the file. Public `Extractor::new(path)`
-/// API stays unchanged.
-#[self_referencing]
-struct ExtractorInner {
-    buf: Vec<u8>,
-    #[borrows(buf)]
-    #[covariant]
-    pe: DnPe<'this>,
-}
-
-pub struct Extractor {
-    inner: ExtractorInner,
+/// 0.4.0: full zero-copy. `Extractor<'a>` borrows the input bytes
+/// from the caller for the lifetime `'a`. `DnPe<'a>` lives directly
+/// on the struct — no `ouroboros` self-referential wrapper, no extra
+/// `Vec<u8>` clone inside capa-rs.
+///
+/// Caller (typically `FileCapabilities::from_file`) reads the file
+/// once and passes `&buf` into `Extractor::new`. The borrow lives as
+/// long as the buffer.
+pub struct Extractor<'a> {
+    pe: DnPe<'a>,
     properties_cache: Arc<RwLock<Option<HashMap<u64, DnMethod>>>>,
     fields_cache: Arc<RwLock<Option<HashMap<u64, DnMethod>>>>,
 }
 
-impl std::fmt::Debug for Extractor {
+impl std::fmt::Debug for Extractor<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Extractor").finish_non_exhaustive()
     }
 }
 
-impl super::Extractor for Extractor {
+// 0.4.0: same lifetime-shadow workaround as the smda extractor. The
+// trait method `get_instructions<'a>` redeclares `'a`; we name the
+// impl's parameter `'data` to avoid the shadow error.
+impl<'data> super::Extractor for Extractor<'data> {
     fn is_dot_net(&self) -> bool {
         true
     }
@@ -284,31 +280,24 @@ impl super::Extractor for Extractor {
     }
 }
 
-impl Extractor {
-    /// Read `file_path` and parse it as a CLR/.NET PE.
+impl<'data> Extractor<'data> {
+    /// 0.4.0: parse a CLR/.NET PE from a borrowed byte slice.
     ///
-    /// 0.3.21: dnfile 0.4 dropped `DnPe::new(path)` in favour of
-    /// `DnPe::parse(&buf)` (zero-copy). We read the file ourselves
-    /// and stash the bytes inside a self-referential wrapper so the
-    /// public Extractor::new signature is preserved.
-    pub fn new(file_path: &str) -> Result<Extractor> {
-        let buf = std::fs::read(file_path)?;
-        let inner = ExtractorInnerTryBuilder {
-            buf,
-            pe_builder: |buf: &Vec<u8>| DnPe::parse(buf.as_slice()),
-        }
-        .try_build()?;
+    /// Pre-0.4.0 this read the file internally and held the bytes via
+    /// an `ouroboros` self-referential wrapper. The new API matches
+    /// the smda extractor — caller owns the buffer, we borrow.
+    pub fn new(data: &'data [u8]) -> Result<Extractor<'data>> {
+        let pe = DnPe::parse(data)?;
         Ok(Extractor {
-            inner,
+            pe,
             fields_cache: Arc::new(RwLock::new(None)),
             properties_cache: Arc::new(RwLock::new(None)),
         })
     }
 
-    /// Borrowed view onto the parsed `DnPe`. Use this everywhere
-    /// instead of touching the inner wrapper directly.
-    pub(crate) fn pe(&self) -> &DnPe<'_> {
-        self.inner.borrow_pe()
+    /// Borrowed view onto the parsed `DnPe`.
+    pub(crate) fn pe(&self) -> &DnPe<'data> {
+        &self.pe
     }
 
     pub fn extract_arch(&self) -> Result<crate::FileArchitecture> {

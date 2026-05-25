@@ -7,7 +7,7 @@
 
 Try it online: <https://www.analyze.rs/>
 
-`capa-rs` detects capabilities in executable files. Point it at a PE, ELF, or .NET binary and it tells you what the program can do — for example, that the file is a backdoor, installs Windows services, communicates over HTTP, or uses RC4. It also runs a binary-security checklist (ASLR, NX, stack canary, CFG, etc.).
+`capa-rs` detects capabilities in executable files. Point it at a PE, ELF, Mach-O, .NET binary, or raw shellcode and it tells you what the program can do — for example, that the file is a backdoor, installs Windows services, communicates over HTTP, or uses RC4. It also runs a binary-security checklist (ASLR, NX, stack canary, CFG, etc.).
 
 This is a Rust port of Mandiant's [Python capa](https://github.com/mandiant/capa) without the IDA / Ghidra plugins — a pure library that emits capability reports. The bundled `capa_cli` example wraps it as a command-line tool. Rules come from the official [capa-rules](https://github.com/mandiant/capa-rules) repository.
 
@@ -15,28 +15,27 @@ This is a Rust port of Mandiant's [Python capa](https://github.com/mandiant/capa
 
 ```toml
 [dependencies]
-capa = "0.3"
+capa = "0.4"
 ```
 
 ```rust
 use capa::{BinarySecurityCheckOptions, FileCapabilities};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut fc = FileCapabilities::from_file(
-        "Sample.exe",
-        "path/to/capa-rules",
-        false,                                       // high_accuracy
-        false,                                       // resolve_tailcalls
-        &|_status| {},                               // progress callback
-        false,                                       // map_features
-        Some(BinarySecurityCheckOptions::default()), // libc / sysroot / spec
-    )?;
+    let mut fc = FileCapabilities::analyze()
+        .rules("path/to/capa-rules")
+        .high_accuracy(true)
+        .resolve_tailcalls(true)
+        .security_checks(BinarySecurityCheckOptions::default())
+        .from_file("Sample.exe")?;
 
     let json = fc.serialize_file_capabilities(None)?;
     println!("{}", json);
     Ok(())
 }
 ```
+
+`.rules(...)` is the only required setter. All other builder methods default to off / no-op — most callers only need a couple of them.
 
 ## CLI example
 
@@ -89,6 +88,27 @@ Verbose mode adds per-function feature + capability tables:
 capa_cli --rules-path capa-rules --verbose data/Demo64.dll
 ```
 
+## Shellcode / raw-buffer analysis
+
+For payloads with no PE/ELF/Mach-O header — shellcode, unpacked modules, memory dumps — use the builder's `.from_buffer(...)` terminal instead of `.from_file(...)`:
+
+```rust
+use capa::FileCapabilities;
+
+let shellcode = std::fs::read("payload.bin")?;
+let fc = FileCapabilities::analyze()
+    .rules("path/to/capa-rules")
+    .high_accuracy(true)
+    .resolve_tailcalls(true)
+    .from_buffer(&shellcode, 0x1000, 64)?;  // base_addr, bitness
+```
+
+The shellcode is treated as a single section mapped at `base_addr`. dnfile and the security-checks pipeline are skipped (no PE/ELF header to inspect).
+
+## PDB metadata (symbol-server lookup)
+
+For PE inputs with a CodeView debug record, `FileCapabilities.properties` exposes `pdb_guid`, `pdb_age`, and `pdb_filename` — the keys Microsoft SymSrv / Mozilla / Chromium symbol stores look up. Fields are omitted from the JSON output when the input has no debug directory or isn't a PE.
+
 ## Features
 
 The crate ships two cargo features:
@@ -117,8 +137,10 @@ cargo build --features verbose,properties  # both
 │  src/lib.rs                  │  rendering, security checks
 └──────────────┬───────────────┘
                │
-               ├──► src/extractor/smda.rs ───► smda 0.5  (PE/ELF/MachO disassembly,
-               │                                          function names, hashes)
+               ├──► src/extractor/smda.rs ───► smda 0.5  (PE / ELF / Mach-O /
+               │                                          shellcode disassembly,
+               │                                          function names, hashes,
+               │                                          PDB debug-directory)
                └──► src/extractor/dnfile.rs ──► dnfile 0.4 (.NET CLR metadata)
 ```
 

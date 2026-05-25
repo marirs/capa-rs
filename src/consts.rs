@@ -1,12 +1,18 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
+// 0.4.0: `#[non_exhaustive]` so future additions (e.g. `Shellcode`,
+// `WASM`) don't break downstream `match` statements. Added `Macho`
+// variant for the Mach-O loader that landed in smda 0.5.0 — capa
+// rules that match on `format: macho` now fire on real samples.
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 #[allow(clippy::upper_case_acronyms)]
 pub enum FileFormat {
     PE,
     ELF,
     DOTNET,
+    Macho,
 }
 
 impl std::fmt::Display for FileFormat {
@@ -15,6 +21,7 @@ impl std::fmt::Display for FileFormat {
             FileFormat::PE => write!(f, "PE file"),
             FileFormat::ELF => write!(f, "Elf file"),
             FileFormat::DOTNET => write!(f, "DotNet file"),
+            FileFormat::Macho => write!(f, "Mach-O file"),
         }
     }
 }
