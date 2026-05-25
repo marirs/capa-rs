@@ -354,6 +354,31 @@ impl Rule {
         }
     }
 
+    /// 0.4.2: parse an `N or more` / `N or fewer` count operand and
+    /// validate that the value fits in `u32`. Pre-0.4.2 the code did
+    /// `value as u32` after parsing via `i64`, which silently
+    /// truncated "5000000000 or more" to ~705 million and matched
+    /// the wrong threshold. Now out-of-range values error at rule
+    /// load. Reference: audit findings S7+S8.
+    fn parse_count_u32(s: &str, raw: &str) -> Result<u32> {
+        let n = s.parse::<i64>().map_err(|_| {
+            Error::InvalidRule(line!(), format!("count value `{}` is not an integer", s))
+        })?;
+        if n < 0 {
+            return Err(Error::InvalidRule(
+                line!(),
+                format!("count value must be non-negative: {}", raw),
+            ));
+        }
+        if n > u32::MAX as i64 {
+            return Err(Error::InvalidRule(
+                line!(),
+                format!("count value exceeds u32::MAX (~4.3B): {} in `{}`", n, raw),
+            ));
+        }
+        Ok(n as u32)
+    }
+
     fn parse_range(s: &str) -> Result<(i128, i128)> {
         if !s.starts_with('(') {
             return Err(Error::InvalidRule(line!(), s.to_string()));
@@ -665,6 +690,22 @@ impl Rule {
                         .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
                     let (params, description) =
                         Rule::extract_elements_and_description(val, scopes)?;
+                    // 0.4.2: enforce arity. Pre-0.4.2 the code took
+                    // `params[0]` and silently dropped any additional
+                    // children — so `not: [a, b]` evaluated as `not a`
+                    // with `b` discarded. Python upstream rejects this
+                    // at rule load. Now we do too. Reference:
+                    // capa/rules/__init__.py:864.
+                    if params.len() != 1 {
+                        return Err(Error::InvalidRule(
+                            line!(),
+                            format!(
+                                "`not` requires exactly one child statement, got {}: {:?}",
+                                params.len(),
+                                vval
+                            ),
+                        ));
+                    }
                     return Ok(StatementElement::Statement(Box::new(Statement::Not(
                         NotStatement::new(params[0].clone(), &description)?,
                     ))));
@@ -915,7 +956,9 @@ impl Rule {
                     //     u32::from_str_radix(&kkey[..kkey.len() - " or more".len()], 10)?;
                     // let count = (&kkey[..kkey.len() - " or more".len()]).parse::<u32>()?;
                     if let Some(x) = kkey.strip_suffix(" or more") {
-                        let count = x.parse::<u32>()?;
+                        // 0.4.2: route through parse_count_u32 for the
+                        // helpful out-of-range error message.
+                        let count = Rule::parse_count_u32(x, kkey)?;
                         let mut params = vec![];
                         let mut description = "".to_string();
                         let val = vval
@@ -979,45 +1022,57 @@ impl Rule {
                                 )));
                             }
                             Yaml::String(val) => {
-                                if val.ends_with(" or more") {
-                                    // let min = i64::from_str_radix(
-                                    //     &val[..val.len() - " or more".len()],
-                                    //     10,
-                                    // )?;
-                                    let min =
-                                        (val[..val.len() - " or more".len()]).parse::<i64>()?;
-                                    let max = 0xFFFFFFFF_u32;
-                                    return Ok(StatementElement::Statement(Box::new(
-                                        Statement::Range(RangeStatement::new(
-                                            StatementElement::Feature(Box::new(feature)),
-                                            min as u32,
-                                            max,
-                                            "",
-                                        )?),
-                                    )));
-                                } else if val.ends_with(" or fewer") {
-                                    let min = 0_u32;
-                                    let max =
-                                        (val[..val.len() - " or fewer".len()]).parse::<i64>()?;
-                                    // let max = i64::from_str_radix(
-                                    //     &val[..val.len() - " or fewer".len()],
-                                    //     10,
-                                    // )?;
+                                // 0.4.2: route count-operand parsing through
+                                // `parse_count_u32` so out-of-range thresholds
+                                // (e.g. "5000000000 or more") error at rule
+                                // load instead of silently truncating via
+                                // `as u32`. Same for "or fewer" and "(min,
+                                // max)" forms.
+                                if let Some(num) = val.strip_suffix(" or more") {
+                                    let min = Rule::parse_count_u32(num, val)?;
                                     return Ok(StatementElement::Statement(Box::new(
                                         Statement::Range(RangeStatement::new(
                                             StatementElement::Feature(Box::new(feature)),
                                             min,
-                                            max as u32,
+                                            u32::MAX,
+                                            "",
+                                        )?),
+                                    )));
+                                } else if let Some(num) = val.strip_suffix(" or fewer") {
+                                    let max = Rule::parse_count_u32(num, val)?;
+                                    return Ok(StatementElement::Statement(Box::new(
+                                        Statement::Range(RangeStatement::new(
+                                            StatementElement::Feature(Box::new(feature)),
+                                            0,
+                                            max,
                                             "",
                                         )?),
                                     )));
                                 } else if val.starts_with('(') {
                                     let (min, max) = Rule::parse_range(val)?;
+                                    let min_u32 = u32::try_from(min).map_err(|_| {
+                                        Error::InvalidRule(
+                                            line!(),
+                                            format!(
+                                                "range min exceeds u32::MAX: {} in `{}`",
+                                                min, val
+                                            ),
+                                        )
+                                    })?;
+                                    let max_u32 = u32::try_from(max).map_err(|_| {
+                                        Error::InvalidRule(
+                                            line!(),
+                                            format!(
+                                                "range max exceeds u32::MAX: {} in `{}`",
+                                                max, val
+                                            ),
+                                        )
+                                    })?;
                                     return Ok(StatementElement::Statement(Box::new(
                                         Statement::Range(RangeStatement::new(
                                             StatementElement::Feature(Box::new(feature)),
-                                            min as u32,
-                                            max as u32,
+                                            min_u32,
+                                            max_u32,
                                             "",
                                         )?),
                                     )));
@@ -1117,22 +1172,46 @@ fn is_hidden(entry: &walkdir::DirEntry) -> bool {
 }
 
 pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
-    let mut rules = vec![];
-    for entry in walkdir::WalkDir::new(rule_path)
+    use rayon::prelude::*;
+
+    // 0.4.2: collect the WalkDir entries up front so the YAML parse
+    // step can rayon-parallelise. WalkDir is itself sequential
+    // (filesystem traversal); the per-file YAML parse is the
+    // expensive bit (~50–200 µs per file × 1,000 rules = the bulk
+    // of rule-load time). Also: `follow_links(false)` defends against
+    // malicious symlink chains in a user-controlled rules directory.
+    //
+    // 0.4.2: replaced `to_str().unwrap()` with a defensive skip on
+    // non-UTF-8 paths so unusual filenames don't panic the loader
+    // (S2 from the audit).
+    let entries: Vec<String> = walkdir::WalkDir::new(rule_path)
+        .follow_links(false)
         .into_iter()
         .filter_entry(|e| !is_hidden(e))
         .filter_map(|e| e.ok())
-    {
-        let fname = entry.path().to_str().unwrap().to_string();
-        if fname.ends_with(".yml") || fname.ends_with(".yaml") {
-            let mut rule = match Rule::from_yaml_file(&fname) {
+        .filter_map(|e| e.path().to_str().map(str::to_string))
+        .filter(|fname| fname.ends_with(".yml") || fname.ends_with(".yaml"))
+        .collect();
+
+    // Each YAML file is independent — parse, set_path, extract
+    // subscopes per file. Workers return `Vec<Rule>` (parent +
+    // synthetic subscope rules); the final `flatten()` merges them.
+    // Parse errors print a warning and yield an empty Vec rather
+    // than propagating, matching pre-0.4.2 best-effort behaviour.
+    let rules: Vec<Rule> = entries
+        .par_iter()
+        .map(|fname| -> Vec<Rule> {
+            let mut rule = match Rule::from_yaml_file(fname) {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("warn: rule {} error: {:?}", fname, e);
-                    continue;
+                    return Vec::new();
                 }
             };
-            rule.set_path(fname.clone())?;
+            if let Err(e) = rule.set_path(fname.clone()) {
+                eprintln!("warn: rule {} set_path error: {:?}", fname, e);
+                return Vec::new();
+            }
             // 0.4.1: extract inline subscopes into synthetic rules.
             // Each `Subscope` statement in `rule.statement` is replaced
             // with a `MatchedRule` feature referencing a freshly-minted
@@ -1143,11 +1222,20 @@ pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
             // addresses), then surface only the boolean result to the
             // outer rule via the match-rule feature index. Mirrors
             // Python capa's pattern from rules/__init__.py.
-            let synthetics = rule.extract_subscopes()?;
-            rules.push(rule);
-            rules.extend(synthetics);
-        }
-    }
+            let synthetics = match rule.extract_subscopes() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("warn: rule {} subscope extraction error: {:?}", fname, e);
+                    return Vec::new();
+                }
+            };
+            let mut out = Vec::with_capacity(1 + synthetics.len());
+            out.push(rule);
+            out.extend(synthetics);
+            out
+        })
+        .flatten()
+        .collect();
     Ok(rules)
 }
 
@@ -1334,7 +1422,17 @@ fn extract_subscopes_walk(
 }
 
 pub fn get_rules_for_scope<'a>(rules: &'a [Rule], scope: &Scope) -> Result<Vec<&'a Rule>> {
+    // 0.4.2: build the namespace + name indexes ONCE per call instead
+    // of once per rule. Previously `get_rules_and_dependencies` (called
+    // per rule from the loop below) rebuilt both indexes internally —
+    // with ~1,000 rules in capa-rules and four scope passes that was
+    // ~16M HashMap inserts per `RuleSet::new`. Hoist them; the body
+    // becomes a flat O(N + deps) per rule, O(N²) total at worst.
+    let namespaces = index_rules_by_namespace(rules)?;
+    let rules_by_name = build_rules_by_name(rules);
+
     let mut scope_rules = vec![];
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     for rule in rules {
         // 0.4.1: skip synthetic subscope rules and library rules from
         // the top-level iteration. Both remain available via
@@ -1344,30 +1442,65 @@ pub fn get_rules_for_scope<'a>(rules: &'a [Rule], scope: &Scope) -> Result<Vec<&
         if rule_meta_bool(rule, "capa/subscope-rule") || is_lib_rule(rule) {
             continue;
         }
-        scope_rules.append(&mut get_rules_and_dependencies(rules, &rule.name)?);
+        let deps =
+            get_rules_and_dependencies_indexed(rules, &rules_by_name, &namespaces, &rule.name)?;
+        for r in deps {
+            if seen.insert(r.name.clone()) {
+                scope_rules.push(r);
+            }
+        }
     }
     let trules = topologically_order_rules(scope_rules)?;
 
     get_rules_with_scope(trules, scope)
 }
 
-pub fn get_rules_and_dependencies<'a>(rules: &'a [Rule], rule_name: &str) -> Result<Vec<&'a Rule>> {
-    let mut res = vec![];
-    //# we evaluate `rules` multiple times, so if its a generator, realize it into a list.
-    let namespaces = index_rules_by_namespace(rules)?;
-    let mut rules_by_name = HashMap::new();
+/// 0.4.2: build the name→rule index once. Used to be inlined per
+/// `get_rules_and_dependencies` call (now `get_rules_and_dependencies_indexed`).
+fn build_rules_by_name(rules: &[Rule]) -> HashMap<String, &Rule> {
+    let mut rules_by_name = HashMap::with_capacity(rules.len());
     for rule in rules {
         rules_by_name.insert(rule.name.clone(), rule);
     }
-    let mut wanted = vec![rule_name.to_string()];
+    rules_by_name
+}
 
-    fn rec(
-        want: &mut Vec<String>,
-        rule: &Rule,
-        rules_by_name: &HashMap<String, &Rule>,
-        namespaces: &HashMap<String, Vec<&Rule>>,
+/// 0.4.2: public entry that builds indexes ad-hoc — kept for external
+/// callers that don't already have indexes on hand. Internal hot path
+/// uses `get_rules_and_dependencies_indexed` directly to share the
+/// indexes across calls.
+pub fn get_rules_and_dependencies<'a>(rules: &'a [Rule], rule_name: &str) -> Result<Vec<&'a Rule>> {
+    let namespaces = index_rules_by_namespace(rules)?;
+    let rules_by_name = build_rules_by_name(rules);
+    get_rules_and_dependencies_indexed(rules, &rules_by_name, &namespaces, rule_name)
+}
+
+/// 0.4.2: indexed variant of [`get_rules_and_dependencies`]. Caller
+/// owns the namespace index and `rules_by_name` map, so they can be
+/// built once and reused across N rules — turns the original O(N²)
+/// scope-rule construction into O(N + total deps).
+fn get_rules_and_dependencies_indexed<'a>(
+    _rules: &'a [Rule],
+    rules_by_name: &HashMap<String, &'a Rule>,
+    namespaces: &HashMap<String, Vec<&'a Rule>>,
+    rule_name: &str,
+) -> Result<Vec<&'a Rule>> {
+    // `wanted` is a HashSet (was a Vec with O(N) `.contains`) so the
+    // final filter is O(N) total instead of O(N²).
+    let mut wanted: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    fn rec<'a>(
+        want: &mut std::collections::HashSet<String>,
+        rule: &'a Rule,
+        rules_by_name: &HashMap<String, &'a Rule>,
+        namespaces: &HashMap<String, Vec<&'a Rule>>,
     ) -> Result<()> {
-        want.push(rule.name.clone());
+        // 0.4.2: cycle break — a rule referenced through nested
+        // `match:` namespaces could otherwise loop. If already wanted,
+        // its dependencies have already been walked.
+        if !want.insert(rule.name.clone()) {
+            return Ok(());
+        }
         for dep in rule.get_dependencies(namespaces)? {
             match rules_by_name.get(&dep) {
                 Some(dep_rule) => {
@@ -1385,19 +1518,21 @@ pub fn get_rules_and_dependencies<'a>(rules: &'a [Rule], rule_name: &str) -> Res
         Ok(())
     }
 
-    rec(
-        &mut wanted,
-        rules_by_name[rule_name],
-        &rules_by_name,
-        &namespaces,
-    )?;
+    let seed = rules_by_name
+        .get(rule_name)
+        .ok_or_else(|| Error::MatchRuleNotFound(rule_name.to_string()))?;
+    rec(&mut wanted, seed, rules_by_name, namespaces)?;
 
-    for (_, rule) in rules_by_name {
-        if wanted.contains(&rule.name) {
-            res.push(rule)
+    // Materialise the HashSet into a Vec preserving insertion via
+    // rules_by_name's iteration (deterministic ordering depends on
+    // HashMap's hasher seed — downstream topo-sort renders that
+    // irrelevant).
+    let mut res = Vec::with_capacity(wanted.len());
+    for name in &wanted {
+        if let Some(rule) = rules_by_name.get(name) {
+            res.push(*rule);
         }
     }
-
     Ok(res)
 }
 

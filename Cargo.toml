@@ -1,6 +1,6 @@
 [package]
 name = "capa"
-version = "0.4.1"
+version = "0.4.2"
 description = "File capability extractor."
 authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>", "Jorge Alejandro Durán Royo<jorge.duran.royo@gmail.com>"]
 keywords = ["capa", "fce", "capability", "aslr", "reverse"]
@@ -35,9 +35,13 @@ walkdir = "2.5.0"
 yaml-rust = "0.4.5"
 goblin = { version = "0.10.0", features = ["alloc"] }
 maplit = "1.0.2"
-# 0.3.21: dnfile 0.2 → 0.4 — zero-copy DnPe<'a>, resource module,
-# AssemblyInfo helper, dndump / dnstrings CLIs, security fixes.
-dnfile = "0.4"
+# 0.4.2: dnfile 0.4 → 0.5 picks up `Send + Sync` supertrait bounds on
+# the public trait family (MDTableTrait, MDTableRowTrait,
+# MDTableRowTraitT, CodedIndex) so `DnPe<'_>` — and the capa-rs
+# `dnfile::Extractor<'_>` that wraps it — can cross thread
+# boundaries. Required by the rayon-parallel function loop in
+# `find_capabilities`. No runtime behaviour change.
+dnfile = "0.5"
 lazy_static = "1.5.0"
 parking_lot = "0.12.3"
 serde_json = "1.0.140"
@@ -58,6 +62,13 @@ dynamic-loader-cache = "0.2.2"
 # decoder swap. Match the feature set smda uses to keep monomorphisation
 # overhead identical.
 iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "intel", "instr_info"] }
+# 0.4.2: rayon for inter-function parallelism in `find_capabilities`.
+# Each function's analysis is pure — reads the extractor, evaluates
+# rules, returns matches. Parallelising the outer loop gives ~4-8×
+# end-to-end speedup on multi-core machines for binaries with more
+# than a handful of functions. Also used in `rules::get_rules` to
+# parallelise YAML parsing across the rule corpus.
+rayon = "1.10"
 
 [dev-dependencies]
 clap = { version = "4.5", features = ["cargo", "derive"] }

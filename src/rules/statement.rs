@@ -228,37 +228,55 @@ impl RangeStatement {
 pub struct SubscopeInstructionEvaluator;
 
 impl SubscopeInstructionEvaluator {
+    /// 0.4.2: rewritten to recurse through nested statements.
+    ///
+    /// Pre-0.4.2 only handled the flat-Feature `And` shape — any
+    /// child that wasn't a `Feature` (e.g. `Or`, `Not`, nested
+    /// `And`) bailed the loop with `matched = false`, so subscopes
+    /// of the form
+    ///
+    /// ```yaml
+    /// instruction:
+    ///   - or:
+    ///     - api: kernel32.Sleep
+    ///     - api: kernel32.SleepEx
+    /// ```
+    ///
+    /// evaluated to false even when Python upstream would match.
+    /// The 0.4.2 rewrite handles arbitrary statement nesting by
+    /// extracting per-address feature subsets and delegating to
+    /// `StatementElement::evaluate` for each candidate address.
+    ///
+    /// Reference: prior audit report B1.
     pub fn evaluate(
         statement: &StatementElement,
         features: &HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
+        // Pivot the feature map: address → set of features at that
+        // address. Captures the per-instruction view the subscope
+        // needs to see.
         let mut addr_to_features: HashMap<u64, HashSet<&Feature>> = HashMap::new();
-
         for (feature, addrs) in features.iter() {
             for addr in addrs {
                 addr_to_features.entry(*addr).or_default().insert(feature);
             }
         }
 
-        if let StatementElement::Statement(stmt) = statement {
-            if let Statement::And(and_stmt) = stmt.as_ref() {
-                for (_addr, feature_set) in addr_to_features.iter() {
-                    let mut matched = true;
-                    for elem in &and_stmt.children {
-                        if let StatementElement::Feature(f) = elem {
-                            if !feature_set.iter().any(|feat| *feat == f.as_ref()) {
-                                matched = false;
-                                break;
-                            }
-                        } else {
-                            matched = false;
-                            break;
-                        }
-                    }
-                    if matched {
-                        return Ok((true, vec![]));
-                    }
-                }
+        // For each candidate address, materialise a small per-address
+        // feature map and ask the statement whether it matches there.
+        // Sorted iteration so output (and any future evidence
+        // collection) is deterministic for a given binary.
+        let mut addrs: Vec<u64> = addr_to_features.keys().copied().collect();
+        addrs.sort_unstable();
+
+        for addr in addrs {
+            let feature_set = &addr_to_features[&addr];
+            let local: HashMap<Feature, Vec<u64>> = feature_set
+                .iter()
+                .map(|f| ((*f).clone(), vec![addr]))
+                .collect();
+            if statement.evaluate(&local)?.0 {
+                return Ok((true, vec![addr]));
             }
         }
 

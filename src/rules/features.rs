@@ -1192,11 +1192,45 @@ impl SubstringFeature {
     }
 }
 
+/// 0.4.2: regex engine handle — linear-time `regex` crate where
+/// possible (no ReDoS surface), fall back to backtracking
+/// `fancy_regex` only when the rule actually uses
+/// lookbehind / backreferences / atomic groups (features the
+/// linear engine doesn't support).
+///
+/// Rationale: a hostile rule pattern like `(a+)+b` against
+/// `fancy_regex` is a textbook ReDoS — it can hang the analyzer
+/// for hours. The vast majority of `capa-rules` regex features
+/// are simple substring / character-class patterns the linear
+/// engine handles in O(n). Routing those through `regex` removes
+/// the DoS surface for them. Only the genuinely-fancy patterns
+/// (lookbehind, backrefs) need the backtracking engine.
+#[derive(Debug, Clone)]
+enum RegexEngine {
+    /// Linear-time matcher. Pattern parsed successfully into the
+    /// `regex` crate, which guarantees O(n) match time.
+    Linear(regex::Regex),
+    /// Fallback for patterns the linear engine can't compile
+    /// (lookbehind, backrefs, atomic groups). Subject to
+    /// catastrophic backtracking on hostile inputs — accept the
+    /// risk because the rule author opted into the feature.
+    Fancy(fancy_regex::Regex),
+}
+
+impl RegexEngine {
+    fn is_match(&self, hay: &str) -> bool {
+        match self {
+            RegexEngine::Linear(re) => re.is_match(hay),
+            RegexEngine::Fancy(re) => matches!(re.find(hay), Ok(Some(_))),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RegexFeature {
     value: String,
     _description: String,
-    re: fancy_regex::Regex,
+    re: RegexEngine,
     scopes: HashSet<Scope>,
 }
 
@@ -1281,17 +1315,29 @@ impl RegexFeature {
             rre = r"(?s)(?i)".to_string() + body_i;
         }
         rre = unicode_safe_byte_escapes(&rre);
-        let rr = match fancy_regex::Regex::new(&rre) {
-            Ok(s) => s,
-            Err(e) => {
-                println!("{:?}", e);
-                return Err(Error::FancyRegexError(Box::new(e)));
-            }
+        // 0.4.2: try the linear-time `regex` crate first; fall back
+        // to `fancy_regex` only when the pattern uses features the
+        // linear engine doesn't support (lookbehind, backrefs,
+        // atomic groups). Closes the ReDoS surface for the ~95% of
+        // capa-rules patterns that don't actually need backtracking.
+        // Fancy-only-feature errors surface as Error::ParseError
+        // variants in the regex crate; we treat ANY parse failure as
+        // "try fancy" rather than introspecting the error type, so
+        // future regex-crate updates can't accidentally lock us out.
+        let re = match regex::Regex::new(&rre) {
+            Ok(linear) => RegexEngine::Linear(linear),
+            Err(_) => match fancy_regex::Regex::new(&rre) {
+                Ok(fancy) => RegexEngine::Fancy(fancy),
+                Err(e) => {
+                    eprintln!("regex parse failed for `{}`: {:?}", rre, e);
+                    return Err(Error::FancyRegexError(Box::new(e)));
+                }
+            },
         };
         Ok(RegexFeature {
             value: value.to_string(),
             _description: description.to_string(),
-            re: rr,
+            re,
             scopes: maplit::hashset!(
                 Scope::Function,
                 Scope::Instruction,
@@ -1307,16 +1353,11 @@ impl RegexFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        //# mapping from string value to list of locations.
-        //# will unique the locations later on.
         let mut ll = vec![];
         for (feature, locations) in features {
             if let Feature::String(s) = feature {
-                if let Ok(Some(_)) = self.re.find(&s.value) {
-                    //                    eprintln!("true {}\t{}", self.re.as_str(), s.value);
+                if self.re.is_match(&s.value) {
                     ll.extend(locations);
-                } else {
-                    //                    eprintln!("false {}\t{}", self.re.as_str(), s.value);
                 }
             }
         }
@@ -1348,39 +1389,10 @@ impl FeatureT for RegexFeature {
     }
 }
 
-// #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-// pub struct StringFactoryFeature{
-//     value: String,
-//     description: String
-// }
-
-// impl StringFactoryFeature{
-//     pub fn new(value: &str, description: &str) -> Result<StringFactoryFeature>{
-// //         Ok(StringFactoryFeature{
-// //             value: value.to_string(),
-// //             description: description.to_string(),
-// //         })
-// //     }
-// //     pub fn is_supported_in_scope(&self, scope: &crate::rules::Scope) -> Result<bool>{
-// //         match scope{
-// //             crate::rules::Scope::Function => {
-// //                 Ok(true)
-// //             },
-// //             crate::rules::Scope::File => {
-// //                 Ok(true)
-// //             },
-// //             crate::rules::Scope::BasicBlock => {
-// //                 Ok(true)
-// //             }
-// //         }
-// //     }
-// //     pub fn evaluate(&self, features: std::collections::HashMap<Feature, Vec<u64>>) -> Result<(bool, Vec<u64>)>{
-// //         if features.contains_key(&Feature::StringFactoryFeature(*self)){
-// //             return Ok((true, features[&Feature::StringFactoryFeature(*self)]));
-// //         }
-// //         Ok((false, vec![]))
-// //     }
-// // }
+// 0.4.2: removed the commented-out `StringFactoryFeature` block —
+// dead since the StringFactory dispatch was inlined into
+// `Feature::new` (it parses `string:` into either Regex or String
+// based on the leading `/`).
 
 #[derive(Debug, Clone, Eq)]
 pub struct BytesFeature {
@@ -1403,6 +1415,22 @@ impl BytesFeature {
     ) -> Result<(bool, Vec<u64>)> {
         for (feature, locations) in features {
             if let Feature::Bytes(s) = feature {
+                // 0.4.2: equal-length fast path. Capa-rules `bytes:`
+                // features are almost always exactly the length of
+                // the binary's extracted bytes (rule authors quote
+                // the full byte slice they're matching), so checking
+                // equality first avoids the O(s*self) windows-scan
+                // for the common case. Falls through to the scan when
+                // lengths differ (e.g. a substring-style bytes rule).
+                if s.value.len() == self.value.len() {
+                    if s.value == self.value {
+                        return Ok((true, locations.clone()));
+                    }
+                    continue;
+                }
+                if self.value.len() > s.value.len() {
+                    continue;
+                }
                 if s.value
                     .windows(self.value.len())
                     .any(|window| window == self.value)
@@ -1446,7 +1474,12 @@ pub struct ArchFeature {
 impl ArchFeature {
     pub fn new(value: &str, description: &str) -> Result<ArchFeature> {
         Ok(ArchFeature {
-            value: value.to_string(),
+            // 0.4.2: canonicalise to lowercase once at construction.
+            // Pre-0.4.2 `Hash` and `PartialEq` both called
+            // `.to_lowercase()` on each invocation — hot in the rule
+            // engine's HashMap lookups (tens of thousands per
+            // analysis × 5 case-insensitive feature types).
+            value: value.to_lowercase(),
             _description: description.to_string(),
             scopes: maplit::hashset!(
                 Scope::Function,
@@ -1474,13 +1507,15 @@ impl ArchFeature {
 impl Hash for ArchFeature {
     fn hash<H: Hasher>(&self, state: &mut H) {
         "arch_feature".hash(state);
-        self.value.to_lowercase().hash(state);
+        // 0.4.2: value already lowercased at construction.
+        self.value.hash(state);
     }
 }
 
 impl PartialEq for ArchFeature {
     fn eq(&self, other: &ArchFeature) -> bool {
-        self.value.to_lowercase() == other.value.to_lowercase()
+        // 0.4.2: both values already lowercased at construction.
+        self.value == other.value
     }
 }
 
@@ -1500,7 +1535,8 @@ pub struct NamespaceFeature {
 impl NamespaceFeature {
     pub fn new(value: &str, description: &str) -> Result<Self> {
         Ok(Self {
-            value: value.to_string(),
+            // 0.4.2: canonicalise once at construction — see ArchFeature.
+            value: value.to_lowercase(),
             _description: description.to_string(),
             scopes: maplit::hashset!(
                 Scope::Function,
@@ -1524,13 +1560,13 @@ impl NamespaceFeature {
 impl Hash for NamespaceFeature {
     fn hash<H: Hasher>(&self, state: &mut H) {
         "namespace_feature".hash(state);
-        self.value.to_lowercase().hash(state);
+        self.value.hash(state);
     }
 }
 
 impl PartialEq for NamespaceFeature {
     fn eq(&self, other: &NamespaceFeature) -> bool {
-        self.value.to_lowercase() == other.value.to_lowercase()
+        self.value == other.value
     }
 }
 
@@ -1550,7 +1586,8 @@ pub struct ClassFeature {
 impl ClassFeature {
     pub fn new(value: &str, description: &str) -> Result<Self> {
         Ok(Self {
-            value: value.to_string(),
+            // 0.4.2: canonicalise once at construction — see ArchFeature.
+            value: value.to_lowercase(),
             _description: description.to_string(),
             scopes: maplit::hashset!(
                 Scope::Function,
@@ -1574,13 +1611,13 @@ impl ClassFeature {
 impl Hash for ClassFeature {
     fn hash<H: Hasher>(&self, state: &mut H) {
         "class_feature".hash(state);
-        self.value.to_lowercase().hash(state);
+        self.value.hash(state);
     }
 }
 
 impl PartialEq for ClassFeature {
     fn eq(&self, other: &Self) -> bool {
-        self.value.to_lowercase() == other.value.to_lowercase()
+        self.value == other.value
     }
 }
 
@@ -1600,7 +1637,8 @@ pub struct OsFeature {
 impl OsFeature {
     pub fn new(value: &str, description: &str) -> Result<OsFeature> {
         Ok(OsFeature {
-            value: value.to_string(),
+            // 0.4.2: canonicalise once at construction — see ArchFeature.
+            value: value.to_lowercase(),
             _description: description.to_string(),
             scopes: maplit::hashset!(
                 Scope::Function,
@@ -1628,13 +1666,13 @@ impl OsFeature {
 impl Hash for OsFeature {
     fn hash<H: Hasher>(&self, state: &mut H) {
         "os_feature".hash(state);
-        self.value.to_lowercase().hash(state);
+        self.value.hash(state);
     }
 }
 
 impl PartialEq for OsFeature {
     fn eq(&self, other: &OsFeature) -> bool {
-        self.value.to_lowercase() == other.value.to_lowercase()
+        self.value == other.value
     }
 }
 
@@ -1654,7 +1692,8 @@ pub struct FormatFeature {
 impl FormatFeature {
     pub fn new(value: &str, description: &str) -> Result<FormatFeature> {
         Ok(FormatFeature {
-            value: value.to_string(),
+            // 0.4.2: canonicalise once at construction — see ArchFeature.
+            value: value.to_lowercase(),
             _description: description.to_string(),
             scopes: maplit::hashset!(
                 Scope::Function,
@@ -1682,13 +1721,13 @@ impl FormatFeature {
 impl Hash for FormatFeature {
     fn hash<H: Hasher>(&self, state: &mut H) {
         "format_feature".hash(state);
-        self.value.to_lowercase().hash(state);
+        self.value.hash(state);
     }
 }
 
 impl PartialEq for FormatFeature {
     fn eq(&self, other: &FormatFeature) -> bool {
-        self.value.to_lowercase() == other.value.to_lowercase()
+        self.value == other.value
     }
 }
 

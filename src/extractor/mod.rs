@@ -3,13 +3,21 @@ use crate::{Result, consts::FileFormat};
 pub mod dnfile;
 pub mod smda;
 
-pub trait Instruction {
+// 0.4.2: trait-object types are passed across rayon threads in
+// `find_capabilities`'s parallel function loop. The `Send + Sync`
+// supertrait bounds tell Rust the boxed values can cross thread
+// boundaries safely. Both the smda and dnfile extractor structs
+// already satisfy these in practice (smda 0.5's `DisassemblyReport`
+// is `Send + Sync`; dnfile 0.4's `DnPe` is too; both extractors'
+// internal caches use `parking_lot::RwLock`).
+
+pub trait Instruction: Send + Sync {
     fn is_mov_imm_to_stack(&self) -> Result<bool>;
     fn get_printable_len(&self) -> Result<u64>;
     fn as_any(&self) -> &dyn std::any::Any;
 }
 
-pub trait Function {
+pub trait Function: Send + Sync {
     fn inrefs(&self) -> &Vec<u64>;
     fn blockrefs(&self) -> &std::collections::HashMap<u64, Vec<u64>>;
     fn offset(&self) -> u64;
@@ -17,7 +25,7 @@ pub trait Function {
     fn as_any(&self) -> &dyn std::any::Any;
 }
 
-pub trait Extractor {
+pub trait Extractor: Send + Sync {
     // 0.4.0: `get_base_address` and `format` are only consumed by the
     // properties-feature-gated `FileCapabilities::new`. With
     // `--no-default-features` they'd warn as unused trait methods —

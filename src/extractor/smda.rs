@@ -1,5 +1,8 @@
-#![allow(dead_code, clippy::to_string_in_format_args)]
-
+// 0.4.2: dropped the file-level `#![allow(dead_code,
+// clippy::to_string_in_format_args)]`. It was hiding real warnings
+// (D7 from the audit — `xor_static` / `xor_with_key`, both removed)
+// and the legitimate clippy hint. With those gone, no remaining
+// items need silencing at the file level.
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::{BTreeMap, HashMap};
@@ -353,12 +356,10 @@ impl<'data> Extractor<'data> {
         &self.report
     }
 
-    /// Raw input bytes — the file content `Extractor::new` was given.
-    pub fn get_buf(&self) -> Result<&[u8]> {
-        Ok(self.buf)
-    }
-
-    /// Alias of [`get_buf`] for in-file convenience.
+    // 0.4.2: removed `get_buf` (pub) — never called from outside this
+    // module; in-tree call sites use the private `buf()` accessor
+    // below. If downstream consumers need raw bytes they can hold
+    // their own reference to the slice they passed to `Extractor::new`.
     fn buf(&self) -> &[u8] {
         self.buf
     }
@@ -1163,14 +1164,6 @@ impl<'data> Extractor<'data> {
         Ok(())
     }
 
-    fn xor_static(data: &[u8], i: u8) -> Result<Vec<u8>> {
-        let mut res = vec![];
-        for c in data {
-            res.push(c ^ i);
-        }
-        Ok(res)
-    }
-
     fn find_embedded_pe_headers(pbytes: &[u8]) -> Vec<(u64, u64, u8)> {
         let mut results = Vec::new();
         let start_offset = 64usize;
@@ -1213,16 +1206,13 @@ impl<'data> Extractor<'data> {
         results
     }
 
-    fn xor_with_key(bytes: &[u8], key: u8) -> Vec<u8> {
-        bytes.iter().map(|&b| b ^ key).collect()
-    }
-
-    // 0.3.21: _carve_pe (dead since the agent audit), the free-fn
-    // is_mov_imm_to_stack (replaced by smda's Instruction::get_printable_len),
-    // and get_operands (operand-string parser, no longer needed now that
-    // capa walks the typed iced operands via format_operands()) have all
-    // been removed. The trait-method InstructionS::is_mov_imm_to_stack
-    // delegates to smda directly.
+    // 0.3.21: removed `_carve_pe`, the free-fn `is_mov_imm_to_stack`
+    // (replaced by smda's `Instruction::get_printable_len`), and
+    // `get_operands` (operand-string parser, no longer needed now
+    // that capa walks the typed iced operands via `format_operands()`).
+    // 0.4.2: removed `xor_static` / `xor_with_key` — dead helpers for
+    // embedded-PE carving; `find_embedded_pe_headers` does the XOR
+    // inline.
 }
 
 fn clean_dll_name(dll_name: &str) -> String {
@@ -1428,19 +1418,9 @@ pub fn is_security_cookie(f: &Function, insn: &Instruction) -> Result<bool> {
     Ok(false)
 }
 
-pub fn to_u16(src: &[u8]) -> Result<Vec<u16>> {
-    let mut res = vec![];
-    if !src.len().is_multiple_of(2) {
-        return Ok(res);
-    }
-    let mut i = 0;
-    while i < src.len() {
-        let ch = u16::from_le_bytes(src[i..i + 2].try_into()?);
-        res.push(ch);
-        i += 2;
-    }
-    Ok(res)
-}
+// 0.4.2: removed `to_u16` — pub helper that converted byte slices to
+// u16 vectors, dead since the UTF-16 string scanner was rewritten to
+// work directly on `&[u8]` chunks without an intermediate Vec<u16>.
 
 fn extract_file_strings(buf: &[u8]) -> Result<Vec<(String, u64)>> {
     let mut res = vec![];

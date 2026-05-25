@@ -23,10 +23,25 @@ use std::{
     thread::spawn,
 };
 
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use smda::FileArchitecture;
 use yaml_rust::Yaml;
+
+// 0.4.2: regexes used in tag-string parsing — compiled once per
+// process via `once_cell::Lazy`. Pre-0.4.2 these were re-compiled
+// inside the per-rule and per-att&ck/mbc-entry loops in
+// `update_capabilities` and `parse_parts_id`. Negligible per-call
+// but real cumulative cost on a ~1,000-rule analysis (~10 ms).
+static TAG_BRACKET_RE: Lazy<regex::Regex> = Lazy::new(|| {
+    regex::Regex::new(r##"[^]]*\[(?P<tag>[^]]*)]"##)
+        .expect("compile-time regex literal — pattern is valid")
+});
+static PARTS_ID_RE: Lazy<regex::Regex> = Lazy::new(|| {
+    regex::Regex::new(r"^(.*?)(?:\s*\[(.*?)])?$")
+        .expect("compile-time regex literal — pattern is valid")
+});
 
 use consts::FileFormat;
 // 0.4.0: `Os` is referenced only by the properties-gated
@@ -236,7 +251,13 @@ pub struct AnalyzeBuilder<'a> {
     rules: Option<String>,
     high_accuracy: bool,
     resolve_tailcalls: bool,
-    logger: &'a dyn Fn(&str),
+    // 0.4.2: `+ Sync + Send` added so the logger can cross rayon
+    // worker threads in `find_capabilities`'s parallel function loop.
+    // `noop_logger` is a fn-pointer, which is unconditionally
+    // `Send + Sync`; user-supplied closures need to satisfy the
+    // bounds (which they do as long as they capture only
+    // `Send + Sync` state).
+    logger: &'a (dyn Fn(&str) + Sync + Send),
     features_dump: bool,
     security_checks: Option<BinarySecurityCheckOptions>,
 }
@@ -290,7 +311,7 @@ impl<'a> AnalyzeBuilder<'a> {
     /// short status strings during the analysis hot loop. Wire it to a
     /// progress bar / log sink if you want visibility into long
     /// analyses.
-    pub fn logger(mut self, logger: &'a dyn Fn(&str)) -> Self {
+    pub fn logger(mut self, logger: &'a (dyn Fn(&str) + Sync + Send)) -> Self {
         self.logger = logger;
         self
     }
@@ -501,7 +522,10 @@ impl FileCapabilities {
         capabilities: &HashMap<crate::rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
         #[cfg(feature = "verbose")] counts: &HashMap<u64, usize>,
     ) -> Result<()> {
-        let re = regex::Regex::new(r##"[^]]*\[(?P<tag>[^]]*)]"##)?;
+        // 0.4.2: cached at module scope (TAG_BRACKET_RE); was compiled
+        // per call, which on hot analyses with thousands of att&ck/mbc
+        // entries was real work.
+        let re = &*TAG_BRACKET_RE;
         for (rule, caps) in capabilities {
             // 0.4.1: belt-and-suspenders for `lib: true` — even though
             // `get_rules_for_scope` already excludes lib rules from
@@ -724,7 +748,7 @@ fn find_function_capabilities<'a>(
     ruleset: &'a rules::RuleSet,
     extractor: &Box<dyn extractor::Extractor + '_>,
     f: &Box<dyn extractor::Function>,
-    logger: &dyn Fn(&str),
+    logger: &(dyn Fn(&str) + Sync + Send),
     map_features: &mut HashMap<rules::features::Feature, Vec<u64>>,
     features_dump: bool,
 ) -> Result<(
@@ -811,13 +835,15 @@ fn aggregate_matches<'a, T: Clone>(
 fn find_capabilities(
     ruleset: &rules::RuleSet,
     extractor: &Box<dyn extractor::Extractor + '_>,
-    logger: &dyn Fn(&str),
+    logger: &(dyn Fn(&str) + Sync + Send),
     features_dump: bool,
 ) -> Result<(
     HashMap<rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     HashMap<u64, usize>,
     HashMap<String, HashMap<String, HashSet<u64>>>,
 )> {
+    use rayon::prelude::*;
+
     let mut all_function_matches: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
         HashMap::new();
     let mut all_bb_matches: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();
@@ -829,26 +855,66 @@ fn find_capabilities(
 
     let mut map_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
 
-    for (index, (function_address, f)) in functions.iter().enumerate() {
-        let (function_matches, bb_matches, feature_count) = find_function_capabilities(
-            ruleset,
-            extractor,
-            f,
-            logger,
-            &mut map_features,
-            features_dump,
-        )?;
-        meta.insert(*function_address, feature_count);
+    // 0.4.2: parallelise the per-function analysis. Each
+    // `find_function_capabilities` call is pure — it reads the
+    // extractor + ruleset and returns matches without touching shared
+    // state. Rayon's work-stealing scheduler distributes functions
+    // across worker threads; aggregation happens single-threaded
+    // afterwards.
+    //
+    // BTreeMap lacks a `par_iter` impl, so we collect to a Vec first.
+    // The Vec is cheap (just borrowed references), and the borrow
+    // outlives the rayon scope below.
+    let function_list: Vec<_> = functions.iter().collect();
+    let total = function_list.len();
 
+    let per_function: Vec<(u64, _, _, usize, HashMap<_, _>)> = function_list
+        .par_iter()
+        .enumerate()
+        .map(|(index, (function_address, f))| -> Result<_> {
+            // Each worker accumulates into a thread-local map_features
+            // map. If `features_dump` is off we never read it so the
+            // allocation is essentially free.
+            let mut local_map_features: HashMap<crate::rules::features::Feature, Vec<u64>> =
+                HashMap::new();
+            let (function_matches, bb_matches, feature_count) = find_function_capabilities(
+                ruleset,
+                extractor,
+                f,
+                logger,
+                &mut local_map_features,
+                features_dump,
+            )?;
+            logger(&format!(
+                "function 0x{:02x} {} from {} processed",
+                function_address, index, total
+            ));
+            // Convert HashMap<&Rule, ...> to HashMap<&Rule (with the
+            // ruleset's lifetime)> by collecting; references are
+            // already 'a-bound from `ruleset`, no clone needed.
+            Ok((
+                **function_address,
+                function_matches,
+                bb_matches,
+                feature_count,
+                local_map_features,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    // Sequential merge — small per-function HashMaps fold into the
+    // shared accumulators. With ~hundreds of functions and ~thousands
+    // of matches total this is microseconds; the parallel work above
+    // is the only place that benefits from threading.
+    for (addr, function_matches, bb_matches, feature_count, local_map) in per_function {
+        meta.insert(addr, feature_count);
         aggregate_matches(&mut all_function_matches, &function_matches);
         aggregate_matches(&mut all_bb_matches, &bb_matches);
-
-        logger(&format!(
-            "function 0x{:02x} {} from {} processed",
-            function_address,
-            index,
-            functions.len()
-        ));
+        if features_dump {
+            for (k, v) in local_map {
+                map_features.entry(k).or_default().extend(v);
+            }
+        }
     }
 
     logger("functions capabilities finish");
@@ -901,7 +967,7 @@ fn find_file_capabilities<'a>(
     ruleset: &'a rules::RuleSet,
     extractor: &Box<dyn extractor::Extractor + '_>,
     function_features: &HashMap<rules::features::Feature, Vec<u64>>,
-    logger: &dyn Fn(&str),
+    logger: &(dyn Fn(&str) + Sync + Send),
     map_features: &mut HashMap<rules::features::Feature, Vec<u64>>,
     features_dump: bool,
 ) -> Result<(
@@ -941,7 +1007,8 @@ pub struct FunctionCapabilities {
 }
 
 fn parse_parts_id(s: &str) -> Result<(Vec<String>, String)> {
-    let re = regex::Regex::new(r"^(.*?)(?:\s*\[(.*?)])?$").unwrap();
+    // 0.4.2: cached at module scope (PARTS_ID_RE); was compiled per call.
+    let re = &*PARTS_ID_RE;
     if let Some(caps) = re.captures(s) {
         let parts_str = caps.get(1).map_or("", |m| m.as_str());
         let parts: Vec<String> = parts_str
@@ -1074,7 +1141,7 @@ fn match_fn<'a>(
     rules: &'a [rules::Rule],
     features: &HashMap<rules::features::Feature, Vec<u64>>,
     va: &u64,
-    logger: &dyn Fn(&str),
+    logger: &(dyn Fn(&str) + Sync + Send),
 ) -> Result<(
     HashMap<rules::features::Feature, Vec<u64>>,
     HashMap<&'a rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,

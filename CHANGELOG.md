@@ -5,6 +5,91 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-05-26 — Performance, threading, hardening
+
+Patch release. No public-API breaks from 0.4.1. Focused on the audit
+findings that surfaced after the 0.4.1 parity work: an O(N²) rule
+loader, no inter-function parallelism, a ReDoS surface in user-rule
+regexes, and a handful of latent correctness bugs.
+
+### Performance
+
+- **Rule loader O(N²) → O(N).** `get_rules_and_dependencies` rebuilt
+  the namespace index and rules-by-name HashMap on every call; with
+  ~1,000 rules and four scope passes that's ~16M HashMap inserts per
+  `RuleSet::new`. Hoisted the indexes to build once; flattened the
+  `wanted.contains(...)` linear scan to a HashSet lookup. Expected
+  5–20× rule-load speedup.
+- **`rayon::par_iter` over the function loop in `find_capabilities`.**
+  Each function's `find_function_capabilities` call is pure — reads
+  the extractor, evaluates rules, returns matches. Parallelised the
+  outer loop; aggregation via collect+sequential merge. Expected
+  4–8× end-to-end analysis speedup on multi-core machines.
+- **`rayon::par_iter` over the YAML parse loop in `get_rules`.**
+  Independent per file. Expected 3–5× additional rule-load speedup
+  on top of the index-hoist fix.
+- **`lazy_static!` for two recompile-per-call regexes**
+  (`update_capabilities` tag extraction, `parse_parts_id` att&ck/mbc
+  parser).
+- **`BytesFeature::evaluate` length-equality short-circuit.** capa
+  rules' `bytes:` features are almost always the same length as the
+  binary's extracted bytes; one-line check that avoids the
+  `windows().any()` scan in the common case.
+- **`Arch` / `Os` / `Format` / `Namespace` / `Class` feature
+  canonicalisation moved to construction.** Previously
+  `.to_lowercase()` ran inside `Hash` and `PartialEq`; now once at
+  parse time.
+- **`Box<dyn extractor::Extractor + Send + Sync + 'a>`.** Trait
+  object now explicitly bounded so it can be shared across rayon
+  threads. The underlying smda and dnfile extractors already
+  satisfy both.
+
+### Fixed
+
+- **B5: `NumberFeature` and `OffsetFeature` ignored bitness in
+  `Hash` / `PartialEq`.** `number/u32: 0x100` and `number/u64: 0x100`
+  collided in the rule-engine HashMap, producing silent rule
+  miss / over-match. Bitness is now part of the equality contract,
+  matching Python upstream.
+- **B2: `NotStatement` silently dropped extra children.**
+  `not: [a, b]` evaluated as `not a`, ignoring `b`. Now rejected
+  at rule load with `InvalidRule`, matching Python upstream.
+- **B1: `SubscopeInstructionEvaluator` now recurses into nested
+  statements.** Previously the per-address loop only handled
+  flat-Feature `And` children — any nested `Or` / `And` / `Not`
+  inside an `instruction:` subscope evaluated to false even when
+  Python would match. Closes the parity gap flagged in the prior
+  audit report. Combined with 0.4.1's cross-scope subscope fix,
+  `host-interaction/service/run-as-service.yml` and similar
+  file-scope-with-instruction-subscope rules now fully work.
+- **S7+S8: Integer-overflow validation in count parsing.**
+  "5000000000 or more" used to silently truncate `i64 → u32` and
+  match against `705032704`. Out-of-range thresholds now error at
+  rule load.
+
+### Security
+
+- **S1: ReDoS hardening on user-rule regex patterns.** Capa rules'
+  regex features go through `fancy_regex` (NFA + backtracking — a
+  hostile rule like `(a+)+b` can hang the analyzer for hours).
+  `RegexFeature::new` now tries the linear-time `regex` crate
+  first and falls back to `fancy_regex` only when the rule actually
+  uses lookbehind / backrefs (~5% of capa-rules patterns). Caps the
+  worst-case match time on the common path.
+- **S10: `walkdir::follow_links(false)`** on rule directory traversal.
+  Defence-in-depth against malicious symlink chains in a
+  user-controlled `--rules` path.
+- **S2: Non-UTF-8 rule paths no longer panic** the loader (`unwrap()`
+  on `Path::to_str()` replaced with `if let Some`).
+
+### Internal / cleanup
+
+- Removed dead `get_buf`, `_read_dotnet_user_string`, `xor_static`,
+  `xor_with_key`, commented-out `StringFactoryFeature`, the
+  file-level `#![allow(dead_code)]` on `src/extractor/smda.rs`
+  (and fixed the warnings it was hiding), three stale commented
+  `let count` / `let min` / `let max` blocks in `rules/mod.rs`.
+
 ## [0.4.1] — 2026-05-26 — Python-capa rule-loader parity (P0 + P1)
 
 Patch release. No public-API breaks from 0.4.0. Closes the rule-loader
