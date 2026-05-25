@@ -1,4 +1,4 @@
-use crate::{error::Error, Result};
+use crate::{Result, error::Error};
 use core::{marker::PhantomPinned, pin::Pin, ptr};
 use memmap2::{Mmap, MmapOptions};
 use std::{fs, path::Path};
@@ -41,7 +41,7 @@ impl BinaryParser {
         Ok(result)
     }
 
-    pub(crate) fn object(&self) -> &goblin::Object {
+    pub(crate) fn object(&self) -> &goblin::Object<'_> {
         // SAFETY: All instances of `Self` that are created and still in scope
         // must have `Some(_)` in the `object` field.
         self.object.as_ref().unwrap()

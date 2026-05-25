@@ -7,13 +7,13 @@
 use self::checked_functions::function_is_checked_version;
 use self::needed_libc::NeededLibC;
 use crate::security::{
+    Result,
     options::{
-        status::{ASLRCompatibilityLevel, HasSecurityStatus},
         AddressSpaceLayoutRandomizationOption, BinarySecurityOption, ELFFortifySourceOption,
         ELFImmediateBindingOption, ELFReadOnlyAfterRelocationsOption, ELFStackProtectionOption,
+        status::{ASLRCompatibilityLevel, HasSecurityStatus},
     },
     parser::BinaryParser,
-    Result,
 };
 use std::collections::HashSet;
 
@@ -160,12 +160,11 @@ pub(crate) fn has_stack_protection(elf: &goblin::elf::Elf) -> bool {
 
 /// Visibility is specified by binding type.
 const STV_DEFAULT: u8 = 0;
-/// Defined by processor supplements.
-//const STV_INTERNAL: u8 = 1;
-/// Not visible to other components.
-//const STV_HIDDEN: u8 = 2;
-/// Visible in other components but not preemptable.
-//const STV_PROTECTED: u8 = 3;
+// (Reserved for future use — kept as plain `//` comments rather than `///`
+// doc comments so they don't accidentally document the next item.)
+// STV_INTERNAL = 1;  // Defined by processor supplements.
+// STV_HIDDEN = 2;    // Not visible to other components.
+// STV_PROTECTED = 3; // Visible in other components but not preemptable.
 
 pub(crate) fn dynamic_symbol_is_named_exported_function<'elf>(
     elf: &'elf goblin::elf::Elf,

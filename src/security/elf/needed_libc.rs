@@ -1,8 +1,8 @@
 use crate::{
-    error::Error,
-    security::elf::checked_functions::{function_is_checked_version, CheckedFunction},
-    security::parser::BinaryParser,
     LibCSpec, Result,
+    error::Error,
+    security::elf::checked_functions::{CheckedFunction, function_is_checked_version},
+    security::parser::BinaryParser,
 };
 use regex::{Regex, RegexBuilder};
 use std::{

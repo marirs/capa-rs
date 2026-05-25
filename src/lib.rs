@@ -1,4 +1,18 @@
-#![allow(clippy::type_complexity, clippy::borrowed_box)]
+// 0.3.21: crate-level allows for clippy categories that produce noise on
+// this legacy codebase but don't represent real defects:
+// - `mutable_key_type`: false positive — `Feature` contains regex internals
+//   (`Pool<Cache>`) whose interior mutability is for caching, not stateful
+//   semantics. Using them as `HashMap` keys is safe.
+// - `collapsible_if` / `collapsible_match`: 2024-edition let-chain
+//   modernizations applied across hundreds of legacy sites. Stylistic.
+// - `type_complexity` / `borrowed_box`: pre-existing.
+#![allow(
+    clippy::type_complexity,
+    clippy::borrowed_box,
+    clippy::mutable_key_type,
+    clippy::collapsible_if,
+    clippy::collapsible_match
+)]
 
 extern crate core;
 
@@ -10,7 +24,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use smda::FileArchitecture;
 use yaml_rust::Yaml;
 
@@ -432,7 +446,7 @@ impl FileCapabilities {
             .unwrap()
             .insert("rules".to_string(), associations_json);
         if let Some(map_features) = fc_json.get("map_features") {
-            if map_features.as_object().map_or(false, |m| m.is_empty()) {
+            if map_features.as_object().is_some_and(|m| m.is_empty()) {
                 fc_json.as_object_mut().unwrap().remove("map_features");
             }
         }
@@ -870,7 +884,7 @@ fn get_format(f: &str) -> Result<(FileFormat, Vec<u8>)> {
 fn get_file_extractors(
     f: &str,
     format: FileFormat,
-    data: &Vec<u8>,
+    data: &[u8],
     high_accuracy: bool,
     resolve_tailcalls: bool,
 ) -> Result<Box<dyn extractor::Extractor>> {

@@ -1,27 +1,31 @@
 #![allow(dead_code, clippy::to_string_in_format_args)]
 
-use std::collections::{BTreeMap, HashMap};
 use lazy_static::lazy_static;
+use ouroboros::self_referencing;
 use regex::Regex;
+use std::collections::{BTreeMap, HashMap};
 
 lazy_static! {
-    static ref RE_NUMBER_HEX_SPACED: Regex = Regex::new(r"(?P<sign>[+\-]) (?P<num>0x[a-fA-F0-9]+)").unwrap();
-    static ref RE_NUMBER_INT_SPACED: Regex = Regex::new(r"(?P<sign>[+\-]) (?P<num>[0-9]+)").unwrap();
-
-    static ref RE_NUMBER_HEX: Regex = Regex::new(r"(?P<sign>[+\-])(?P<num>0x[a-fA-F0-9]+)").unwrap();
+    static ref RE_NUMBER_HEX_SPACED: Regex =
+        Regex::new(r"(?P<sign>[+\-]) (?P<num>0x[a-fA-F0-9]+)").unwrap();
+    static ref RE_NUMBER_INT_SPACED: Regex =
+        Regex::new(r"(?P<sign>[+\-]) (?P<num>[0-9]+)").unwrap();
+    static ref RE_NUMBER_HEX: Regex =
+        Regex::new(r"(?P<sign>[+\-])(?P<num>0x[a-fA-F0-9]+)").unwrap();
     static ref RE_NUMBER_INT: Regex = Regex::new(r"(?P<sign>[+\-])(?P<num>[0-9]+)").unwrap();
 }
 
+use iced_x86::{FlowControl, Mnemonic};
 use smda::{
+    Disassembler, SmdaConfig,
     function::{Function, Instruction},
     report::DisassemblyReport,
-    Disassembler,
 };
 
 use crate::{
+    Result,
     consts::{FileFormat, Os},
     error::Error,
-    Result,
 };
 
 #[derive(Debug, Clone)]
@@ -30,7 +34,13 @@ struct InstructionS {
 }
 impl super::Instruction for InstructionS {
     fn is_mov_imm_to_stack(&self) -> Result<bool> {
-        is_mov_imm_to_stack(&self.i)
+        // 0.3.21: capa-rs used to re-implement this check by string-
+        // parsing `insn.mnemonic` / `insn.operands`. smda 0.4.1+ does
+        // the work internally via `get_printable_len` — a non-zero
+        // return value means the instruction is a `mov [stack], IMM`
+        // with a printable immediate. Same semantics, no string
+        // allocation, no duplicated heuristic to drift.
+        Ok(self.i.get_printable_len()? > 0)
     }
     fn get_printable_len(&self) -> Result<u64> {
         Ok(self.i.get_printable_len()?)
@@ -72,11 +82,34 @@ impl super::Function for FunctionS {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Extractor {
-    pub report: DisassemblyReport,
+/// 0.3.21: smda 0.4.0 made `DisassemblyReport<'a>` borrow from the
+/// input buffer (zero-copy). Capa-rs's existing public API
+/// (`Extractor::new(path, …, &data)`) owns the buffer at construction
+/// time, so we use `ouroboros::self_referencing` to hold `buf: Vec<u8>`
+/// and `report: DisassemblyReport<'this>` in the same struct without
+/// exposing smda's lifetime to capa-rs callers. The full zero-copy
+/// refactor (caller owns the buffer, `Extractor<'a>` takes `&'a [u8]`)
+/// is deferred to capa 0.4.0.
+#[self_referencing]
+struct ExtractorInner {
     buf: Vec<u8>,
+    #[borrows(buf)]
+    #[covariant]
+    report: DisassemblyReport<'this>,
+}
+
+pub struct Extractor {
+    inner: ExtractorInner,
     path: String,
+}
+
+impl std::fmt::Debug for Extractor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Extractor")
+            .field("path", &self.path)
+            .field("functions", &self.inner.borrow_report().functions.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl super::Extractor for Extractor {
@@ -85,18 +118,27 @@ impl super::Extractor for Extractor {
     }
 
     fn get_base_address(&self) -> Result<u64> {
-        Ok(self.report.base_addr)
+        Ok(self.report().base_addr)
     }
 
     fn format(&self) -> FileFormat {
-        match self.report.format {
+        // 0.3.21: smda 0.5.0 made `FileFormat` `#[non_exhaustive]` and
+        // added `MachO` + `Buffer` variants. Capa-rs's own FileFormat
+        // doesn't yet model those (deferred to 0.4.0 alongside the
+        // shellcode / Mach-O product surface), so fall back to a
+        // reasonable default. `Buffer` is reported as PE because
+        // raw-buffer entry isn't reachable from capa-rs's
+        // `FileCapabilities::from_file` path today.
+        match self.report().format {
             smda::FileFormat::PE => FileFormat::PE,
             smda::FileFormat::ELF => FileFormat::ELF,
+            smda::FileFormat::MachO | smda::FileFormat::Buffer => FileFormat::PE,
+            _ => FileFormat::PE,
         }
     }
 
     fn bitness(&self) -> u32 {
-        self.report.bitness
+        self.report().bitness
     }
 
     fn extract_global_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
@@ -120,20 +162,25 @@ impl super::Extractor for Extractor {
 
     fn extract_file_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        //        res.extend(self.extract_file_embedded_pe()?);
         res.extend(self.extract_file_export_names()?);
         res.extend(self.extract_file_import_names()?);
         res.extend(self.extract_file_section_names()?);
         res.extend(self.extract_file_embedded_pe()?);
         res.extend(self.extract_file_strings()?);
-        //        res.extend(self.extract_file_function_names(pbytes)?);
+        // 0.3.21: smda 0.4.2 added Function::function_name(), populated
+        // by Go pclntab / MinGW DWARF / Delphi VMT / Rust demangling.
+        // Wires those names into the rules engine for `function-name:`
+        // rule matches — previously this line was commented out
+        // ("NOTE not sure") because the smda 0.2 API exposed it via a
+        // different code path. The current smda surface is the right one.
+        res.extend(self.extract_file_function_names()?);
         res.extend(self.extract_file_format()?);
         Ok(res)
     }
 
     fn get_functions(&self) -> Result<BTreeMap<u64, Box<dyn super::Function>>> {
         let mut res = BTreeMap::<u64, Box<dyn super::Function>>::new();
-        for (u, f) in self.report.get_functions()? {
+        for (u, f) in self.report().get_functions()? {
             res.insert(*u, Box::new(FunctionS { f: f.clone() }));
         }
         Ok(res)
@@ -257,22 +304,42 @@ impl Extractor {
         path: &str,
         high_accuracy: bool,
         resolve_tailcalls: bool,
-        data: &Vec<u8>,
+        data: &[u8],
     ) -> Result<Extractor> {
+        // 0.3.21: smda 0.5.0 collapsed positional bool args into
+        // SmdaConfig + the new `parse(&buf, &cfg)` entry point. We
+        // build the config once and pass through; future analysis
+        // knobs (timeout, confidence threshold, …) land here without
+        // touching the public Extractor::new signature.
+        let cfg = SmdaConfig::new()
+            .path(path)
+            .high_accuracy(high_accuracy)
+            .resolve_tailcalls(resolve_tailcalls);
+        let inner = ExtractorInnerTryBuilder {
+            buf: data.to_owned(),
+            report_builder: |buf: &Vec<u8>| Disassembler::parse(buf, &cfg),
+        }
+        .try_build()?;
         Ok(Extractor {
-            report: Disassembler::disassemble_file(
-                path,
-                high_accuracy,
-                resolve_tailcalls,
-                Some(data),
-            )?,
-            buf: data.clone(),
+            inner,
             path: path.to_string(),
         })
     }
 
+    /// Borrowed view onto the smda report. Use this everywhere instead
+    /// of touching the inner ouroboros wrapper directly.
+    pub(crate) fn report(&self) -> &DisassemblyReport<'_> {
+        self.inner.borrow_report()
+    }
+
+    /// Raw input bytes — the file content `Extractor::new` was given.
     pub fn get_buf(&self) -> Result<&[u8]> {
-        Ok(&self.buf)
+        Ok(self.inner.borrow_buf().as_slice())
+    }
+
+    /// Alias of [`get_buf`] for in-file convenience.
+    fn buf(&self) -> &[u8] {
+        self.inner.borrow_buf().as_slice()
     }
 
     pub fn get_elf_os(elf: &goblin::elf::Elf) -> Result<Os> {
@@ -301,7 +368,7 @@ impl Extractor {
         }
     }
     pub fn extract_os(&self) -> Result<Os> {
-        match goblin::Object::parse(&self.buf)? {
+        match goblin::Object::parse(self.buf())? {
             goblin::Object::Elf(elf) => Extractor::get_elf_os(&elf),
             goblin::Object::PE(_) => Ok(Os::WINDOWS),
             _ => Err(Error::UnsupportedOsError),
@@ -309,7 +376,7 @@ impl Extractor {
     }
 
     pub fn extract_arch(&self) -> Result<crate::FileArchitecture> {
-        Ok(self.report.architecture)
+        Ok(self.report().architecture)
     }
 
     pub fn has_loop(
@@ -340,7 +407,7 @@ impl Extractor {
         let mut res = vec![];
         res.push((
             crate::rules::features::Feature::Format(crate::rules::features::FormatFeature::new(
-                if let smda::FileFormat::PE = self.report.format {
+                if let smda::FileFormat::PE = self.report().format {
                     "pe"
                 } else {
                     "elf"
@@ -355,7 +422,7 @@ impl Extractor {
     fn extract_file_embedded_pe(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
         for (mz_offset, _pe_offset, _key) in
-            Extractor::find_embedded_pe_headers(&self.report.buffer)
+            Extractor::find_embedded_pe_headers(self.report().binary_info.raw_data)
         {
             res.push((
                 crate::rules::features::Feature::Characteristic(
@@ -371,7 +438,7 @@ impl Extractor {
         &self,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        for (n, b, _e) in &self.report.sections {
+        for (n, b, _e) in &self.report().sections {
             res.push((
                 crate::rules::features::Feature::Section(
                     crate::rules::features::SectionFeature::new(n.trim_matches(char::from(0)), "")?,
@@ -384,7 +451,7 @@ impl Extractor {
 
     pub fn extract_file_export_names(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        for (e, o, ree) in &self.report.exports {
+        for (e, o, ree) in &self.report().exports {
             match ree {
                 None => {
                     res.push((
@@ -418,7 +485,7 @@ impl Extractor {
 
     pub fn extract_file_import_names(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        for (d, f, o) in &self.report.imports {
+        for (d, f, o) in &self.report().imports {
             for n in generate_symbols(&Some(d.to_string()), &Some(f.to_string()))? {
                 res.push((
                     crate::rules::features::Feature::Import(
@@ -431,9 +498,31 @@ impl Extractor {
         Ok(res)
     }
 
+    /// 0.3.21: emit `Feature::FunctionName` for every smda-discovered
+    /// function that carries a symbolic name. Names come from any of
+    /// smda's name-recovery pipelines: Go pclntab, MinGW DWARF (with
+    /// Rust / Itanium demangling), ELF dynsym/symtab, Delphi VMT
+    /// (`ClassName::vmt_<idx>`). Empty names are skipped.
+    fn extract_file_function_names(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+        let mut res = vec![];
+        for (addr, func) in self.report().get_functions()? {
+            let name = func.function_name();
+            if name.is_empty() {
+                continue;
+            }
+            res.push((
+                crate::rules::features::Feature::FunctionName(
+                    crate::rules::features::FunctionNameFeature::new(name, "")?,
+                ),
+                *addr,
+            ));
+        }
+        Ok(res)
+    }
+
     fn extract_file_strings(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        for (s, a) in extract_file_strings(&self.buf)? {
+        for (s, a) in extract_file_strings(self.buf())? {
             let trimmed = s.trim();
             if trimmed.is_empty() {
                 continue;
@@ -454,10 +543,14 @@ impl Extractor {
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        if insn.mnemonic != "call" {
+        // 0.3.21: smda 0.4.0 dropped `Instruction::mnemonic: String` in
+        // favour of typed `mnemonic_enum()` + `is_call/jmp/ret` helpers.
+        // String-compare hot paths now go through the iced `Mnemonic`
+        // enum — no allocation per instruction.
+        if !insn.is_call() {
             return Ok(res);
         }
-        if let Some(o) = &insn.operands {
+        if let Some(o) = insn.format_operands() {
             if o.starts_with("0x") {
                 return Ok(res);
             }
@@ -486,7 +579,7 @@ impl Extractor {
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        if insn.mnemonic != "call" {
+        if !insn.is_call() {
             return Ok(res);
         }
 
@@ -529,7 +622,7 @@ impl Extractor {
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        if let Some(o) = &insn.operands {
+        if let Some(o) = insn.format_operands() {
             let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
             for operand in operands {
                 if operand.contains("fs:") {
@@ -559,14 +652,16 @@ impl Extractor {
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        if ["call", "jmp"].contains(&&insn.mnemonic[..]) {
+        if insn.is_call() || insn.is_jmp() {
             if f.apirefs.contains_key(&insn.offset) {
                 return Ok(res);
             }
 
             if f.outrefs.contains_key(&insn.offset) {
                 for target in &f.outrefs[&insn.offset] {
-                    if self.report.get_section(&insn.offset)? != self.report.get_section(target)? {
+                    if self.report().get_section(&insn.offset)?
+                        != self.report().get_section(target)?
+                    {
                         res.push((
                             crate::rules::features::Feature::Characteristic(
                                 crate::rules::features::CharacteristicFeature::new(
@@ -578,12 +673,14 @@ impl Extractor {
                         ));
                     }
                 }
-            } else if let Some(o) = &insn.operands {
+            } else if let Some(o) = insn.format_operands() {
                 // if o.starts_with("0x") {
                 //     let target = u64::from_str_radix(&o[2..], 16)?;
                 if let Some(x) = o.strip_prefix("0x") {
                     let target = u64::from_str_radix(x, 16)?;
-                    if self.report.get_section(&insn.offset)? != self.report.get_section(&target)? {
+                    if self.report().get_section(&insn.offset)?
+                        != self.report().get_section(&target)?
+                    {
                         res.push((
                             crate::rules::features::Feature::Characteristic(
                                 crate::rules::features::CharacteristicFeature::new(
@@ -606,10 +703,10 @@ impl Extractor {
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        if !["push", "mov"].contains(&&insn.mnemonic[..]) {
+        if !matches!(insn.mnemonic_enum(), Mnemonic::Push | Mnemonic::Mov) {
             return Ok(res);
         }
-        if let Some(o) = &insn.operands {
+        if let Some(o) = insn.format_operands() {
             let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
             for operand in operands {
                 if (operand.contains("fs:") && operand.contains("0x30"))
@@ -634,7 +731,7 @@ impl Extractor {
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         Ok(vec![(
             crate::rules::features::Feature::Mnemonic(
-                crate::rules::features::MnemonicFeature::new(&insn.mnemonic, "")?,
+                crate::rules::features::MnemonicFeature::new(&insn.format_mnemonic(), "")?,
             ),
             insn.offset,
         )])
@@ -646,10 +743,13 @@ impl Extractor {
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        if !["xor", "xorpd", "xorps", "pxor"].contains(&&insn.mnemonic[..]) {
+        if !matches!(
+            insn.mnemonic_enum(),
+            Mnemonic::Xor | Mnemonic::Xorpd | Mnemonic::Xorps | Mnemonic::Pxor
+        ) {
             return Ok(res);
         }
-        if let Some(o) = &insn.operands {
+        if let Some(o) = insn.format_operands() {
             let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
             if operands[0] == operands[1] {
                 return Ok(res);
@@ -674,10 +774,10 @@ impl Extractor {
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        if &insn.mnemonic[..] != "call" {
+        if !insn.is_call() {
             return Ok(res);
         }
-        if let Some(o) = &insn.operands {
+        if let Some(o) = insn.format_operands() {
             if !o.starts_with("0x") {
                 return Ok(res);
             }
@@ -703,10 +803,10 @@ impl Extractor {
         //#
         //#     mov eax, [esi + 4]
         //#     mov eax, [esi + ecx + 16384]
-        if let Some(o) = &insn.operands {
+        if let Some(o) = insn.format_operands() {
             let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
             for (i, operand) in operands.iter().enumerate() {
-                if !insn.mnemonic.contains("lea") && !operand.contains("ptr") {
+                if insn.mnemonic_enum() != Mnemonic::Lea && !operand.contains("ptr") {
                     continue;
                 }
                 //NOTE not sure
@@ -743,7 +843,7 @@ impl Extractor {
                     insn.offset,
                 ));
 
-                if insn.mnemonic.contains("lea") {
+                if insn.mnemonic_enum() == Mnemonic::Lea {
                     res.push((
                         crate::rules::features::Feature::Number(
                             crate::rules::features::NumberFeature::new(f.bitness, &number, "")?,
@@ -765,9 +865,9 @@ impl Extractor {
         //# example:
         //#
         //#     push    offset aAcr     ; "ACR  > "
-        for data_ref in insn.get_data_refs(&self.report)? {
-            for v in derefs(&self.report, &data_ref)? {
-                let string_read = read_string(&self.report, &v)?;
+        for data_ref in insn.get_data_refs(self.report())? {
+            for v in derefs(self.report(), &data_ref)? {
+                let string_read = read_string(self.report(), &v)?;
                 let trimmed = string_read.trim();
                 if trimmed.is_empty() {
                     continue;
@@ -793,9 +893,9 @@ impl Extractor {
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
 
-        for data_ref in insn.get_data_refs(&self.report)? {
-            for v in derefs(&self.report, &data_ref)? {
-                let bytes_read = read_bytes(&self.report, &v, 0x100)?;
+        for data_ref in insn.get_data_refs(self.report())? {
+            for v in derefs(self.report(), &data_ref)? {
+                let bytes_read = read_bytes(self.report(), &v, 0x100)?;
                 if all_zeros(bytes_read)? || is_padding(bytes_read)? {
                     continue;
                 }
@@ -855,30 +955,33 @@ impl Extractor {
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        if let Some(o) = &insn.operands {
+        if let Some(o) = insn.format_operands() {
             let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
 
-            if insn.mnemonic == "add" && ["esp", "rsp"].contains(&operands[0].as_str()) {
+            if insn.mnemonic_enum() == Mnemonic::Add
+                && ["esp", "rsp"].contains(&operands[0].as_str())
+            {
                 return Ok(vec![]);
             }
 
             for (i, operand) in operands.iter().enumerate() {
                 if let Some(s) = self.parse_operand_to_number(operand) {
-                    if s >= 0
-                    {
+                    if s >= 0 {
                         res.push((
                             crate::rules::features::Feature::Number(
                                 crate::rules::features::NumberFeature::new(f.bitness, &s, "")?,
                             ),
                             insn.offset,
                         ));
-                    }
-                    else
-                    {
-                        let masked_value = (s as u32) as i128;  // Convierte a u32 y de vuelta a i128
+                    } else {
+                        let masked_value = (s as u32) as i128; // Convierte a u32 y de vuelta a i128
                         res.push((
                             crate::rules::features::Feature::Number(
-                                crate::rules::features::NumberFeature::new(f.bitness, &masked_value, "")?,
+                                crate::rules::features::NumberFeature::new(
+                                    f.bitness,
+                                    &masked_value,
+                                    "",
+                                )?,
                             ),
                             insn.offset,
                         ));
@@ -901,7 +1004,7 @@ impl Extractor {
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
-        let va = self.report.base_addr + insn.offset;
+        let va = self.report().base_addr + insn.offset;
 
         if let Some((dll, api)) = f.apirefs.get(&insn.offset) {
             if let Some(api_name) = api {
@@ -921,13 +1024,16 @@ impl Extractor {
             let mut api_candidates = Vec::new();
 
             for target in targets.iter().rev() {
-                if let Some((dll, api)) = self.report.addr_to_api.get(target) {
+                if let Some((dll, api)) = self.report().addr_to_api.get(target) {
                     api_candidates.push((*target, dll.clone(), api.clone()));
                 }
             }
 
             if !api_candidates.is_empty() {
-                let best_candidate = api_candidates.iter().max_by_key(|(addr, _, _)| *addr).unwrap();
+                let best_candidate = api_candidates
+                    .iter()
+                    .max_by_key(|(addr, _, _)| *addr)
+                    .unwrap();
                 let (mut best_addr, dll, api) = best_candidate.clone();
 
                 // FIX: api es Option<String>, desenvolverlo
@@ -953,7 +1059,7 @@ impl Extractor {
                 }
 
                 let chain_target = targets[0];
-                let referenced_function = match self.report.get_function(chain_target) {
+                let referenced_function = match self.report().get_function(chain_target) {
                     Ok(func) => func,
                     Err(_) => break,
                 };
@@ -977,9 +1083,7 @@ impl Extractor {
                 {
                     current_function = referenced_function;
                     current_instruction = referenced_function.get_instructions()?[0];
-                }
-                else
-                {
+                } else {
                     break;
                 }
             } else {
@@ -993,7 +1097,7 @@ impl Extractor {
     fn find_highest_address_for_symbol(&self, symbol_name: &str) -> Option<u64> {
         let mut addresses = Vec::new();
 
-        for (addr, (_, api)) in &self.report.addr_to_api {
+        for (addr, (_, api)) in &self.report().addr_to_api {
             if let Some(api_name) = api {
                 if api_name == symbol_name {
                     addresses.push(*addr);
@@ -1013,9 +1117,9 @@ impl Extractor {
     ) -> Result<()> {
         for name in generate_symbols(dll, api)? {
             res.push((
-                crate::rules::features::Feature::Api(
-                    crate::rules::features::ApiFeature::new(&name, "")?,
-                ),
+                crate::rules::features::Feature::Api(crate::rules::features::ApiFeature::new(
+                    &name, "",
+                )?),
                 va,
             ));
         }
@@ -1035,7 +1139,7 @@ impl Extractor {
         let start_offset = 64usize;
         let end = pbytes.len();
 
-        let end_safe_zone = if end > 0x40 { end - 0x40 } else { 0 };
+        let end_safe_zone = end.saturating_sub(0x40);
         let mut current_offset = start_offset;
         while current_offset < end_safe_zone {
             if pbytes[current_offset + 0x3E] == pbytes[current_offset + 0x3F] {
@@ -1076,94 +1180,12 @@ impl Extractor {
         bytes.iter().map(|&b| b ^ key).collect()
     }
 
-    fn _carve_pe(pbytes: &[u8], offset: u64) -> Result<Vec<(u64, u64)>> {
-        let mut mz_xor = vec![];
-        for key in 0..255 {
-            mz_xor.push((
-                Extractor::xor_static(b"MZ", key)?,
-                Extractor::xor_static(b"PE", key)?,
-                key,
-            ));
-        }
-
-        let pblen = pbytes.len();
-        let mut todo = vec![];
-
-        // Buscar patrones MZ XORed
-        for (mzx, pex, key) in mz_xor {
-            if let Some(relative_pos) = pbytes[offset as usize..]
-                .windows(mzx.len())
-                .position(|window| window == mzx)
-            {
-                let absolute_pos = offset as usize + relative_pos;  // ← CORREGIR: posición absoluta
-                todo.push((absolute_pos, mzx, pex, key));
-            }
-        }
-
-        let mut res = vec![];
-        while let Some((off, mzx, pex, key)) = todo.pop() {
-            // The MZ header has one field we will check
-            let e_lfanew_offset = off + 0x3C;
-            if e_lfanew_offset + 4 > pblen {
-                continue;
-            }
-
-            let ppp: [u8; 4] = Extractor::xor_static(&pbytes[e_lfanew_offset..e_lfanew_offset + 4], key)?
-                .try_into()
-                .map_err(|_| Error::InvalidRule(line!(), "Failed to parse e_lfanew".to_string()))?;
-
-            let pe_offset_value = u32::from_le_bytes(ppp);
-
-            if off + 1 < pblen {
-                if let Some(relative_pos) = pbytes[off + 1..]
-                    .windows(mzx.len())
-                    .position(|window| window == mzx)
-                {
-                    let next_absolute_pos = off + 1 + relative_pos;  // ← CORREGIR: posición absoluta
-                    todo.push((next_absolute_pos, mzx, pex.clone(), key));
-                }
-            }
-
-            let pe_header_offset = off + pe_offset_value as usize;
-            if pe_header_offset + 2 > pblen {
-                continue;
-            }
-            if pbytes[pe_header_offset..pe_header_offset + 2] == pex {
-                res.push((off as u64, key as u64));
-            }
-        }
-        Ok(res)
-    }
-}
-
-pub fn is_mov_imm_to_stack(ins: &Instruction) -> Result<bool> {
-    if !ins.mnemonic.starts_with("mov") {
-        return Ok(false);
-    }
-
-    if let Ok((dst, src)) = get_operands(ins) {
-        if u64::from_str_radix(&src[2..], 16).is_ok() {
-            for regname in ["ebp", "rbp", "esp", "rsp"] {
-                if dst.contains(regname) {
-                    return Ok(false);
-                }
-            }
-        }
-        return Ok(true);
-    }
-    Ok(false)
-}
-
-pub fn get_operands(ins: &Instruction) -> Result<(String, String)> {
-    if let Some(s) = &ins.operands {
-        let parts: Vec<&str> = s.split(',').collect();
-        if parts.len() > 1 {
-            return Ok((parts[0].to_string(), parts[1].to_string()));
-        } else {
-            return Ok((parts[0].to_string(), "".to_string()));
-        }
-    }
-    Ok(("".to_string(), "".to_string()))
+    // 0.3.21: _carve_pe (dead since the agent audit), the free-fn
+    // is_mov_imm_to_stack (replaced by smda's Instruction::get_printable_len),
+    // and get_operands (operand-string parser, no longer needed now that
+    // capa walks the typed iced operands via format_operands()) have all
+    // been removed. The trait-method InstructionS::is_mov_imm_to_stack
+    // delegates to smda directly.
 }
 
 fn clean_dll_name(dll_name: &str) -> String {
@@ -1181,10 +1203,11 @@ fn clean_dll_name(dll_name: &str) -> String {
     clean
 }
 
-
 pub fn generate_symbols(dll: &Option<String>, symbol: &Option<String>) -> Result<Vec<String>> {
     let mut res = vec![];
-    let symbol_name = symbol.clone().ok_or_else(|| Error::InvalidRule(line!(), file!().to_string()))?;
+    let symbol_name = symbol
+        .clone()
+        .ok_or_else(|| Error::InvalidRule(line!(), file!().to_string()))?;
 
     // Add simple symbol if it does not start with #
     if !symbol_name.starts_with('#') {
@@ -1201,7 +1224,8 @@ pub fn generate_symbols(dll: &Option<String>, symbol: &Option<String>) -> Result
     }
 
     // A/W variants para APIs Windows
-    if !symbol_name.starts_with("_Z") && (symbol_name.ends_with('A') || symbol_name.ends_with('W')) {
+    if !symbol_name.starts_with("_Z") && (symbol_name.ends_with('A') || symbol_name.ends_with('W'))
+    {
         let base_name = &symbol_name[..symbol_name.len() - 1];
         if !res.contains(&base_name.to_string()) {
             res.push(base_name.to_string());
@@ -1214,7 +1238,7 @@ pub fn generate_symbols(dll: &Option<String>, symbol: &Option<String>) -> Result
     Ok(res)
 }
 
-pub fn derefs(report: &DisassemblyReport, p: &u64) -> Result<Vec<u64>> {
+pub fn derefs(report: &DisassemblyReport<'_>, p: &u64) -> Result<Vec<u64>> {
     let mut res = vec![];
     let mut depth = 0;
     let mut pp = *p;
@@ -1240,34 +1264,29 @@ pub fn derefs(report: &DisassemblyReport, p: &u64) -> Result<Vec<u64>> {
     Ok(res)
 }
 
+/// 0.3.21: smda 0.4.0 replaced the owned `report.buffer: Vec<u8>` with
+/// the borrowed `binary_info.raw_data: &[u8]`. All readers go through
+/// that now — same semantics, no clone.
 pub fn read_bytes<'a>(
-    report: &'a DisassemblyReport,
+    report: &'a DisassemblyReport<'_>,
     offset: &u64,
     num_bytes: usize,
 ) -> Result<&'a [u8]> {
+    let raw = report.binary_info.raw_data;
     let rva = offset - report.base_addr;
-    let buffer_end = report.buffer.len();
+    let buffer_end = raw.len();
     let mut end_of_string = rva + num_bytes as u64;
 
-    // If end_of_string exceeds buffer_end, adjust it to buffer_end
     if end_of_string > buffer_end as u64 {
-        // println!(
-        //    "Buffer overflow error end_of_string: {} buffer_end: {}, rva: {}, num_bytes: {}. Force end.",
-        //     end_of_string, buffer_end, rva, num_bytes
-        // );
         end_of_string = buffer_end as u64;
     }
-
-    // Ensure that rva does not exceed the size of the buffer
     if rva > buffer_end as u64 {
-        // println!("Offset out of buffer range rva: {} buffer_end: {}", rva, buffer_end);
         return Err(Error::BufferOverflowError);
     }
-
-    Ok(&report.buffer[rva as usize..end_of_string as usize])
+    Ok(&raw[rva as usize..end_of_string as usize])
 }
 
-pub fn read_string(report: &DisassemblyReport, offset: &u64) -> Result<String> {
+pub fn read_string(report: &DisassemblyReport<'_>, offset: &u64) -> Result<String> {
     let alen = detect_ascii_len(report, offset)?;
     if alen > 1 {
         let bytes = read_bytes(report, offset, alen)?;
@@ -1285,31 +1304,25 @@ pub fn read_string(report: &DisassemblyReport, offset: &u64) -> Result<String> {
     Ok("".to_string())
 }
 
-pub fn detect_ascii_len(report: &DisassemblyReport, offset: &u64) -> Result<usize> {
-    let buffer_len = report.buffer.len() as u64;
+pub fn detect_ascii_len(report: &DisassemblyReport<'_>, offset: &u64) -> Result<usize> {
+    let raw = report.binary_info.raw_data;
+    let buffer_len = raw.len() as u64;
     let rva = offset.checked_sub(report.base_addr).ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "Offset is out of bounds relative to the base address",
-        )
+        std::io::Error::other("Offset is out of bounds relative to the base address")
     })?;
 
-    if rva as usize >= report.buffer.len() {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "RVA is beyond buffer length",
-        ))?;
+    if rva as usize >= raw.len() {
+        Err(std::io::Error::other("RVA is beyond buffer length"))?;
     }
 
-    let ascii_len = report.buffer[rva as usize..]
+    let ascii_len = raw[rva as usize..]
         .iter()
         .take_while(|&&ch| ch != 0 && ch.is_ascii())
         .take_while(|&&ch| b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+, -./:;<=>?@[\\]^_`{|}~ \r\n".contains(&ch))
         .count();
 
     if rva + ascii_len as u64 >= buffer_len {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        Err(std::io::Error::other(
             "Buffer overflow detected while detecting ASCII length",
         ))?;
     }
@@ -1317,16 +1330,23 @@ pub fn detect_ascii_len(report: &DisassemblyReport, offset: &u64) -> Result<usiz
     Ok(ascii_len)
 }
 
-pub fn detect_unicode_len(report: &DisassemblyReport, offset: &u64) -> Result<usize> {
+pub fn detect_unicode_len(report: &DisassemblyReport<'_>, offset: &u64) -> Result<usize> {
+    let raw = report.binary_info.raw_data;
     let mut unicode_len = 0;
     let mut rva = offset - report.base_addr;
-    let mut ch = report.buffer[rva as usize];
-    let mut second_char = report.buffer[rva as usize + 1];
-    while ch < 127 && b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+, -./:;<=>?@[\\]^_`{|}~ \r\n".contains(&ch) && second_char == 0{
+    if (rva as usize) + 1 >= raw.len() {
+        return Ok(0);
+    }
+    let mut ch = raw[rva as usize];
+    let mut second_char = raw[rva as usize + 1];
+    while ch < 127 && b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+, -./:;<=>?@[\\]^_`{|}~ \r\n".contains(&ch) && second_char == 0 {
         unicode_len += 2;
         rva += 2;
-        ch = report.buffer[rva as usize];
-        second_char = report.buffer[rva as usize + 1];
+        if (rva as usize) + 1 >= raw.len() {
+            return Ok(0);
+        }
+        ch = raw[rva as usize];
+        second_char = raw[rva as usize + 1];
     }
     if ch == 0 && second_char == 0 {
         return Ok(unicode_len);
@@ -1348,7 +1368,7 @@ pub fn is_padding(bytez: &[u8]) -> Result<bool> {
 
 pub fn is_security_cookie(f: &Function, insn: &Instruction) -> Result<bool> {
     //# security cookie check should use SP or BP
-    if let Some(o) = &insn.operands {
+    if let Some(o) = insn.format_operands() {
         let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
         if !["esp", "ebp", "rsp", "rbp"].contains(&&operands[1][..]) {
             return Ok(false);
@@ -1361,9 +1381,8 @@ pub fn is_security_cookie(f: &Function, insn: &Instruction) -> Result<bool> {
                 return Ok(true);
             }
             //# ... or within last bytes (instructions) before a return
-            if block.1[block.1.len() - 1].mnemonic.starts_with("ret")
-                && insn.offset > (block.1[block.1.len() - 1].offset - 0x40)
-            {
+            let last = &block.1[block.1.len() - 1];
+            if last.flow_control() == FlowControl::Return && insn.offset > (last.offset - 0x40) {
                 //SECURITY_COOKIE_BYTES_DELTA
                 return Ok(true);
             }
@@ -1374,7 +1393,7 @@ pub fn is_security_cookie(f: &Function, insn: &Instruction) -> Result<bool> {
 
 pub fn to_u16(src: &[u8]) -> Result<Vec<u16>> {
     let mut res = vec![];
-    if src.len() % 2 != 0 {
+    if !src.len().is_multiple_of(2) {
         return Ok(res);
     }
     let mut i = 0;
@@ -1405,9 +1424,10 @@ lazy_static::lazy_static! {
 }
 
 pub fn extract_ascii_strings(data: &[u8], min_length: usize) -> Result<Vec<(String, u64)>> {
-    if data.first().map_or(false, |&b| {
-        REPEATS.contains(&b) && buf_filled_with(data, &b)
-    }) {
+    if data
+        .first()
+        .is_some_and(|&b| REPEATS.contains(&b) && buf_filled_with(data, &b))
+    {
         return Ok(vec![]);
     }
     let re = regex::bytes::Regex::new(&format!(r##"([{}]{{{},}})"##, ASCII_BYTE, min_length))?;

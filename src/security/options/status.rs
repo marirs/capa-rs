@@ -1,6 +1,6 @@
 use crate::{
-    security::elf::{self, needed_libc::NeededLibC},
     Result,
+    security::elf::{self, needed_libc::NeededLibC},
 };
 use core::{marker::PhantomPinned, pin::Pin, ptr::NonNull};
 use serde::{Deserialize, Serialize};

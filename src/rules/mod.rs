@@ -8,7 +8,7 @@ use statement::{
     StatementElement, SubscopeStatement,
 };
 use std::collections::HashMap;
-use yaml_rust::{yaml::Hash, Yaml, YamlLoader};
+use yaml_rust::{Yaml, YamlLoader, yaml::Hash};
 
 use self::features::ComType;
 
@@ -39,6 +39,11 @@ pub enum CommandType {
 }
 
 impl CommandType {
+    // 0.3.21: intentionally not implementing `std::str::FromStr` — that
+    // trait's `from_str` returns `Result<Self, Self::Err>` with a strict
+    // error-type signature, while this method returns capa-rs's `Result`
+    // for consistency with the rest of the parser. Allow the clippy lint.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Result<Self> {
         match s {
             "and" => Ok(CommandType::And),
@@ -110,7 +115,7 @@ pub enum Scope {
     Process,
     Thread,
     Call,
-    SpanOfCalls
+    SpanOfCalls,
 }
 
 impl TryFrom<&Yaml> for Scope {
@@ -131,7 +136,7 @@ impl TryFrom<&Yaml> for Scope {
                 return Err(Error::InvalidScope(
                     line!(),
                     value.as_str().unwrap().to_string(),
-                ))
+                ));
             }
             None => Scope::None,
         })
@@ -316,12 +321,22 @@ impl Rule {
                     let bitness = Rule::parse_int(&parts[1].trim()[1..])? as u32;
                     return Ok(RuleFeatureType::Offset(bitness));
                 }
-                if let Some(rest) = key.strip_prefix("operand[").and_then(|s| s.strip_suffix("].number")) {
-                    let idx = rest.parse::<usize>().map_err(|_| Error::InvalidRule(line!(), key.to_string()))?;
+                if let Some(rest) = key
+                    .strip_prefix("operand[")
+                    .and_then(|s| s.strip_suffix("].number"))
+                {
+                    let idx = rest
+                        .parse::<usize>()
+                        .map_err(|_| Error::InvalidRule(line!(), key.to_string()))?;
                     return Ok(RuleFeatureType::OperandNumber(idx));
                 }
-                if let Some(rest) = key.strip_prefix("operand[").and_then(|s| s.strip_suffix("].offset")) {
-                    let idx = rest.parse::<usize>().map_err(|_| Error::InvalidRule(line!(), key.to_string()))?;
+                if let Some(rest) = key
+                    .strip_prefix("operand[")
+                    .and_then(|s| s.strip_suffix("].offset"))
+                {
+                    let idx = rest
+                        .parse::<usize>()
+                        .map_err(|_| Error::InvalidRule(line!(), key.to_string()))?;
                     return Ok(RuleFeatureType::OperandOffset(idx));
                 }
                 Err(Error::InvalidRule(line!(), key.to_string()))
@@ -475,15 +490,16 @@ impl Rule {
     ) -> Result<(Vec<StatementElement>, String)> {
         let mut description = String::new();
 
-        let params = vals.iter()
+        let params = vals
+            .iter()
             .map(|vv| Rule::build_statements(vv, scopes))
             .filter_map(|result| match result {
                 Ok(StatementElement::Description(s)) => {
                     description = s.value.clone();
                     None
-                },
+                }
                 Ok(elem) => Some(Ok(elem)),
-                Err(e) => Some(Err(e))
+                Err(e) => Some(Err(e)),
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -498,9 +514,10 @@ impl Rule {
         Ok(StatementElement::Statement(Box::new(Statement::Subscope(
             SubscopeStatement::new(
                 scope,
-                StatementElement::Statement(Box::new(Statement::And(
-                    AndStatement::new(params, description)?,
-                ))),
+                StatementElement::Statement(Box::new(Statement::And(AndStatement::new(
+                    params,
+                    description,
+                )?))),
                 description,
             )?,
         ))))
@@ -526,43 +543,47 @@ impl Rule {
                     return Ok(StatementElement::Description(Box::new(Description::new(
                         val,
                     )?)));
-                },
+                }
                 CommandType::And => {
                     let val = vval
                         .as_vec()
                         .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-                    let (params, description) = Rule::extract_elements_and_description(val, scopes)?;
+                    let (params, description) =
+                        Rule::extract_elements_and_description(val, scopes)?;
                     return Ok(StatementElement::Statement(Box::new(Statement::And(
                         AndStatement::new(params, &description)?,
                     ))));
-                },
+                }
                 CommandType::Or => {
                     let val = vval
                         .as_vec()
                         .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-                    let (params, description) = Rule::extract_elements_and_description(val, scopes)?;
+                    let (params, description) =
+                        Rule::extract_elements_and_description(val, scopes)?;
                     return Ok(StatementElement::Statement(Box::new(Statement::Or(
                         OrStatement::new(params, &description)?,
                     ))));
-                },
+                }
                 CommandType::Not => {
                     let val = vval
                         .as_vec()
                         .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-                    let (params, description) = Rule::extract_elements_and_description(val, scopes)?;
+                    let (params, description) =
+                        Rule::extract_elements_and_description(val, scopes)?;
                     return Ok(StatementElement::Statement(Box::new(Statement::Not(
                         NotStatement::new(params[0].clone(), &description)?,
                     ))));
-                },
+                }
                 CommandType::Optional => {
                     let val = vval
                         .as_vec()
                         .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-                    let (params, description) = Rule::extract_elements_and_description(val, scopes)?;
+                    let (params, description) =
+                        Rule::extract_elements_and_description(val, scopes)?;
                     return Ok(StatementElement::Statement(Box::new(Statement::Some(
                         SomeStatement::new(0, params, &description)?,
                     ))));
-                },
+                }
                 CommandType::Process => {
                     if [Scope::File].contains(&scopes.r#static.scope)
                         || [Scope::File].contains(&scopes.dynamic.scope)
@@ -572,7 +593,9 @@ impl Rule {
                             .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
 
                         let process_scope = Scopes {
-                            r#static: StaticScope { scope: Scope::Process },
+                            r#static: StaticScope {
+                                scope: Scope::Process,
+                            },
                             dynamic: DynamicScope { scope: Scope::None },
                         };
 
@@ -593,13 +616,15 @@ impl Rule {
                         line!(),
                         format!("{:?}: {:?}", key, vval),
                     ));
-                },
+                }
                 CommandType::Thread => {
                     if [Scope::File, Scope::Process].contains(&scopes.r#static.scope)
                         || [Scope::File, Scope::Process].contains(&scopes.dynamic.scope)
                     {
                         let thread_scope = Scopes {
-                            r#static: StaticScope { scope: Scope::Thread },
+                            r#static: StaticScope {
+                                scope: Scope::Thread,
+                            },
                             dynamic: DynamicScope { scope: Scope::None },
                         };
 
@@ -607,7 +632,8 @@ impl Rule {
                             .as_vec()
                             .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
 
-                        let (params, description) = Rule::extract_elements_and_description(val, &thread_scope)?;
+                        let (params, description) =
+                            Rule::extract_elements_and_description(val, &thread_scope)?;
 
                         if params.len() != 1 {
                             return Err(Error::InvalidRule(
@@ -622,11 +648,13 @@ impl Rule {
                         line!(),
                         format!("{:?}: {:?}", key, vval),
                     ));
-                },
+                }
                 CommandType::Call => {
                     let call_scope = Scopes {
                         r#static: StaticScope { scope: Scope::Call },
-                        dynamic: DynamicScope { scope: Scope::SpanOfCalls },
+                        dynamic: DynamicScope {
+                            scope: Scope::SpanOfCalls,
+                        },
                     };
 
                     let val_list = match vval {
@@ -636,11 +664,12 @@ impl Rule {
                             return Err(Error::InvalidRule(
                                 line!(),
                                 format!("call expects array or hash: {:?}", vval),
-                            ))
+                            ));
                         }
                     };
 
-                    let (params, description) = Rule::extract_elements_and_description(val_list, &call_scope)?;
+                    let (params, description) =
+                        Rule::extract_elements_and_description(val_list, &call_scope)?;
 
                     if params.len() != 1 {
                         return Err(Error::InvalidRule(
@@ -650,11 +679,13 @@ impl Rule {
                     }
 
                     return Rule::wrap_and_subscope(Scope::Call, params, &description);
-                },
+                }
                 CommandType::Function => {
                     if Scope::File == scopes.r#static.scope || Scope::File == scopes.dynamic.scope {
                         let function_scope = Scopes {
-                            r#static: StaticScope { scope: Scope::Function },
+                            r#static: StaticScope {
+                                scope: Scope::Function,
+                            },
                             dynamic: DynamicScope { scope: Scope::None },
                         };
 
@@ -662,25 +693,38 @@ impl Rule {
                             .as_vec()
                             .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
 
-                        let (params, description) = Rule::extract_elements_and_description(val, &function_scope)?;
+                        let (params, description) =
+                            Rule::extract_elements_and_description(val, &function_scope)?;
 
                         if params.len() != 1 {
-                            return Err(Error::InvalidRule(line!(), format!("{:?}: {:?}", key, vval)));
+                            return Err(Error::InvalidRule(
+                                line!(),
+                                format!("{:?}: {:?}", key, vval),
+                            ));
                         }
 
                         return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
-                            SubscopeStatement::new(Scope::Function, params[0].clone(), &description)?,
+                            SubscopeStatement::new(
+                                Scope::Function,
+                                params[0].clone(),
+                                &description,
+                            )?,
                         ))));
                     }
 
-                    return Err(Error::InvalidRule(line!(), format!("{:?}: {:?}", key, vval)));
-                },
+                    return Err(Error::InvalidRule(
+                        line!(),
+                        format!("{:?}: {:?}", key, vval),
+                    ));
+                }
                 CommandType::BasicBlock => {
                     if [Scope::Function, Scope::BasicBlock].contains(&scopes.r#static.scope)
                         || [Scope::Function, Scope::BasicBlock].contains(&scopes.dynamic.scope)
                     {
                         let bb_scope = Scopes {
-                            r#static: StaticScope { scope: Scope::BasicBlock },
+                            r#static: StaticScope {
+                                scope: Scope::BasicBlock,
+                            },
                             dynamic: DynamicScope { scope: Scope::None },
                         };
 
@@ -691,27 +735,36 @@ impl Rule {
                                 return Err(Error::InvalidRule(
                                     line!(),
                                     format!("basic block expects array or hash: {:?}", vval),
-                                ))
+                                ));
                             }
                         };
 
-                        let (params, description) = Rule::extract_elements_and_description(val_list, &bb_scope)?;
+                        let (params, description) =
+                            Rule::extract_elements_and_description(val_list, &bb_scope)?;
 
                         if params.is_empty() {
-                            return Err(Error::InvalidRule(line!(), format!("basic block must have at least one condition: {:?}", vval)));
+                            return Err(Error::InvalidRule(
+                                line!(),
+                                format!("basic block must have at least one condition: {:?}", vval),
+                            ));
                         }
 
                         return Rule::wrap_and_subscope(Scope::BasicBlock, params, &description);
                     }
 
-                    return Err(Error::InvalidRule(line!(), format!("{:?}: {:?}", key, vval)));
-                },
+                    return Err(Error::InvalidRule(
+                        line!(),
+                        format!("{:?}: {:?}", key, vval),
+                    ));
+                }
                 CommandType::Instruction => {
                     if [Scope::BasicBlock, Scope::Function].contains(&scopes.r#static.scope)
                         || [Scope::BasicBlock, Scope::Function].contains(&scopes.dynamic.scope)
                     {
                         let instruction_scope = Scopes {
-                            r#static: StaticScope { scope: Scope::Instruction },
+                            r#static: StaticScope {
+                                scope: Scope::Instruction,
+                            },
                             dynamic: DynamicScope { scope: Scope::None },
                         };
 
@@ -719,7 +772,8 @@ impl Rule {
                             .as_vec()
                             .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
 
-                        let (params, description) = Rule::extract_elements_and_description(val, &instruction_scope)?;
+                        let (params, description) =
+                            Rule::extract_elements_and_description(val, &instruction_scope)?;
 
                         return Rule::wrap_and_subscope(Scope::Instruction, params, &description);
                     }
@@ -728,7 +782,7 @@ impl Rule {
                         line!(),
                         format!("{:?},  {:?}: {:?}", scopes, key, vval),
                     ));
-                },
+                }
                 _ => {
                     let kkey = key.as_str().ok_or_else(|| {
                         Error::InvalidRule(line!(), format!("{:?} must be string", key))
@@ -854,7 +908,7 @@ impl Rule {
                                 return Err(Error::InvalidRule(
                                     line!(),
                                     format!("{:?} {:?}", key, vval),
-                                ))
+                                ));
                             }
                         }
                     } else if let Some(stripped_key) = kkey.strip_prefix("com/") {
@@ -961,7 +1015,6 @@ pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
     }
     Ok(rules)
 }
-
 
 #[derive(Debug)]
 pub struct RuleSet {
@@ -1083,7 +1136,8 @@ pub fn get_rules_with_scope<'a>(rules: Vec<&'a Rule>, scope: &Scope) -> Result<V
 }
 
 fn generate_namespace_paths(namespace: &str) -> Vec<String> {
-    namespace.split('/')
+    namespace
+        .split('/')
         .scan(String::new(), |state, part| {
             if !state.is_empty() {
                 state.push('/');
@@ -1098,9 +1152,10 @@ pub fn index_rules_by_namespace(rules: &[Rule]) -> Result<HashMap<String, Vec<&R
     let mut namespaces: HashMap<String, Vec<&Rule>> = HashMap::new();
 
     for rule in rules {
-        if let Some(Yaml::String(namespace)) = rule.meta.get(&Yaml::String("namespace".to_string())) {
+        if let Some(Yaml::String(namespace)) = rule.meta.get(&Yaml::String("namespace".to_string()))
+        {
             for path in generate_namespace_paths(namespace) {
-                namespaces.entry(path).or_insert_with(Vec::new).push(rule);
+                namespaces.entry(path).or_default().push(rule);
             }
         }
     }
@@ -1112,9 +1167,10 @@ pub fn index_rules_by_namespace2<'a>(rules: &[&'a Rule]) -> Result<HashMap<Strin
     let mut namespaces: HashMap<String, Vec<&'a Rule>> = HashMap::new();
 
     for &rule in rules {
-        if let Some(Yaml::String(namespace)) = rule.meta.get(&Yaml::String("namespace".to_string())) {
+        if let Some(Yaml::String(namespace)) = rule.meta.get(&Yaml::String("namespace".to_string()))
+        {
             for path in generate_namespace_paths(namespace) {
-                namespaces.entry(path).or_insert_with(Vec::new).push(rule);
+                namespaces.entry(path).or_default().push(rule);
             }
         }
     }

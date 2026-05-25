@@ -3,7 +3,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use crate::{rules::Value, Error, Result};
+use crate::{Error, Result, rules::Value};
 
 use super::{Scope, Scopes};
 
@@ -1175,7 +1175,7 @@ impl SubstringFeature {
             //# unlike other features, we cannot return put a reference to `self` directly in a `Result`.
             //# this is because `self` may match on many strings, so we can't stuff the matched value into it.
             //# instead, return a new instance that has a reference to both the substring and the matched values.
-            return Ok((true, locations.iter().copied().collect()));
+            Ok((true, locations.iter().copied().collect()))
         } else {
             Ok((false, vec![]))
         }
@@ -1190,16 +1190,87 @@ pub struct RegexFeature {
     scopes: HashSet<Scope>,
 }
 
+/// (0.3.21) Translate non-ASCII `\xHH` byte escapes to Unicode
+/// code-point escapes `\u{HH}` so crates.io `fancy-regex 0.18` parses
+/// them.
+///
+/// Background: capa-rs used to depend on the `mnaza/fancy-regex` git
+/// fork that patched out a `NonUnicodeUnsupported` parser check.
+/// Swapping to upstream crates.io `fancy-regex` (the no-git-deps
+/// cleanup) re-introduced that strictness: any pattern containing
+/// `\x80`-`\xff` is rejected at parse time, even with an inline
+/// `(?-u)` flag. Many `capa-rules` patterns rely on high byte
+/// escapes for malware signature matching.
+///
+/// `\xHH` and `\u{HH}` match the same code point at the regex-match
+/// level. ASCII range (`\x00`-`\x7F`) is left alone — fancy-regex
+/// accepts those as-is. Escaped backslashes (`\\x80` = literal
+/// `\x80`, not a byte escape) are preserved.
+///
+/// Pure string transform — does not try to parse the full regex
+/// grammar, only the `\xHH` token. Runs once per `RegexFeature`
+/// construction (i.e. once per rule load), so allocation cost is
+/// negligible.
+fn unicode_safe_byte_escapes(pat: &str) -> String {
+    let chars: Vec<char> = pat.chars().collect();
+    let mut out = String::with_capacity(pat.len());
+    let mut i = 0;
+    while i < chars.len() {
+        // `\\` — escaped backslash. Emit both verbatim so the next
+        // iteration doesn't misread the trailing `\` as an escape lead.
+        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '\\' {
+            out.push('\\');
+            out.push('\\');
+            i += 2;
+            continue;
+        }
+        // `\xHH` where HH is exactly two hex digits.
+        if chars[i] == '\\'
+            && i + 3 < chars.len()
+            && chars[i + 1] == 'x'
+            && chars[i + 2].is_ascii_hexdigit()
+            && chars[i + 3].is_ascii_hexdigit()
+        {
+            let mut hex = String::with_capacity(2);
+            hex.push(chars[i + 2]);
+            hex.push(chars[i + 3]);
+            // SAFETY: both chars are ASCII hex by the check above.
+            let v = u8::from_str_radix(&hex, 16).unwrap();
+            if v >= 0x80 {
+                out.push_str(&format!("\\u{{{v:x}}}"));
+            } else {
+                // ASCII byte — leave as `\xHH`, fancy-regex accepts.
+                out.push('\\');
+                out.push('x');
+                out.push(chars[i + 2]);
+                out.push(chars[i + 3]);
+            }
+            i += 4;
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 impl RegexFeature {
     pub fn new(value: &str, description: &str) -> Result<RegexFeature> {
-        let mut rre = r"(?-u)(?s)".to_string() + &value["/".len()..value.len() - "/".len()];
+        let body = &value["/".len()..value.len() - "/".len()];
+        // 0.3.21: pre-0.3.21 we prepended `(?-u)` to put the regex into
+        // byte mode (matched the `mnaza/fancy-regex` fork's behaviour).
+        // Crates.io `fancy-regex 0.18` rejects `(?-u)` outright
+        // (`NonUnicodeUnsupported` at parse position 3) because its
+        // lookbehind/backreference engine needs Unicode mode. Stay in
+        // Unicode mode and let `unicode_safe_byte_escapes` convert the
+        // problematic `\xHH` byte escapes to `\u{HH}` Unicode escapes,
+        // which match the same code point either way.
+        let mut rre = r"(?s)".to_string() + body;
         if value.ends_with("/i") {
-            rre = r"(?-u)(?s)(?i)".to_string() + &value["/".len()..value.len() - "/i".len()];
+            let body_i = &value["/".len()..value.len() - "/i".len()];
+            rre = r"(?s)(?i)".to_string() + body_i;
         }
-        //        rre = rre.replace("\\/", "/");
-        //        rre = rre.replace("\\\"", "\"");
-        //        rre = rre.replace("\\'", "'");
-        //        rre = rre.replace("\\%", "%");
+        rre = unicode_safe_byte_escapes(&rre);
         let rr = match fancy_regex::Regex::new(&rre) {
             Ok(s) => s,
             Err(e) => {
@@ -1614,5 +1685,70 @@ impl PartialEq for FormatFeature {
 impl FeatureT for FormatFeature {
     fn scopes(&self) -> &HashSet<Scope> {
         &self.scopes
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unicode_safe_byte_escapes;
+
+    #[test]
+    fn passes_ascii_byte_escapes_through_unchanged() {
+        // fancy-regex 0.18 accepts \xHH where HH <= 0x7F directly.
+        assert_eq!(unicode_safe_byte_escapes(r"\x00"), r"\x00");
+        assert_eq!(unicode_safe_byte_escapes(r"\x7F"), r"\x7F");
+        assert_eq!(unicode_safe_byte_escapes(r"foo\x41bar"), r"foo\x41bar");
+    }
+
+    #[test]
+    fn translates_high_byte_escapes_to_code_points() {
+        // The actual fix — these would otherwise hit NonUnicodeUnsupported.
+        assert_eq!(unicode_safe_byte_escapes(r"\x80"), r"\u{80}");
+        assert_eq!(unicode_safe_byte_escapes(r"\xFF"), r"\u{ff}");
+        assert_eq!(unicode_safe_byte_escapes(r"\xC2"), r"\u{c2}");
+    }
+
+    #[test]
+    fn preserves_escaped_backslashes() {
+        // `\\x80` is `\` then literal `x80` text — not a byte escape.
+        // The escaped-backslash branch must consume two chars.
+        assert_eq!(unicode_safe_byte_escapes(r"\\x80"), r"\\x80");
+        assert_eq!(unicode_safe_byte_escapes(r"\\\\xFF"), r"\\\\xFF");
+    }
+
+    #[test]
+    fn handles_mixed_patterns() {
+        // Realistic capa-rules-style snippet.
+        assert_eq!(
+            unicode_safe_byte_escapes(r"(?-u)(?s)foo\x80bar\x7Fbaz"),
+            r"(?-u)(?s)foo\u{80}bar\x7Fbaz"
+        );
+    }
+
+    #[test]
+    fn leaves_non_xhh_escapes_alone() {
+        // \d, \n, \w etc. — only \xHH is touched.
+        assert_eq!(unicode_safe_byte_escapes(r"\d+"), r"\d+");
+        assert_eq!(unicode_safe_byte_escapes(r"foo\nbar"), r"foo\nbar");
+        assert_eq!(unicode_safe_byte_escapes(r"\u{80}"), r"\u{80}");
+    }
+
+    #[test]
+    fn ignores_invalid_xhh_sequences() {
+        // \xZZ is invalid — pass through verbatim.
+        assert_eq!(unicode_safe_byte_escapes(r"\xZZ"), r"\xZZ");
+        // \x with no hex after — pass through.
+        assert_eq!(unicode_safe_byte_escapes(r"\x"), r"\x");
+        // \xH (one digit) — pass through.
+        assert_eq!(unicode_safe_byte_escapes(r"\xA"), r"\xA");
+    }
+
+    #[test]
+    fn preserves_multibyte_utf8_literals() {
+        // A regex pattern can literally contain Unicode characters
+        // outside the escape syntax; those must survive.
+        let pat = "中文\\x80";
+        let expected = "中文\\u{80}";
+        assert_eq!(unicode_safe_byte_escapes(pat), expected);
     }
 }

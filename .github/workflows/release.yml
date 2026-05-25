@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build artifacts for (e.g. v0.3.21). Must already exist."
+        required: true
+
+permissions:
+  contents: write   # for creating GitHub releases + uploading assets
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: verify build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-features
+
+  package:
+    name: package source + cargo artifacts
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # `cargo package` builds the exact .crate file that would be uploaded
+      # to crates.io if/when we publish manually. Shipping it as a release
+      # asset lets downstream consumers verify what's on crates.io matches
+      # the tagged source, and lets them install offline via
+      # `cargo install --path`.
+      - name: Build cargo package
+        run: cargo package --allow-dirty --no-verify
+
+      - name: Stage release artifacts
+        run: |
+          tag="${{ steps.tag.outputs.tag }}"
+          mkdir -p release
+
+          # 1) The cargo .crate (same bytes that would go to crates.io)
+          cp target/package/capa-*.crate "release/capa-${tag}.crate"
+
+          # 2) A plain source tarball excluding target/, .git/, etc.
+          src_name="capa-${tag}-src"
+          git archive --format=tar.gz --prefix="${src_name}/" \
+            -o "release/${src_name}.tar.gz" HEAD
+
+          # 3) SHA-256 sums next to each artifact
+          (cd release && \
+            for f in *.crate *.tar.gz; do
+              sha256sum "$f" > "$f.sha256"
+            done)
+
+          ls -la release
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: capa-release-artifacts
+          path: |
+            release/*.crate
+            release/*.tar.gz
+            release/*.sha256
+          if-no-files-found: error
+
+  github-release:
+    name: create GitHub release
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          tag="${{ steps.tag.outputs.tag }}"
+          previous=$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || echo "")
+          {
+            echo "notes<<EOF"
+            if [ -n "$previous" ]; then
+              echo "## Changes since $previous"
+              echo
+              git log --pretty=format:"- %s (%h)" "${previous}..${tag}"
+            else
+              echo "## Initial release"
+              echo
+              git log --pretty=format:"- %s (%h)" "${tag}"
+            fi
+            echo
+            echo
+            echo "## Artifacts"
+            echo
+            echo "- \`capa-${tag}.crate\` — the cargo package archive (same bytes as crates.io)"
+            echo "- \`capa-${tag}-src.tar.gz\` — plain git source tarball"
+            echo "- Matching \`*.sha256\` sums for verification"
+            echo
+            echo "Publishing to crates.io is performed manually with \`cargo publish\` and is not part of this workflow."
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: capa-release-artifacts
+          path: release
+
+      - name: List files going to release
+        run: ls -la release
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          body: ${{ steps.notes.outputs.notes }}
+          files: release/*
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}

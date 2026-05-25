@@ -2,6 +2,7 @@ use self::status::{
     ELFFortifySourceStatus, HasSecurityStatus, PEControlFlowGuardLevel, YesNoUnknownStatus,
 };
 use crate::{
+    BinarySecurityCheckOptions, LibCSpec, Result,
     security::{
         pe,
         {
@@ -12,7 +13,6 @@ use crate::{
             parser::BinaryParser,
         },
     },
-    BinarySecurityCheckOptions, LibCSpec, Result,
 };
 
 pub(crate) mod status;

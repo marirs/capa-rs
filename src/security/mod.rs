@@ -1,7 +1,7 @@
 use crate::{
+    Result,
     error::Error,
     security::{options::status::SecurityCheckStatus, parser::BinaryParser},
-    Result,
 };
 use std::path::Path;
 

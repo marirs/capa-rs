@@ -1,9 +1,14 @@
+// 0.3.21: same clippy allowlist rationale as the library crate — see the
+// comment at the top of `src/lib.rs`. Examples are compiled as a separate
+// crate so the lib-level `#![allow]` doesn't reach them automatically.
+#![allow(clippy::collapsible_if, clippy::collapsible_match)]
+
 use std::fs;
 use std::time::Instant;
 
 use clap::Parser;
-use prettytable::{color, format::Alignment, Attr, Cell, Row, Table};
-use serde_json::{to_value, Map, Value};
+use prettytable::{Attr, Cell, Row, Table, color, format::Alignment};
+use serde_json::{Map, Value, to_value};
 
 use capa::{BinarySecurityCheckOptions, FileCapabilities};
 
@@ -172,11 +177,9 @@ fn main() {
 fn get_properties(props: &Value, features: Option<&Value>) -> Table {
     let meta = props.as_object().unwrap();
     let mut tbl = Table::new();
-    tbl.set_titles(Row::new(vec![Cell::new_align(
-        "File Properties",
-        Alignment::CENTER,
-    )
-    .with_hspan(2)]));
+    tbl.set_titles(Row::new(vec![
+        Cell::new_align("File Properties", Alignment::CENTER).with_hspan(2),
+    ]));
     for (k, v) in meta {
         tbl.add_row(Row::new(vec![
             Cell::new(k)
@@ -200,11 +203,9 @@ fn get_properties(props: &Value, features: Option<&Value>) -> Table {
 /// Gets the MITRE ATT&CK information and returns as a TABLE for stdout
 fn get_mitre(attacks: &Map<String, Value>) -> Table {
     let mut tbl = Table::new();
-    tbl.set_titles(Row::new(vec![Cell::new_align(
-        "MITRE ATT&CK",
-        Alignment::CENTER,
-    )
-    .with_hspan(2)]));
+    tbl.set_titles(Row::new(vec![
+        Cell::new_align("MITRE ATT&CK", Alignment::CENTER).with_hspan(2),
+    ]));
     tbl.set_titles(Row::new(vec![
         Cell::new_align("ATT&CK Tactic", Alignment::LEFT),
         Cell::new_align("ATT&CK Technique", Alignment::LEFT),
@@ -231,11 +232,9 @@ fn get_mitre(attacks: &Map<String, Value>) -> Table {
 /// Gets the Malware Behavior Catalog information and returns as a TABLE for stdout
 fn get_mbc(mbc: &Map<String, Value>) -> Table {
     let mut tbl = Table::new();
-    tbl.set_titles(Row::new(vec![Cell::new_align(
-        "Malware Behavior Catalog",
-        Alignment::CENTER,
-    )
-    .with_hspan(2)]));
+    tbl.set_titles(Row::new(vec![
+        Cell::new_align("Malware Behavior Catalog", Alignment::CENTER).with_hspan(2),
+    ]));
     tbl.set_titles(Row::new(vec![
         Cell::new_align("MBC Objective", Alignment::LEFT),
         Cell::new_align("MBC Behavior", Alignment::LEFT),
@@ -261,11 +260,9 @@ fn get_mbc(mbc: &Map<String, Value>) -> Table {
 fn get_security_checks(security_checks: &Value) -> Table {
     let security_checks = security_checks.as_array().unwrap();
     let mut tbl = Table::new();
-    tbl.set_titles(Row::new(vec![Cell::new_align(
-        "Security Checks",
-        Alignment::CENTER,
-    )
-    .with_hspan(2)]));
+    tbl.set_titles(Row::new(vec![
+        Cell::new_align("Security Checks", Alignment::CENTER).with_hspan(2),
+    ]));
     for check in security_checks {
         let check = check.as_object().unwrap();
         let check_name = check.get("name").unwrap().as_str().unwrap();
@@ -294,11 +291,9 @@ fn get_security_checks(security_checks: &Value) -> Table {
 /// Gets the Capability & Namespace information and returns as a TABLE for stdout
 fn get_namespace(namespace: &Map<String, Value>) -> Table {
     let mut tbl = Table::new();
-    tbl.set_titles(Row::new(vec![Cell::new_align(
-        "File Capability/Namespace",
-        Alignment::CENTER,
-    )
-    .with_hspan(2)]));
+    tbl.set_titles(Row::new(vec![
+        Cell::new_align("File Capability/Namespace", Alignment::CENTER).with_hspan(2),
+    ]));
     tbl.set_titles(Row::new(vec![
         Cell::new_align("Capability", Alignment::LEFT),
         Cell::new_align("Namespace", Alignment::LEFT),

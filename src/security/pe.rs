@@ -1,16 +1,16 @@
 use crate::{
+    Result,
     security::{
         options::{
-            status::{ASLRCompatibilityLevel, HasSecurityStatus, PEControlFlowGuardLevel},
             AddressSpaceLayoutRandomizationOption, BinarySecurityOption,
             DataExecutionPreventionOption, PEControlFlowGuardOption,
             PEEnableManifestHandlingOption, PEHandlesAddressesLargerThan2GBOption,
             PEHasCheckSumOption, PERunsOnlyInAppContainerOption,
             PESafeStructuredExceptionHandlingOption, RequiresIntegrityCheckOption,
+            status::{ASLRCompatibilityLevel, HasSecurityStatus, PEControlFlowGuardLevel},
         },
         parser::BinaryParser,
     },
-    Result,
 };
 use core::mem;
 use goblin::pe::section_table::{IMAGE_SCN_CNT_INITIALIZED_DATA, IMAGE_SCN_MEM_READ};

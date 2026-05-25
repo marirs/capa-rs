@@ -1,14 +1,15 @@
 use crate::Result;
 use dnfile::{
+    DnPe,
     lang::{
         cil::{self, enums::*},
         clr,
     },
     stream::meta_data_tables::mdtables::{codedindex::*, *},
-    DnPe,
 };
+use ouroboros::self_referencing;
 use std::{
-    collections::{HashMap, BTreeMap,  HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -107,11 +108,30 @@ enum Callee {
     Method(DnMethod),
 }
 
-#[derive(Debug)]
+/// 0.3.21: dnfile 0.4.0 made `DnPe<'a>` borrow from the input bytes
+/// (zero-copy heaps + reader borrows). Same ouroboros pattern as the
+/// smda extractor — `buf: Vec<u8>` owned by the Extractor, `pe`
+/// borrows from it via `#[borrows(buf)]`, and a `pe()` accessor hides
+/// the wrapper from the rest of the file. Public `Extractor::new(path)`
+/// API stays unchanged.
+#[self_referencing]
+struct ExtractorInner {
+    buf: Vec<u8>,
+    #[borrows(buf)]
+    #[covariant]
+    pe: DnPe<'this>,
+}
+
 pub struct Extractor {
+    inner: ExtractorInner,
     properties_cache: Arc<RwLock<Option<HashMap<u64, DnMethod>>>>,
     fields_cache: Arc<RwLock<Option<HashMap<u64, DnMethod>>>>,
-    pe: DnPe,
+}
+
+impl std::fmt::Debug for Extractor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Extractor").finish_non_exhaustive()
+    }
 }
 
 impl super::Extractor for Extractor {
@@ -166,7 +186,7 @@ impl super::Extractor for Extractor {
         let mut methods: std::collections::HashMap<u64, Function> =
             std::collections::HashMap::new();
         let mut calls_to_map = HashMap::new();
-        for f in self.pe.net()?.functions() {
+        for f in self.pe().net()?.functions() {
             let mut calls_from = HashSet::new();
             for insn in &f.instructions {
                 if ![
@@ -265,19 +285,36 @@ impl super::Extractor for Extractor {
 }
 
 impl Extractor {
+    /// Read `file_path` and parse it as a CLR/.NET PE.
+    ///
+    /// 0.3.21: dnfile 0.4 dropped `DnPe::new(path)` in favour of
+    /// `DnPe::parse(&buf)` (zero-copy). We read the file ourselves
+    /// and stash the bytes inside a self-referential wrapper so the
+    /// public Extractor::new signature is preserved.
     pub fn new(file_path: &str) -> Result<Extractor> {
-        let res = Extractor {
-            pe: dnfile::DnPe::new(file_path)?,
+        let buf = std::fs::read(file_path)?;
+        let inner = ExtractorInnerTryBuilder {
+            buf,
+            pe_builder: |buf: &Vec<u8>| DnPe::parse(buf.as_slice()),
+        }
+        .try_build()?;
+        Ok(Extractor {
+            inner,
             fields_cache: Arc::new(RwLock::new(None)),
             properties_cache: Arc::new(RwLock::new(None)),
-        };
-        Ok(res)
+        })
+    }
+
+    /// Borrowed view onto the parsed `DnPe`. Use this everywhere
+    /// instead of touching the inner wrapper directly.
+    pub(crate) fn pe(&self) -> &DnPe<'_> {
+        self.inner.borrow_pe()
     }
 
     pub fn extract_arch(&self) -> Result<crate::FileArchitecture> {
-        if let Some(oh) = self.pe.pe()?.header.optional_header {
+        if let Some(oh) = self.pe().pe()?.header.optional_header {
             if self
-                .pe
+                .pe()
                 .net()?
                 .flags
                 .contains(&dnfile::ClrHeaderFlags::BitRequired32)
@@ -351,7 +388,7 @@ impl Extractor {
         let mut res = vec![];
         // namespaces may be referenced multiple times, so we need to filter
         let mut namespaces = std::collections::HashSet::new();
-        let typedef = self.pe.net()?.md_table("TypeDef")?;
+        let typedef = self.pe().net()?.md_table("TypeDef")?;
         for rid in 0..typedef.row_count() {
             let row = typedef.row::<TypeDef>(rid)?;
             namespaces.insert(row.type_namespace.clone());
@@ -364,7 +401,7 @@ impl Extractor {
                 token,
             ))
         }
-        let typedef = self.pe.net()?.md_table("TypeRef")?;
+        let typedef = self.pe().net()?.md_table("TypeRef")?;
         for rid in 0..typedef.row_count() {
             let row = typedef.row::<TypeRef>(rid)?;
             namespaces.insert(row.type_namespace.clone());
@@ -407,7 +444,7 @@ impl Extractor {
 
     pub fn get_dotnet_managed_methods(&self) -> Result<HashMap<u64, DnMethod>> {
         let mut res = HashMap::new();
-        let typedef = self.pe.net()?.md_table("TypeDef")?;
+        let typedef = self.pe().net()?.md_table("TypeDef")?;
         for rid in 0..typedef.row_count() {
             let row = typedef.row::<TypeDef>(rid)?;
             for metdef in &row.method_list {
@@ -419,7 +456,7 @@ impl Extractor {
                         &row.type_namespace,
                         &row.type_name,
                         &self
-                            .pe
+                            .pe()
                             .net()?
                             .resolve_coded_index::<MethodDef>(metdef)?
                             .name,
@@ -432,13 +469,13 @@ impl Extractor {
     }
 
     pub fn get_dotnet_property_map(&self, property_row: &Property) -> Result<Option<TypeDef>> {
-        let property_map = self.pe.net()?.md_table("PropertyMap")?;
+        let property_map = self.pe().net()?.md_table("PropertyMap")?;
         for rid in 0..property_map.row_count() {
             let row = property_map.row::<PropertyMap>(rid)?;
             for i in &row.property_list {
                 if i.name == property_row.name {
                     return Ok(Some(
-                        self.pe
+                        self.pe()
                             .net()?
                             .resolve_coded_index::<TypeDef>(&row.parent)?
                             .clone(),
@@ -467,7 +504,7 @@ impl Extractor {
 
     pub fn get_dotnet_properties(&self) -> Result<HashMap<u64, DnMethod>> {
         let mut res = HashMap::new();
-        let method_semantics = if let Ok(s) = self.pe.net()?.md_table("MethodSemantics") {
+        let method_semantics = if let Ok(s) = self.pe().net()?.md_table("MethodSemantics") {
             s
         } else {
             return Ok(res);
@@ -475,7 +512,7 @@ impl Extractor {
         for rid in 0..method_semantics.row_count() {
             let row = method_semantics.row::<MethodSemantics>(rid)?;
             let typedef_row = match self.get_dotnet_property_map(
-                self.pe
+                self.pe()
                     .net()?
                     .resolve_coded_index::<Property>(&row.association)?,
             )? {
@@ -503,7 +540,7 @@ impl Extractor {
                     &typedef_row.type_namespace,
                     &typedef_row.type_name,
                     &self
-                        .pe
+                        .pe()
                         .net()?
                         .resolve_coded_index::<Property>(&row.association)?
                         .name,
@@ -533,11 +570,11 @@ impl Extractor {
     /// get fields from TypeDef table
     pub fn get_dotnet_fields(&self) -> Result<HashMap<u64, DnMethod>> {
         let mut res = HashMap::new();
-        let type_defs = self.pe.net()?.md_table("TypeDef")?;
+        let type_defs = self.pe().net()?.md_table("TypeDef")?;
         for rid in 0..type_defs.row_count() {
             let row = type_defs.row::<TypeDef>(rid)?;
             for index in &row.field_list {
-                let ss = self.pe.net()?.resolve_coded_index::<Field>(index)?;
+                let ss = self.pe().net()?.resolve_coded_index::<Field>(index)?;
                 let token = calculate_dotnet_token_value("TypeDef", rid + 1)?;
                 res.insert(
                     token,
@@ -550,8 +587,8 @@ impl Extractor {
 
     pub fn get_dotnet_managed_imports(&self) -> Result<HashMap<u64, String>> {
         let mut res = HashMap::new();
-        let memref = self.pe.net()?.md_table("MemberRef")?;
-        let typeref = self.pe.net()?.md_table("TypeRef")?;
+        let memref = self.pe().net()?.md_table("MemberRef")?;
+        let typeref = self.pe().net()?.md_table("TypeRef")?;
         for rid in 0..memref.row_count() {
             let row = memref.row::<MemberRef>(rid)?;
             if row.class.table != "TypeRef" {
@@ -570,11 +607,11 @@ impl Extractor {
 
     pub fn get_dotnet_unmanaged_imports(&self) -> Result<HashMap<u64, String>> {
         let mut res = HashMap::new();
-        if let Ok(implmap) = self.pe.net()?.md_table("ImplMap") {
+        if let Ok(implmap) = self.pe().net()?.md_table("ImplMap") {
             for rid in 0..implmap.row_count() {
                 let row = implmap.row::<ImplMap>(rid)?;
                 let import_scope = self
-                    .pe
+                    .pe()
                     .net()?
                     .resolve_coded_index::<ModuleRef>(&row.import_scope)?;
                 let mut dll = import_scope.name.clone();
@@ -595,7 +632,7 @@ impl Extractor {
     pub fn extract_file_mixed_mode_characteristic_features(
         &self,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-        if is_dotnet_mixed_mode(&self.pe)? {
+        if is_dotnet_mixed_mode(self.pe())? {
             Ok(vec![(
                 crate::rules::features::Feature::Characteristic(
                     crate::rules::features::CharacteristicFeature::new("mixed mode", "")?,
@@ -728,7 +765,7 @@ impl Extractor {
             Some(Callee::Method(m)) => {
                 if m.name.starts_with("get_") || m.name.starts_with("set_") {
                     let row = resolve_dotnet_token(
-                        &self.pe,
+                        self.pe(),
                         &cil::instruction::Operand::Token(clr::token::Token::new(
                             insn.operand.value()?,
                         )),
@@ -775,7 +812,7 @@ impl Extractor {
         .contains(&insn.opcode.value)
         {
             let operand_result = resolve_dotnet_token(
-                &self.pe,
+                self.pe(),
                 &cil::instruction::Operand::Token(clr::token::Token::new(insn.operand.value()?)),
             );
 
@@ -805,7 +842,7 @@ impl Extractor {
                             match operand.class.table() {
                                 "TypeRef" => {
                                     if let Ok(rr) = self
-                                        .pe
+                                        .pe()
                                         .net()?
                                         .resolve_coded_index::<TypeRef>(&operand.class)
                                     {
@@ -816,7 +853,7 @@ impl Extractor {
                                 }
                                 "TypeDef" => {
                                     if let Ok(rr) = self
-                                        .pe
+                                        .pe()
                                         .net()?
                                         .resolve_coded_index::<TypeDef>(&operand.class)
                                     {
@@ -926,7 +963,7 @@ impl Extractor {
             return Ok(res);
         }
         if let cil::instruction::Operand::StringToken(t) = &insn.operand {
-            match self.pe.net()?.get_us(t.rid()) {
+            match self.pe().net()?.get_us(t.rid()) {
                 Err(_) => Ok(res),
                 Ok(s) => {
                     let trimmed = s.trim();
@@ -957,11 +994,11 @@ impl Extractor {
         }
         let mut res = vec![];
         let operand = resolve_dotnet_token(
-            &self.pe,
+            self.pe(),
             &cil::instruction::Operand::Token(clr::token::Token::new(insn.operand.value()?)),
         )?;
         if let Some(s) = operand.downcast_ref::<MemberRef>() {
-            if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeDef>(&s.class) {
+            if let Ok(ss) = &self.pe().net()?.resolve_coded_index::<TypeDef>(&s.class) {
                 if !ss.type_namespace.is_empty() {
                     res.push((
                         crate::rules::features::Feature::Namespace(
@@ -970,7 +1007,7 @@ impl Extractor {
                         insn.offset as u64,
                     ))
                 }
-            } else if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeRef>(&s.class) {
+            } else if let Ok(ss) = &self.pe().net()?.resolve_coded_index::<TypeRef>(&s.class) {
                 if !ss.type_namespace.is_empty() {
                     res.push((
                         crate::rules::features::Feature::Namespace(
@@ -1045,11 +1082,11 @@ impl Extractor {
 
         let mut res = vec![];
         let operand = resolve_dotnet_token(
-            &self.pe,
+            self.pe(),
             &cil::instruction::Operand::Token(clr::token::Token::new(insn.operand.value()?)),
         )?;
         if let Some(s) = operand.downcast_ref::<MemberRef>() {
-            if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeDef>(&s.class) {
+            if let Ok(ss) = &self.pe().net()?.resolve_coded_index::<TypeDef>(&s.class) {
                 res.push((
                     crate::rules::features::Feature::Class(
                         crate::rules::features::ClassFeature::new(
@@ -1059,7 +1096,7 @@ impl Extractor {
                     ),
                     insn.offset as u64,
                 ))
-            } else if let Ok(ss) = &self.pe.net()?.resolve_coded_index::<TypeRef>(&s.class) {
+            } else if let Ok(ss) = &self.pe().net()?.resolve_coded_index::<TypeRef>(&s.class) {
                 res.push((
                     crate::rules::features::Feature::Class(
                         crate::rules::features::ClassFeature::new(
@@ -1118,7 +1155,7 @@ impl Extractor {
             return Ok(vec![]);
         }
         let mut res = vec![];
-        let token = resolve_dotnet_token(&self.pe, &insn.operand)?;
+        let token = resolve_dotnet_token(self.pe(), &insn.operand)?;
         if let Some(s) = token.downcast_ref::<MethodDef>() {
             if s.flags.contains(&dnfile::stream::meta_data_tables::mdtables::enums::ClrMethodAttr::AttrFlag(dnfile::stream::meta_data_tables::mdtables::enums::CorMethodAttrFlag::PinvokeImpl))
                 || s.impl_flags.contains(&dnfile::stream::meta_data_tables::mdtables::enums::ClrMethodImpl::MethodManaged(dnfile::stream::meta_data_tables::mdtables::enums::CorMethodManaged::Unmanaged))
