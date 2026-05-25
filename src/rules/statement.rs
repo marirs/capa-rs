@@ -40,6 +40,22 @@ impl Statement {
             Statement::Subscope(s) => s.get_children(),
         }
     }
+
+    /// 0.4.1: mutable children — used by the subscope-extraction pass
+    /// in `rules::mod` to walk the tree and rewrite each `Subscope`
+    /// inline into a `MatchedRule` reference + companion synthetic
+    /// rule. Mirrors `get_children` but yields `&mut`.
+    pub fn children_mut(&mut self) -> Vec<&mut StatementElement> {
+        match self {
+            Statement::And(s) => s.children.iter_mut().collect(),
+            Statement::Or(s) => s.children.iter_mut().collect(),
+            Statement::Not(s) => vec![&mut s.child],
+            Statement::Some(s) => s.children.iter_mut().collect(),
+            Statement::Range(s) => vec![&mut s.child],
+            Statement::Subscope(s) => vec![&mut s.child],
+        }
+    }
+
     pub fn evaluate(&self, features: &HashMap<Feature, Vec<u64>>) -> Result<(bool, Vec<u64>)> {
         match self {
             Statement::And(s) => s.evaluate(features),
@@ -270,6 +286,23 @@ impl SubscopeStatement {
     }
     pub fn get_children(&self) -> Result<Vec<&StatementElement>> {
         Ok(vec![&self.child])
+    }
+    /// 0.4.1: borrow the target scope of this subscope. Used by the
+    /// extraction pass to determine the synthetic rule's scope.
+    pub fn scope(&self) -> &Scope {
+        &self.scope
+    }
+    /// 0.4.1: borrow the description string. Used by the extraction
+    /// pass to copy it onto the synthetic rule.
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+    /// 0.4.1: consume the subscope and return its `(scope, child,
+    /// description)` parts. Used by the extraction pass in
+    /// `rules::mod` to move the inner statement onto the synthetic
+    /// rule without cloning.
+    pub fn into_inner(self) -> (Scope, StatementElement, String) {
+        (self.scope, self.child, self.description)
     }
     pub fn evaluate(&self, features: &HashMap<Feature, Vec<u64>>) -> Result<(bool, Vec<u64>)> {
         match self.scope {

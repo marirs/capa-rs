@@ -118,6 +118,63 @@ pub enum Scope {
     SpanOfCalls,
 }
 
+// 0.4.1: ordered scope tables for Python-compatible
+// `is_subscope_compatible`. Reference: capa/rules/__init__.py:596–610.
+// A subscope is compatible with the current scope iff it appears at or
+// below the current scope in the table the subscope belongs to.
+const STATIC_SCOPE_ORDER: &[Scope] = &[
+    Scope::File,
+    Scope::Function,
+    Scope::BasicBlock,
+    Scope::Instruction,
+];
+
+const DYNAMIC_SCOPE_ORDER: &[Scope] = &[
+    Scope::File,
+    Scope::Process,
+    Scope::Thread,
+    Scope::SpanOfCalls,
+    Scope::Call,
+];
+
+/// 0.4.1: Python-style subscope compatibility check. Returns `true`
+/// when a `subscope:` block is allowed inside the current `scope`.
+///
+/// Static and dynamic scopes form parallel orderings; a subscope is
+/// dispatched against whichever ordering contains it. A subscope at
+/// or below the current scope's position in that ordering is allowed
+/// — e.g. `instruction:` (position 3) inside `static: file`
+/// (position 0) is fine: 3 ≥ 0.
+///
+/// Replaces 0.4.0's hardcoded `if [Scope::X, Scope::Y].contains(...)`
+/// checks per subscope arm, which rejected legitimate cross-scope
+/// rules like `host-interaction/service/run-as-service.yml`.
+///
+/// Reference: `capa/rules/__init__.py:613`.
+fn is_subscope_compatible(scope: &Scope, subscope: &Scope) -> bool {
+    let pos = |order: &[Scope], s: &Scope| order.iter().position(|x| x == s);
+
+    if STATIC_SCOPE_ORDER.contains(subscope) {
+        match (
+            pos(STATIC_SCOPE_ORDER, scope),
+            pos(STATIC_SCOPE_ORDER, subscope),
+        ) {
+            (Some(scope_idx), Some(sub_idx)) => sub_idx >= scope_idx,
+            _ => false,
+        }
+    } else if DYNAMIC_SCOPE_ORDER.contains(subscope) {
+        match (
+            pos(DYNAMIC_SCOPE_ORDER, scope),
+            pos(DYNAMIC_SCOPE_ORDER, subscope),
+        ) {
+            (Some(scope_idx), Some(sub_idx)) => sub_idx >= scope_idx,
+            _ => false,
+        }
+    } else {
+        false
+    }
+}
+
 impl TryFrom<&Yaml> for Scope {
     type Error = Error;
     fn try_from(value: &Yaml) -> std::result::Result<Self, Self::Error> {
@@ -217,6 +274,38 @@ impl Rule {
         Ok(())
     }
 
+    /// 0.4.1: subscope extraction pass. Walks `self.statement`,
+    /// replaces every inline `Subscope` with a `MatchedRule` feature,
+    /// and returns the synthetic rules that own the extracted
+    /// subscope bodies. Each synthetic rule carries
+    /// `capa/subscope-rule: true` in its meta and runs at the
+    /// subscope's target scope.
+    ///
+    /// Mirrors Python capa's behaviour in `capa/rules/__init__.py`
+    /// (~line 1124). The reason for the rewrite: subscope contents
+    /// need to evaluate at their inner scope (e.g. instruction-by-
+    /// instruction) so feature addresses are meaningful; the outer
+    /// rule then sees only a `MatchedRule` feature carrying those
+    /// addresses, which is what makes evidence trees work later.
+    ///
+    /// Pre-0.4.1 capa-rs wrapped subscopes inline (`Subscope::evaluate`
+    /// just delegated to `child.evaluate`), which gave the right
+    /// boolean answer but lost the address-of-match in the outer
+    /// rule. This extraction makes the addresses available — they
+    /// flow through the existing `index_rule_matches` pipeline.
+    pub fn extract_subscopes(&mut self) -> Result<Vec<Rule>> {
+        let mut counter = 0usize;
+        let mut extracted = Vec::new();
+        extract_subscopes_walk(
+            &mut self.statement,
+            &self.name,
+            &self.definition,
+            &mut counter,
+            &mut extracted,
+        )?;
+        Ok(extracted)
+    }
+
     pub fn get_dependencies(
         &self,
         namespaces: &HashMap<String, Vec<&Rule>>,
@@ -290,8 +379,14 @@ impl Rule {
     fn parse_feature_type(key: &str) -> Result<RuleFeatureType> {
         match key {
             "api" => Ok(RuleFeatureType::Api),
-            "property/read" => Ok(RuleFeatureType::PropretyRead),
-            "property/write" => Ok(RuleFeatureType::PropretyWrite),
+            // 0.4.1: bare `property:` arm added. Python capa's
+            // `parse_feature` (capa/rules/__init__.py:446) returns the
+            // `Property` class for the unqualified key — used by the
+            // count-context form `count(property(...))`. Unblocks
+            // nursery/check-for-time-delay-in-dotnet.yml.
+            "property" => Ok(RuleFeatureType::Property),
+            "property/read" => Ok(RuleFeatureType::PropertyRead),
+            "property/write" => Ok(RuleFeatureType::PropertyWrite),
             "namespace" => Ok(RuleFeatureType::Namespace),
             "string" => Ok(RuleFeatureType::StringFactory),
             "substring" => Ok(RuleFeatureType::Substring),
@@ -585,71 +680,91 @@ impl Rule {
                     ))));
                 }
                 CommandType::Process => {
-                    if [Scope::File].contains(&scopes.r#static.scope)
-                        || [Scope::File].contains(&scopes.dynamic.scope)
-                    {
-                        let val = vval
-                            .as_vec()
-                            .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+                    // 0.4.1: replaced hardcoded `[File].contains(...)` with
+                    // is_subscope_compatible. `process` is in DYNAMIC_SCOPE_ORDER,
+                    // so it's checked against the dynamic scope. Result is the
+                    // same for the previously-permitted file→process transition;
+                    // also accepts process→process as Python does.
+                    if !is_subscope_compatible(&scopes.dynamic.scope, &Scope::Process) {
+                        return Err(Error::InvalidRule(
+                            line!(),
+                            format!(
+                                "`process` subscope not allowed in scope {:?}: {:?}",
+                                scopes.dynamic.scope, vval
+                            ),
+                        ));
+                    }
+                    let val = vval
+                        .as_vec()
+                        .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
 
-                        let process_scope = Scopes {
-                            r#static: StaticScope {
-                                scope: Scope::Process,
-                            },
-                            dynamic: DynamicScope { scope: Scope::None },
-                        };
+                    let process_scope = Scopes {
+                        r#static: StaticScope {
+                            scope: Scope::Process,
+                        },
+                        dynamic: DynamicScope { scope: Scope::None },
+                    };
 
-                        let (params, description) =
-                            Rule::extract_elements_and_description(val, &process_scope)?;
+                    let (params, description) =
+                        Rule::extract_elements_and_description(val, &process_scope)?;
 
-                        if params.len() != 1 {
-                            return Err(Error::InvalidRule(
-                                line!(),
-                                format!("process must have exactly one condition: {:?}", vval),
-                            ));
-                        }
-
-                        return Rule::wrap_and_subscope(Scope::Process, params, &description);
+                    if params.len() != 1 {
+                        return Err(Error::InvalidRule(
+                            line!(),
+                            format!("process must have exactly one condition: {:?}", vval),
+                        ));
                     }
 
-                    return Err(Error::InvalidRule(
-                        line!(),
-                        format!("{:?}: {:?}", key, vval),
-                    ));
+                    return Rule::wrap_and_subscope(Scope::Process, params, &description);
                 }
                 CommandType::Thread => {
-                    if [Scope::File, Scope::Process].contains(&scopes.r#static.scope)
-                        || [Scope::File, Scope::Process].contains(&scopes.dynamic.scope)
-                    {
-                        let thread_scope = Scopes {
-                            r#static: StaticScope {
-                                scope: Scope::Thread,
-                            },
-                            dynamic: DynamicScope { scope: Scope::None },
-                        };
-
-                        let val = vval
-                            .as_vec()
-                            .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-
-                        let (params, description) =
-                            Rule::extract_elements_and_description(val, &thread_scope)?;
-
-                        if params.len() != 1 {
-                            return Err(Error::InvalidRule(
-                                line!(),
-                                format!("process must have exactly one condition: {:?}", vval),
-                            ));
-                        }
-                        return Rule::wrap_and_subscope(Scope::Thread, params, &description);
+                    // 0.4.1: `thread` is in DYNAMIC_SCOPE_ORDER. Checking
+                    // against the dynamic scope allows process→thread (as
+                    // before) plus thread→thread.
+                    if !is_subscope_compatible(&scopes.dynamic.scope, &Scope::Thread) {
+                        return Err(Error::InvalidRule(
+                            line!(),
+                            format!(
+                                "`thread` subscope not allowed in scope {:?}: {:?}",
+                                scopes.dynamic.scope, vval
+                            ),
+                        ));
                     }
+                    let thread_scope = Scopes {
+                        r#static: StaticScope {
+                            scope: Scope::Thread,
+                        },
+                        dynamic: DynamicScope { scope: Scope::None },
+                    };
 
-                    return Err(Error::InvalidRule(
-                        line!(),
-                        format!("{:?}: {:?}", key, vval),
-                    ));
+                    let val = vval
+                        .as_vec()
+                        .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+
+                    let (params, description) =
+                        Rule::extract_elements_and_description(val, &thread_scope)?;
+
+                    if params.len() != 1 {
+                        return Err(Error::InvalidRule(
+                            line!(),
+                            format!("thread must have exactly one condition: {:?}", vval),
+                        ));
+                    }
+                    return Rule::wrap_and_subscope(Scope::Thread, params, &description);
                 }
                 CommandType::Call => {
+                    // 0.4.1: `call` is in DYNAMIC_SCOPE_ORDER. Compatible with
+                    // process / thread / span-of-calls / call. Was previously
+                    // unchecked.
+                    if !is_subscope_compatible(&scopes.dynamic.scope, &Scope::Call) {
+                        return Err(Error::InvalidRule(
+                            line!(),
+                            format!(
+                                "`call` subscope not allowed in scope {:?}: {:?}",
+                                scopes.dynamic.scope, vval
+                            ),
+                        ));
+                    }
                     let call_scope = Scopes {
                         r#static: StaticScope { scope: Scope::Call },
                         dynamic: DynamicScope {
@@ -681,107 +796,115 @@ impl Rule {
                     return Rule::wrap_and_subscope(Scope::Call, params, &description);
                 }
                 CommandType::Function => {
-                    if Scope::File == scopes.r#static.scope || Scope::File == scopes.dynamic.scope {
-                        let function_scope = Scopes {
-                            r#static: StaticScope {
-                                scope: Scope::Function,
-                            },
-                            dynamic: DynamicScope { scope: Scope::None },
-                        };
+                    // 0.4.1: `function` is in STATIC_SCOPE_ORDER. Allowed
+                    // in file scope (position 0 → function position 1).
+                    if !is_subscope_compatible(&scopes.r#static.scope, &Scope::Function) {
+                        return Err(Error::InvalidRule(
+                            line!(),
+                            format!(
+                                "`function` subscope not allowed in scope {:?}: {:?}",
+                                scopes.r#static.scope, vval
+                            ),
+                        ));
+                    }
+                    let function_scope = Scopes {
+                        r#static: StaticScope {
+                            scope: Scope::Function,
+                        },
+                        dynamic: DynamicScope { scope: Scope::None },
+                    };
 
-                        let val = vval
-                            .as_vec()
-                            .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+                    let val = vval
+                        .as_vec()
+                        .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
 
-                        let (params, description) =
-                            Rule::extract_elements_and_description(val, &function_scope)?;
+                    let (params, description) =
+                        Rule::extract_elements_and_description(val, &function_scope)?;
 
-                        if params.len() != 1 {
-                            return Err(Error::InvalidRule(
-                                line!(),
-                                format!("{:?}: {:?}", key, vval),
-                            ));
-                        }
-
-                        return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
-                            SubscopeStatement::new(
-                                Scope::Function,
-                                params[0].clone(),
-                                &description,
-                            )?,
-                        ))));
+                    if params.len() != 1 {
+                        return Err(Error::InvalidRule(
+                            line!(),
+                            format!("{:?}: {:?}", key, vval),
+                        ));
                     }
 
-                    return Err(Error::InvalidRule(
-                        line!(),
-                        format!("{:?}: {:?}", key, vval),
-                    ));
+                    return Ok(StatementElement::Statement(Box::new(Statement::Subscope(
+                        SubscopeStatement::new(Scope::Function, params[0].clone(), &description)?,
+                    ))));
                 }
                 CommandType::BasicBlock => {
-                    if [Scope::Function, Scope::BasicBlock].contains(&scopes.r#static.scope)
-                        || [Scope::Function, Scope::BasicBlock].contains(&scopes.dynamic.scope)
-                    {
-                        let bb_scope = Scopes {
-                            r#static: StaticScope {
-                                scope: Scope::BasicBlock,
-                            },
-                            dynamic: DynamicScope { scope: Scope::None },
-                        };
+                    // 0.4.1: `basic block` is in STATIC_SCOPE_ORDER.
+                    // Allowed in file / function / basic-block scope.
+                    if !is_subscope_compatible(&scopes.r#static.scope, &Scope::BasicBlock) {
+                        return Err(Error::InvalidRule(
+                            line!(),
+                            format!(
+                                "`basic block` subscope not allowed in scope {:?}: {:?}",
+                                scopes.r#static.scope, vval
+                            ),
+                        ));
+                    }
+                    let bb_scope = Scopes {
+                        r#static: StaticScope {
+                            scope: Scope::BasicBlock,
+                        },
+                        dynamic: DynamicScope { scope: Scope::None },
+                    };
 
-                        let val_list = match vval {
-                            Yaml::Array(arr) => arr.as_slice(),
-                            Yaml::Hash(_) => std::slice::from_ref(vval),
-                            _ => {
-                                return Err(Error::InvalidRule(
-                                    line!(),
-                                    format!("basic block expects array or hash: {:?}", vval),
-                                ));
-                            }
-                        };
-
-                        let (params, description) =
-                            Rule::extract_elements_and_description(val_list, &bb_scope)?;
-
-                        if params.is_empty() {
+                    let val_list = match vval {
+                        Yaml::Array(arr) => arr.as_slice(),
+                        Yaml::Hash(_) => std::slice::from_ref(vval),
+                        _ => {
                             return Err(Error::InvalidRule(
                                 line!(),
-                                format!("basic block must have at least one condition: {:?}", vval),
+                                format!("basic block expects array or hash: {:?}", vval),
                             ));
                         }
+                    };
 
-                        return Rule::wrap_and_subscope(Scope::BasicBlock, params, &description);
+                    let (params, description) =
+                        Rule::extract_elements_and_description(val_list, &bb_scope)?;
+
+                    if params.is_empty() {
+                        return Err(Error::InvalidRule(
+                            line!(),
+                            format!("basic block must have at least one condition: {:?}", vval),
+                        ));
                     }
 
-                    return Err(Error::InvalidRule(
-                        line!(),
-                        format!("{:?}: {:?}", key, vval),
-                    ));
+                    return Rule::wrap_and_subscope(Scope::BasicBlock, params, &description);
                 }
                 CommandType::Instruction => {
-                    if [Scope::BasicBlock, Scope::Function].contains(&scopes.r#static.scope)
-                        || [Scope::BasicBlock, Scope::Function].contains(&scopes.dynamic.scope)
-                    {
-                        let instruction_scope = Scopes {
-                            r#static: StaticScope {
-                                scope: Scope::Instruction,
-                            },
-                            dynamic: DynamicScope { scope: Scope::None },
-                        };
-
-                        let val = vval
-                            .as_vec()
-                            .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
-
-                        let (params, description) =
-                            Rule::extract_elements_and_description(val, &instruction_scope)?;
-
-                        return Rule::wrap_and_subscope(Scope::Instruction, params, &description);
+                    // 0.4.1: `instruction` is in STATIC_SCOPE_ORDER (position
+                    // 3). Now allowed in any static scope: file (0),
+                    // function (1), basic-block (2), instruction (3). This is
+                    // the load-bearing fix — pre-0.4.1 it was rejected at
+                    // file scope, breaking host-interaction/service/run-as-
+                    // service.yml and similar.
+                    if !is_subscope_compatible(&scopes.r#static.scope, &Scope::Instruction) {
+                        return Err(Error::InvalidRule(
+                            line!(),
+                            format!(
+                                "`instruction` subscope not allowed in scope {:?}: {:?}",
+                                scopes.r#static.scope, vval
+                            ),
+                        ));
                     }
+                    let instruction_scope = Scopes {
+                        r#static: StaticScope {
+                            scope: Scope::Instruction,
+                        },
+                        dynamic: DynamicScope { scope: Scope::None },
+                    };
 
-                    return Err(Error::InvalidRule(
-                        line!(),
-                        format!("{:?},  {:?}: {:?}", scopes, key, vval),
-                    ));
+                    let val = vval
+                        .as_vec()
+                        .ok_or_else(|| Error::InvalidRule(line!(), format!("{:?}", vval)))?;
+
+                    let (params, description) =
+                        Rule::extract_elements_and_description(val, &instruction_scope)?;
+
+                    return Rule::wrap_and_subscope(Scope::Instruction, params, &description);
                 }
                 _ => {
                     let kkey = key.as_str().ok_or_else(|| {
@@ -1010,7 +1133,19 @@ pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
                 }
             };
             rule.set_path(fname.clone())?;
-            rules.push(rule)
+            // 0.4.1: extract inline subscopes into synthetic rules.
+            // Each `Subscope` statement in `rule.statement` is replaced
+            // with a `MatchedRule` feature referencing a freshly-minted
+            // synthetic rule, which carries the subscope body at the
+            // target scope and `capa/subscope-rule: true` in its meta.
+            // Lets the rules engine evaluate the inner block at its
+            // proper scope (where its matches have meaningful
+            // addresses), then surface only the boolean result to the
+            // outer rule via the match-rule feature index. Mirrors
+            // Python capa's pattern from rules/__init__.py.
+            let synthetics = rule.extract_subscopes()?;
+            rules.push(rule);
+            rules.extend(synthetics);
         }
     }
     Ok(rules)
@@ -1055,18 +1190,159 @@ pub fn get_file_rules(rules: &[Rule]) -> Result<Vec<&Rule>> {
     get_rules_for_scope(rules, &Scope::File)
 }
 
+/// 0.4.1: returns `true` for the given meta key bool if present and
+/// `true`. Generalises the existing `capa/subscope-rule` and new
+/// `lib: true` filters in [`get_rules_for_scope`] and
+/// `update_capabilities`. Mirrors Python's
+/// `rule.meta.get("lib", False)` lookup pattern.
+pub(crate) fn rule_meta_bool(rule: &Rule, key: &str) -> bool {
+    matches!(
+        rule.meta.get(&Yaml::String(key.to_string())),
+        Some(Yaml::Boolean(true))
+    )
+}
+
+/// 0.4.1: `lib: true` marks a rule as a building block consumed by
+/// other rules via `match:` rather than a user-facing capability.
+/// 21 rules in `capa-rules` are lib-marked today. Python capa skips
+/// them from rendered output; capa-rs now matches that behaviour
+/// (also filtered from `update_capabilities` in src/lib.rs).
+pub(crate) fn is_lib_rule(rule: &Rule) -> bool {
+    rule_meta_bool(rule, "lib")
+}
+
+/// 0.4.1: build a `Scopes` for a synthetic subscope rule. Routes the
+/// target scope into the right slot (static or dynamic) and sets the
+/// other to `Scope::None`. Used by [`Rule::extract_subscopes`].
+fn scopes_for_subscope(target: &Scope) -> Scopes {
+    let is_static = matches!(
+        target,
+        Scope::File | Scope::Function | Scope::BasicBlock | Scope::Instruction
+    );
+    if is_static {
+        Scopes {
+            r#static: StaticScope {
+                scope: target.clone(),
+            },
+            dynamic: DynamicScope { scope: Scope::None },
+        }
+    } else {
+        Scopes {
+            r#static: StaticScope { scope: Scope::None },
+            dynamic: DynamicScope {
+                scope: target.clone(),
+            },
+        }
+    }
+}
+
+/// 0.4.1: recursive walker for [`Rule::extract_subscopes`]. Depth-
+/// first traversal: rewrites the deepest subscopes first so nested
+/// subscopes (e.g. `function:` containing `basic block:`) generate
+/// rules in the correct order — the inner synthetic rule exists by
+/// the time the outer synthetic rule's body is sealed.
+fn extract_subscopes_walk(
+    elem: &mut StatementElement,
+    parent_name: &str,
+    parent_definition: &str,
+    counter: &mut usize,
+    extracted: &mut Vec<Rule>,
+) -> Result<()> {
+    // Depth-first: recurse into any children first.
+    if let StatementElement::Statement(s) = elem {
+        for c in s.children_mut() {
+            extract_subscopes_walk(c, parent_name, parent_definition, counter, extracted)?;
+        }
+    }
+
+    // After children are clean, check if this node is itself a
+    // Subscope to extract.
+    let target_scope = match elem {
+        StatementElement::Statement(s) => match s.as_ref() {
+            Statement::Subscope(sub) => Some(sub.scope().clone()),
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some(target_scope) = target_scope else {
+        return Ok(());
+    };
+
+    // 0.4.1 limitation: only extract subscopes whose target has an
+    // evaluation bucket in `RuleSet` (`basic_block_rules`,
+    // `function_rules`, `file_rules`). Today that means Function and
+    // BasicBlock. Instruction subscopes stay inline so they continue
+    // to use `SubscopeInstructionEvaluator`'s per-address matching;
+    // dynamic-scope subscopes (Process / Thread / Call / SpanOfCalls)
+    // stay inline because dynamic-analysis isn't yet wired through.
+    // Extracting those would silently break working rules — the
+    // synthetic rule would never evaluate.
+    //
+    // Once an instruction_rules bucket + dynamic-analysis pipeline
+    // land (0.5.0 target), this guard can be lifted.
+    if !matches!(target_scope, Scope::Function | Scope::BasicBlock) {
+        return Ok(());
+    }
+
+    let idx = *counter;
+    *counter += 1;
+    let synth_name = format!("{}/subscope/{}", parent_name, idx);
+
+    // Move the Subscope out via a placeholder Description swap.
+    // Description is the cheapest StatementElement to construct (no
+    // regex compile, no scope check) — it's a one-shot dummy that
+    // gets overwritten before this function returns.
+    let placeholder = StatementElement::Description(Box::new(Description::new("").unwrap()));
+    let owned = std::mem::replace(elem, placeholder);
+
+    let StatementElement::Statement(boxed) = owned else {
+        unreachable!("checked Statement above")
+    };
+    let Statement::Subscope(sub) = *boxed else {
+        unreachable!("checked Subscope above")
+    };
+    // `target_scope` from the pre-check shadowed here on purpose —
+    // `into_inner` consumes the only owned copy.
+    let (target_scope, child, description) = sub.into_inner();
+
+    // Build the synthetic rule that owns the subscope body.
+    let scopes = scopes_for_subscope(&target_scope);
+    let mut meta = Hash::new();
+    meta.insert(
+        Yaml::String("name".to_string()),
+        Yaml::String(synth_name.clone()),
+    );
+    meta.insert(
+        Yaml::String("capa/subscope-rule".to_string()),
+        Yaml::Boolean(true),
+    );
+    if !description.is_empty() {
+        meta.insert(
+            Yaml::String("description".to_string()),
+            Yaml::String(description.clone()),
+        );
+    }
+    let synth = Rule::new(&synth_name, &scopes, child, &meta, parent_definition)?;
+    extracted.push(synth);
+
+    // Replace the placeholder with a `match: <synth_name>` reference
+    // so the outer rule's evaluation now consults the synthetic
+    // rule's match status via the MatchedRule feature index.
+    let matched = features::MatchedRuleFeature::new(&synth_name, "")?;
+    *elem = StatementElement::Feature(Box::new(Feature::MatchedRule(matched)));
+    Ok(())
+}
+
 pub fn get_rules_for_scope<'a>(rules: &'a [Rule], scope: &Scope) -> Result<Vec<&'a Rule>> {
     let mut scope_rules = vec![];
     for rule in rules {
-        if rule
-            .meta
-            .contains_key(&Yaml::String("capa/subscope-rule".to_string()))
-        {
-            if let Yaml::Boolean(b) = rule.meta[&Yaml::String("capa/subscope-rule".to_string())] {
-                if b {
-                    continue;
-                }
-            }
+        // 0.4.1: skip synthetic subscope rules and library rules from
+        // the top-level iteration. Both remain available via
+        // `get_rules_and_dependencies` when another rule depends on
+        // them — this only prevents them from being treated as their
+        // own evaluation target. Matches Python's RuleSet partitioning.
+        if rule_meta_bool(rule, "capa/subscope-rule") || is_lib_rule(rule) {
+            continue;
         }
         scope_rules.append(&mut get_rules_and_dependencies(rules, &rule.name)?);
     }

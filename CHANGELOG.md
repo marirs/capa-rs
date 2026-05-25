@@ -5,6 +5,69 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-05-26 — Python-capa rule-loader parity (P0 + P1)
+
+Patch release. No public-API breaks from 0.4.0. Closes the rule-loader
+parity gaps the 0.3.21 → 0.4.0 work surfaced: two `capa-rules` files
+that previously failed to load with `InvalidRule(...)` errors now load
+cleanly, and `lib: true` building-block rules no longer pollute the
+final capability output.
+
+### Fixed
+
+- **Bare `property:` feature key.** `parse_feature_type` had arms for
+  `property/read` and `property/write` but rejected the unqualified
+  `property` form Python capa uses in `count(property(...))` contexts.
+  Unblocks `nursery/check-for-time-delay-in-dotnet.yml` and any future
+  count-context property rule. Reference:
+  `capa/rules/__init__.py:446`.
+- **Cross-scope subscope at file level.** `build_statements` rejected
+  `instruction:` blocks inside `static: file` rules with hardcoded
+  per-scope checks. Replaced with Python's ordered-list compatibility
+  helper (`STATIC_SCOPE_ORDER = [file, function, basic_block, instruction]`):
+  any subscope at or below the current scope is now allowed. Unblocks
+  `host-interaction/service/run-as-service.yml` and at least 2 other
+  production rules. Reference: `capa/rules/__init__.py:613`.
+- **`lib: true` rules no longer surfaced as capabilities.** Python capa
+  treats library-marker rules (21 in `capa-rules`) as building blocks
+  for `match:` dependency resolution and filters them from output;
+  capa-rs read them but listed them in `capability_namespaces`. Now
+  loaded for dependency resolution and skipped from the final output,
+  mirroring the existing `capa/subscope-rule` skip pattern.
+- **Subscope rule rewriting (Function / BasicBlock targets).**
+  `function:` and `basic block:` subscopes are now extracted into
+  synthetic rules with `capa/subscope-rule: true` at ruleset
+  construction (Python's pattern from `rules/__init__.py:~1124`)
+  and the parent rule references them via `MatchedRule`. Each
+  synthetic rule evaluates at its own scope, so feature addresses
+  are meaningful and bubble up correctly through the existing
+  match-rule feature index.
+  - **Behavioural fix as side effect:** rules with a `basic block:`
+    subscope inside a function-scope rule (or similar
+    higher-scope-with-lower-subscope patterns) now correctly
+    require the inner features to occur **in the same basic
+    block**, not aggregated across all basic blocks of the
+    function. Pre-0.4.1 capa-rs evaluated subscopes inline against
+    aggregated higher-scope features, which produced false-positive
+    matches when an outer rule's `basic block:` features actually
+    lived in different basic blocks. Mimikatz example: pre-0.4.1
+    matched `encode data using ADD XOR SUB operations` (which
+    requires tight-loop + nzxor + 1 add + 1 sub in the same BB);
+    0.4.1 correctly does not match it because mimikatz spreads those
+    features across BBs. Python upstream behaves the same way.
+  - **Instruction subscopes left inline** (continued use of
+    `SubscopeInstructionEvaluator`'s per-address matching). Same
+    for dynamic-scope subscopes (`process:`, `thread:`, `call:`,
+    `span of calls:`). Extracting these requires an
+    `instruction_rules` evaluation bucket and the dynamic-analysis
+    pipeline, both deferred to 0.5.0.
+
+### Internal
+
+- Typo fix: `RuleFeatureType::PropretyRead` → `PropertyRead`,
+  `PropretyWrite` → `PropertyWrite`. Pure rename — no behaviour
+  change, but the misspelling was visible in error output.
+
 ## [0.4.0] — 2026-05-26 — Full zero-copy + Mach-O + shellcode entry (breaking)
 
 The 0.3.21 release got capa-rs onto modern smda/dnfile by wrapping the

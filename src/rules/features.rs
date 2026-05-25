@@ -33,8 +33,14 @@ pub enum FeatureAccess {
 
 #[derive(Debug)]
 pub enum RuleFeatureType {
-    PropretyRead,
-    PropretyWrite,
+    // 0.4.1: bare `Property` form (no access) added — Python capa's
+    // `parse_feature` returns this for unqualified `property:` keys
+    // (used in `count(property(...))` contexts and similar).
+    // Reference: capa/rules/__init__.py:446.
+    // Typo fix: `PropretyRead`/`PropretyWrite` → `PropertyRead`/`PropertyWrite`.
+    Property,
+    PropertyRead,
+    PropertyWrite,
     Api,
     StringFactory,
     String,
@@ -111,17 +117,21 @@ impl Feature {
                 &value.get_str()?,
                 description,
             )?)),
-            //            RuleFeatureType::Property => Ok(Feature::Property(PropertyFeature::new(
-            //                &value.get_str()?,
-            //                None,
-            //                description,
-            //            )?)),
-            RuleFeatureType::PropretyRead => Ok(Feature::Property(PropertyFeature::new(
+            // 0.4.1: bare `property:` — unqualified property access.
+            // `access: None` means "any access" (read or write); matches
+            // Python's behaviour for `parse_feature("property")` and
+            // makes the `count(property(...))` count-context work.
+            RuleFeatureType::Property => Ok(Feature::Property(PropertyFeature::new(
+                &value.get_str()?,
+                None,
+                description,
+            )?)),
+            RuleFeatureType::PropertyRead => Ok(Feature::Property(PropertyFeature::new(
                 &value.get_str()?,
                 Some(FeatureAccess::Read),
                 description,
             )?)),
-            RuleFeatureType::PropretyWrite => Ok(Feature::Property(PropertyFeature::new(
+            RuleFeatureType::PropertyWrite => Ok(Feature::Property(PropertyFeature::new(
                 &value.get_str()?,
                 Some(FeatureAccess::Write),
                 description,

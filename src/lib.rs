@@ -503,6 +503,16 @@ impl FileCapabilities {
     ) -> Result<()> {
         let re = regex::Regex::new(r##"[^]]*\[(?P<tag>[^]]*)]"##)?;
         for (rule, caps) in capabilities {
+            // 0.4.1: belt-and-suspenders for `lib: true` — even though
+            // `get_rules_for_scope` already excludes lib rules from
+            // top-level evaluation, a lib rule can still appear in
+            // `capabilities` if another rule references it via `match:`
+            // and the match fired. Filter here so the user-facing
+            // ATT&CK / MBC / namespace / tag output stays clean.
+            // Matches Python capa's render-time filtering.
+            if rules::is_lib_rule(rule) {
+                continue;
+            }
             let mut local_attacks_set: BTreeSet<Attacks> = BTreeSet::new();
             let mut local_mbc_set: BTreeSet<Mbc> = BTreeSet::new();
 
