@@ -28,8 +28,8 @@ jobs:
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - run: cargo test --all-features
 
-  package:
-    name: package source + cargo artifacts
+  package-source:
+    name: package source + cargo .crate
     needs: verify
     runs-on: ubuntu-latest
     steps:
@@ -50,27 +50,22 @@ jobs:
           fi
 
       # `cargo package` builds the exact .crate file that would be uploaded
-      # to crates.io if/when we publish manually. Shipping it as a release
-      # asset lets downstream consumers verify what's on crates.io matches
-      # the tagged source, and lets them install offline via
-      # `cargo install --path`.
+      # to crates.io if/when we publish manually. Shipping it lets downstream
+      # consumers verify what's on crates.io matches the tagged source.
       - name: Build cargo package
         run: cargo package --allow-dirty --no-verify
 
-      - name: Stage release artifacts
+      - name: Stage source artifacts
         run: |
           tag="${{ steps.tag.outputs.tag }}"
           mkdir -p release
 
-          # 1) The cargo .crate (same bytes that would go to crates.io)
           cp target/package/capa-*.crate "release/capa-${tag}.crate"
 
-          # 2) A plain source tarball excluding target/, .git/, etc.
           src_name="capa-${tag}-src"
           git archive --format=tar.gz --prefix="${src_name}/" \
             -o "release/${src_name}.tar.gz" HEAD
 
-          # 3) SHA-256 sums next to each artifact
           (cd release && \
             for f in *.crate *.tar.gz; do
               sha256sum "$f" > "$f.sha256"
@@ -78,19 +73,118 @@ jobs:
 
           ls -la release
 
-      - name: Upload artifacts
+      - name: Upload source artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: capa-release-artifacts
+          name: capa-source-artifacts
           path: |
             release/*.crate
             release/*.tar.gz
             release/*.sha256
           if-no-files-found: error
 
+  build-cli:
+    name: build capa_cli — ${{ matrix.target }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            cross: false
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            cross: false
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            cross: false
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            cross: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust + target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # Linux aarch64 needs a cross linker / sysroot. The simplest way that
+      # doesn't pull in `cross` (and Docker-in-Docker on CI) is the apt
+      # gcc-aarch64-linux-gnu toolchain + a cargo config that uses it as
+      # the linker for the target.
+      - name: Install aarch64-linux cross toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          mkdir -p .cargo
+          cat >> .cargo/config.toml <<'EOF'
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
+      - name: Determine tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build capa_cli (release)
+        run: cargo build --release --example capa_cli --target ${{ matrix.target }} --all-features
+
+      - name: Stage binary
+        shell: bash
+        run: |
+          tag="${{ steps.tag.outputs.tag }}"
+          target="${{ matrix.target }}"
+          mkdir -p release
+          # The example binary lives at target/<triple>/release/examples/<name>(.exe).
+          if [[ "$target" == *windows* ]]; then
+            src="target/${target}/release/examples/capa_cli.exe"
+            dst="release/capa_cli-${tag}-${target}.exe"
+          else
+            src="target/${target}/release/examples/capa_cli"
+            dst="release/capa_cli-${tag}-${target}"
+          fi
+          cp "$src" "$dst"
+          # SHA-256 — `sha256sum` exists on Linux/macOS, `certutil` on Windows.
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd release && sha256sum "$(basename "$dst")" > "$(basename "$dst").sha256")
+          else
+            (cd release && certutil -hashfile "$(basename "$dst")" SHA256 | \
+              grep -v ':' | head -1 | tr -d ' \r' > "$(basename "$dst").sha256")
+          fi
+          ls -la release
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: capa_cli-${{ matrix.target }}
+          path: |
+            release/capa_cli-*
+            release/capa_cli-*.sha256
+          if-no-files-found: error
+
   github-release:
     name: create GitHub release
-    needs: package
+    needs: [package-source, build-cli]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -124,24 +218,41 @@ jobs:
             fi
             echo
             echo
-            echo "## Artifacts"
+            echo "## Source"
             echo
             echo "- \`capa-${tag}.crate\` — the cargo package archive (same bytes as crates.io)"
             echo "- \`capa-${tag}-src.tar.gz\` — plain git source tarball"
-            echo "- Matching \`*.sha256\` sums for verification"
+            echo
+            echo "## CLI binaries"
+            echo
+            echo "Pre-built \`capa_cli\` binaries for each supported platform:"
+            echo
+            echo "| Platform                  | Binary                                             |"
+            echo "|---------------------------|----------------------------------------------------|"
+            echo "| Linux x86_64              | \`capa_cli-${tag}-x86_64-unknown-linux-gnu\`        |"
+            echo "| Linux aarch64             | \`capa_cli-${tag}-aarch64-unknown-linux-gnu\`       |"
+            echo "| macOS Intel (x86_64)      | \`capa_cli-${tag}-x86_64-apple-darwin\`             |"
+            echo "| macOS Apple Silicon       | \`capa_cli-${tag}-aarch64-apple-darwin\`            |"
+            echo "| Windows x86_64            | \`capa_cli-${tag}-x86_64-pc-windows-msvc.exe\`      |"
+            echo "| Windows aarch64           | \`capa_cli-${tag}-aarch64-pc-windows-msvc.exe\`     |"
+            echo
+            echo "Every artifact ships with a matching \`*.sha256\` checksum."
             echo
             echo "Publishing to crates.io is performed manually with \`cargo publish\` and is not part of this workflow."
             echo EOF
           } >> "$GITHUB_OUTPUT"
 
-      - name: Download release artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: capa-release-artifacts
-          path: release
+          path: artifacts
 
-      - name: List files going to release
-        run: ls -la release
+      - name: Flatten artifact tree
+        run: |
+          mkdir -p release
+          # Each artifacts/<name>/ folder contains files we want at release/ top-level.
+          find artifacts -type f \( -name 'capa-*' -o -name 'capa_cli-*' \) -exec cp {} release/ \;
+          ls -la release
 
       - name: Create release
         uses: softprops/action-gh-release@v2
