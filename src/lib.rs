@@ -221,16 +221,25 @@ impl Default for BinarySecurityCheckOptions {
 /// callers to provide one.
 fn noop_logger(_: &str) {}
 
-/// 0.4.3: build the library-function filter closure passed to
+/// 0.5.0: build the library-function filter closure passed to
 /// [`find_capabilities`]. When the caller has configured a
 /// [`flirt::FlirtMatcher`] (via `AnalyzeBuilder::signatures` or
 /// `with_flirt_matcher`), the closure asks the matcher for each
-/// function. Otherwise the closure always returns `false`, leaving
-/// the analysis unchanged.
+/// function and returns `Some(name)` on match. Otherwise it always
+/// returns `None`, leaving the analysis unchanged.
+///
+/// 0.4.3 returned a `bool`. 0.5.0 returns `Option<String>` so the
+/// matched library-function name flows back to the caller and gets
+/// surfaced on `FileCapabilities::library_functions` — parity with
+/// Python capa's JSON output, and the only way for consumers to see
+/// what was FLIRT-skipped.
 ///
 /// Routes through `FlirtMatcher::match_function_at`, which owns the
 /// `FLIRT_LOOKAHEAD_BYTES` constant + the byte-read dance — keeping
-/// the lookahead size in exactly one place.
+/// the lookahead size in exactly one place. The arena `&str` is
+/// copied to a `String` here because the closure return type can't
+/// borrow from the matcher (the borrow would have to outlive the
+/// closure itself, defeating the abstraction).
 ///
 /// `Box<dyn>` because the FLIRT and no-op arms produce different
 /// closure types. `'a` is the borrow scope of `extractor` and the
@@ -240,11 +249,15 @@ fn noop_logger(_: &str) {}
 fn make_library_filter<'a>(
     extractor: &'a (dyn extractor::Extractor + '_),
     flirt: Option<&'a flirt::FlirtMatcher>,
-) -> Box<dyn Fn(u64) -> bool + Sync + Send + 'a> {
+) -> Box<dyn Fn(u64) -> Option<String> + Sync + Send + 'a> {
     if let Some(matcher) = flirt {
-        return Box::new(move |addr: u64| matcher.match_function_at(addr, extractor).is_some());
+        return Box::new(move |addr: u64| {
+            matcher
+                .match_function_at(addr, extractor)
+                .map(str::to_owned)
+        });
     }
-    Box::new(|_addr: u64| false)
+    Box::new(|_addr: u64| None)
 }
 
 /// 0.4.0: chained builder for [`FileCapabilities`] analysis. The
@@ -488,7 +501,7 @@ impl<'a> AnalyzeBuilder<'a> {
         #[cfg(not(feature = "verbose"))]
         {
             file_capabilities.security_checks = BTreeSet::from_iter(security_checks);
-            let (capabilities, _counts, _map_features) = find_capabilities(
+            let (capabilities, counts, _map_features, library_funcs) = find_capabilities(
                 &rules,
                 &extractor,
                 &*library_function,
@@ -498,12 +511,16 @@ impl<'a> AnalyzeBuilder<'a> {
             if self.features_dump {
                 file_capabilities.map_features = _map_features;
             }
+            file_capabilities.library_functions = library_funcs;
+            // 0.5.0 (D2): direct move — no iteration, no filter, no
+            // BTreeMap re-insert. addr=0 is the file-scope sentinel.
+            file_capabilities.feature_counts = counts;
             file_capabilities.update_capabilities(&capabilities)?;
         }
         #[cfg(feature = "verbose")]
         {
             file_capabilities.security_checks = BTreeSet::from_iter(security_checks);
-            let (capabilities, counts, _map_features) = find_capabilities(
+            let (capabilities, counts, _map_features, library_funcs) = find_capabilities(
                 &rules,
                 &extractor,
                 &*library_function,
@@ -513,6 +530,12 @@ impl<'a> AnalyzeBuilder<'a> {
             if self.features_dump {
                 file_capabilities.map_features = _map_features;
             }
+            file_capabilities.library_functions = library_funcs;
+            // 0.5.0 (D2): verbose path still needs &counts for
+            // update_capabilities, so clone here. HashMap clone is
+            // a single allocation + memcpy, much cheaper than the
+            // per-entry iteration + BTreeMap re-insert.
+            file_capabilities.feature_counts = counts.clone();
             file_capabilities.update_capabilities(&capabilities, &counts)?;
         }
 
@@ -569,7 +592,7 @@ impl<'a> AnalyzeBuilder<'a> {
 
         #[cfg(not(feature = "verbose"))]
         {
-            let (capabilities, _counts, _map_features) = find_capabilities(
+            let (capabilities, counts, _map_features, library_funcs) = find_capabilities(
                 &rules,
                 &extractor,
                 &*library_function,
@@ -579,11 +602,14 @@ impl<'a> AnalyzeBuilder<'a> {
             if self.features_dump {
                 file_capabilities.map_features = _map_features;
             }
+            file_capabilities.library_functions = library_funcs;
+            // 0.5.0 (D2): see `from_file` for rationale.
+            file_capabilities.feature_counts = counts;
             file_capabilities.update_capabilities(&capabilities)?;
         }
         #[cfg(feature = "verbose")]
         {
-            let (capabilities, counts, _map_features) = find_capabilities(
+            let (capabilities, counts, _map_features, library_funcs) = find_capabilities(
                 &rules,
                 &extractor,
                 &*library_function,
@@ -593,6 +619,9 @@ impl<'a> AnalyzeBuilder<'a> {
             if self.features_dump {
                 file_capabilities.map_features = _map_features;
             }
+            file_capabilities.library_functions = library_funcs;
+            // 0.5.0 (D2): see `from_file` for rationale.
+            file_capabilities.feature_counts = counts.clone();
             file_capabilities.update_capabilities(&capabilities, &counts)?;
         }
 
@@ -659,6 +688,15 @@ impl FileCapabilities {
             security_checks: BTreeSet::new(),
             map_features: HashMap::new(),
             capabilities_associations: BTreeMap::new(),
+            // 0.5.0 (D1): populated by `from_file` / `from_buffer`
+            // after `find_capabilities` returns. Starts empty here
+            // because `FileCapabilities::new` knows nothing about the
+            // FLIRT pass.
+            library_functions: BTreeMap::new(),
+            // 0.5.0 (D2): per-function feature counts, populated
+            // alongside `library_functions` from the `counts` slot
+            // returned by `find_capabilities`. Empty until that fill.
+            feature_counts: HashMap::new(),
         };
         Ok(ss)
     }
@@ -979,23 +1017,34 @@ fn aggregate_matches<'a, T: Clone>(
 // non-`'static` trait objects — see `find_function_capabilities` for
 // the underlying reason.
 //
-// 0.4.3: `library_function` closure — when the closure returns true
-// for a function's address, that function is skipped (no
-// find_function_capabilities call, no contributions to the matches
-// map). The caller decides what counts as a library function. When
-// `.signatures(path)` or `.with_flirt_matcher(arc)` is configured the
-// closure consults a `FlirtMatcher`; otherwise it's a no-op
-// (`|_| false`) and behaviour is identical to pre-0.4.3.
+// 0.5.0: `library_function` closure — when the closure returns
+// `Some(name)` for a function's address, that function is skipped
+// (no find_function_capabilities call, no contributions to the
+// matches map) and the (address, name) pair is collected for the
+// caller. When `.signatures(path)` or `.with_flirt_matcher(arc)` is
+// configured the closure consults a `FlirtMatcher`; otherwise it's a
+// no-op (`|_| None`) and behaviour is identical to pre-0.4.3.
+//
+// 0.4.3 used `Fn(u64) -> bool` and discarded the matched name. 0.5.0
+// returns `Option<String>` so the name surfaces on
+// `FileCapabilities::library_functions` for output parity with
+// Python capa's JSON.
+//
+// Partitioning happens sequentially before the rayon parallel loop:
+// FLIRT match is one trie traversal per function so the sequential
+// pass is fast, and it keeps the parallel loop free of side effects
+// on the library-functions accumulator.
 fn find_capabilities(
     ruleset: &rules::RuleSet,
     extractor: &Box<dyn extractor::Extractor + '_>,
-    library_function: &(dyn Fn(u64) -> bool + Sync + Send),
+    library_function: &(dyn Fn(u64) -> Option<String> + Sync + Send),
     logger: &(dyn Fn(&str) + Sync + Send),
     features_dump: bool,
 ) -> Result<(
     HashMap<rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     HashMap<u64, usize>,
     HashMap<String, HashMap<String, HashSet<u64>>>,
+    BTreeMap<u64, String>,
 )> {
     use rayon::prelude::*;
 
@@ -1010,6 +1059,34 @@ fn find_capabilities(
 
     let mut map_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
 
+    // 0.5.0: pre-partition FLIRT-marked library functions out of the
+    // analysis set. The names are collected for the
+    // `library_functions` output field; the addresses are the only
+    // thing the parallel loop needs to know about.
+    let mut library_functions: BTreeMap<u64, String> = BTreeMap::new();
+    let mut real_functions: Vec<_> = Vec::with_capacity(functions.len());
+    let total_input = functions.len();
+    for (addr, f) in functions.iter() {
+        match library_function(*addr) {
+            Some(name) => {
+                logger(&format!(
+                    "flirt: skipping library function at 0x{:02x} as {}",
+                    addr, name
+                ));
+                library_functions.insert(*addr, name);
+            }
+            None => {
+                real_functions.push((addr, f));
+            }
+        }
+    }
+    logger(&format!(
+        "flirt: {} library / {} non-library out of {} total functions",
+        library_functions.len(),
+        real_functions.len(),
+        total_input
+    ));
+
     // 0.4.2: parallelise the per-function analysis. Each
     // `find_function_capabilities` call is pure — it reads the
     // extractor + ruleset and returns matches without touching shared
@@ -1020,29 +1097,13 @@ fn find_capabilities(
     // BTreeMap lacks a `par_iter` impl, so we collect to a Vec first.
     // The Vec is cheap (just borrowed references), and the borrow
     // outlives the rayon scope below.
-    let function_list: Vec<_> = functions.iter().collect();
+    let function_list = real_functions;
     let total = function_list.len();
 
     let per_function: Vec<(u64, _, _, usize, HashMap<_, _>)> = function_list
         .par_iter()
         .enumerate()
-        .filter_map(|(index, (function_address, f))| {
-            // 0.4.3: FLIRT-marked library functions are skipped entirely.
-            // No find_function_capabilities call → no matches recorded
-            // → the function's bytes don't contribute capability hits.
-            // This is the user-facing payoff of FLIRT: stripped MSVC
-            // CRT functions (memcpy, strlen, _RTC_*) stop polluting
-            // the report.
-            if library_function(**function_address) {
-                logger(&format!(
-                    "flirt: skipping library function at 0x{:02x} ({} of {})",
-                    function_address, index, total
-                ));
-                return None;
-            }
-            Some((index, function_address, f))
-        })
-        .map(|(index, function_address, f)| -> Result<_> {
+        .map(|(index, (function_address, f))| -> Result<_> {
             // Each worker accumulates into a thread-local map_features
             // map. If `features_dump` is off we never read it so the
             // allocation is essentially free.
@@ -1128,7 +1189,7 @@ fn find_capabilities(
         }
     }
 
-    Ok((matches, meta, map_features_string))
+    Ok((matches, meta, map_features_string, library_functions))
 }
 
 // 0.4.0: extractor parameter explicitly carries `'_` to allow
@@ -1306,6 +1367,34 @@ pub struct FileCapabilities {
     pub security_checks: BTreeSet<SecurityCheckStatus>,
     pub map_features: HashMap<String, HashMap<String, HashSet<u64>>>,
     pub capabilities_associations: BTreeMap<String, CapabilityAssociation>,
+    /// 0.5.0 (D1): map from function VA to the FLIRT-resolved
+    /// library-function name for every function that the configured
+    /// `FlirtMatcher` matched and that capa-rs therefore skipped
+    /// during capability analysis. Empty when no signatures were
+    /// configured (matches pre-0.5.0 behaviour). Parity with Python
+    /// capa's JSON `library_functions` output — gives consumers
+    /// visibility into what was filtered as MSVC CRT / ATL / OpenSSL
+    /// / etc., so a missing capability can be traced back to a
+    /// FLIRT skip rather than a rule miss.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub library_functions: BTreeMap<u64, String>,
+
+    /// 0.5.0 (D2): map from function VA to the number of features
+    /// emitted for that function during capability analysis. The
+    /// `addr=0` sentinel entry carries the file-scope count.
+    /// Skipped FLIRT-marked library functions (see
+    /// `library_functions`) don't appear here. Parity with Python
+    /// capa's `StaticFeatureCounts.functions` JSON output — needed
+    /// for `capa --json` diffing and any consumer doing per-function
+    /// statistics over a binary.
+    ///
+    /// `HashMap` (not `BTreeMap`) because the source type from
+    /// `find_capabilities` is already a `HashMap` and we can move
+    /// the whole map into this field without a per-entry re-insert.
+    /// Sorted-order presentation is the consumer's responsibility
+    /// (cheap one-shot sort on the way out).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub feature_counts: HashMap<u64, usize>,
 }
 
 fn match_fn<'a>(

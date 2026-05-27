@@ -1353,10 +1353,25 @@ impl RegexFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
+        // 0.5.0 (E4): also iterate `Feature::Substring` for parity
+        // with Python capa. Python's evaluator runs
+        // `isinstance(feature, (String,))` which catches both `String`
+        // and `Substring` because `Substring(String)` inherits from
+        // `String` in Python's class hierarchy. In capa-rs they're
+        // distinct enum variants, so the dispatch has to enumerate
+        // both explicitly. No capa-rs extractor currently emits
+        // `Feature::Substring`, so this is behaviour-neutral today —
+        // defensive widening to keep parity if a future extractor
+        // does.
         let mut ll = vec![];
         for (feature, locations) in features {
-            if let Feature::String(s) = feature {
-                if self.re.is_match(&s.value) {
+            let value: Option<&str> = match feature {
+                Feature::String(s) => Some(s.value.as_str()),
+                Feature::Substring(s) => Some(s.value.as_str()),
+                _ => None,
+            };
+            if let Some(value) = value {
+                if self.re.is_match(value) {
                     ll.extend(locations);
                 }
             }

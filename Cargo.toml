@@ -79,7 +79,7 @@ iced-x86 = { version = "1", default-features = false, features = ["std", "decode
 # Three direct deps (`miniz_oxide`, `smallvec`, `thiserror`); ~240×
 # faster on `matches()` and ~70% less resident memory than the
 # upstream-FLIRT engine we briefly piloted on.
-fast-flirt = "0.2.1"
+fast-flirt = "0.2.2"
 # 0.4.2: rayon for inter-function parallelism in `find_capabilities`.
 # Each function's analysis is pure — reads the extractor, evaluates
 # rules, returns matches. Parallelising the outer loop gives ~4-8×

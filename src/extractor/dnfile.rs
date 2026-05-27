@@ -22,12 +22,34 @@ struct Instruction {
 }
 
 impl super::Instruction for Instruction {
+    /// CIL is a stack-based ISA — there is no notion of a "stack
+    /// variable" in the x86 sense. Locals are addressed by index
+    /// (`ldloc.N` / `stloc.N`), not by frame offset, and the
+    /// stack-string heuristic that drives `is_mov_imm_to_stack` on
+    /// x86 backends doesn't apply. Python capa makes the same call —
+    /// it doesn't define this method on the dnfile extractor at all.
+    /// Safe default `false` matches Python's behaviour: the
+    /// stack-string detector skips .NET methods.
+    ///
+    /// 0.4.x: previously `unimplemented!()`. Replaced in 0.5.0 — the
+    /// panic was a latent footgun for any caller that held a
+    /// `&dyn Instruction` without knowing which extractor produced it.
     fn is_mov_imm_to_stack(&self) -> Result<bool> {
-        unimplemented!()
+        Ok(false)
     }
+
+    /// CIL string literals come from the `#US` heap via `ldstr`, not
+    /// as byte arrays moved to a stack frame, so there are no
+    /// "printable bytes" to count on an instruction. Python capa
+    /// doesn't define this for the dnfile extractor. Safe default
+    /// `0` keeps the stack-string aggregator at 0 contributions for
+    /// .NET methods — same outcome as Python.
+    ///
+    /// 0.4.x: previously `unimplemented!()`.
     fn get_printable_len(&self) -> Result<u64> {
-        unimplemented!()
+        Ok(0)
     }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -36,17 +58,41 @@ impl super::Instruction for Instruction {
 #[derive(Debug, Clone)]
 struct Function {
     f: cil::function::Function,
+    /// Python capa convention: `calls_to` = set of CALLERS (incoming
+    /// references — addresses of methods that call this one).
     calls_to: HashSet<u64>,
+    /// Python capa convention: `calls_from` = set of CALLEES (outgoing
+    /// references — addresses of methods this one calls).
     calls_from: HashSet<u64>,
+    /// Materialised caller list for the `inrefs` trait method. Same
+    /// content as `calls_to`, kept as `Vec` because the trait returns
+    /// `&Vec<u64>`. Populated at `get_functions` construction.
+    inrefs: Vec<u64>,
+    /// Per-block successor map for the `blockrefs` trait method. The
+    /// .NET extractor treats each method as a single basic block
+    /// (matches `get_blocks` below), so this is always
+    /// `{first_insn_offset: vec![]}` — one entry, no successors. A
+    /// future CIL CFG split (br/brtrue/brfalse/switch walking) would
+    /// expand this; tracked as a follow-up.
+    blockrefs: HashMap<u64, Vec<u64>>,
 }
 
 impl super::Function for Function {
+    /// Callers of this method. 0.4.x: `unimplemented!()`. 0.5.0:
+    /// populated from `calls_to` at construction.
     fn inrefs(&self) -> &Vec<u64> {
-        unimplemented!()
+        &self.inrefs
     }
+
+    /// Per-basic-block successor map. 0.4.x: `unimplemented!()`.
+    /// 0.5.0: returns a single-entry map matching `get_blocks`'
+    /// single-block-per-method shape. Proper CIL CFG split is a
+    /// follow-up — it requires walking br/brtrue/brfalse/switch
+    /// targets and re-segmenting the instruction list.
     fn blockrefs(&self) -> &HashMap<u64, Vec<u64>> {
-        unimplemented!()
+        &self.blockrefs
     }
+
     fn offset(&self) -> u64 {
         self.f.offset as u64
     }
@@ -179,11 +225,27 @@ impl<'data> super::Extractor for Extractor<'data> {
     }
 
     fn get_functions(&self) -> Result<std::collections::BTreeMap<u64, Box<dyn super::Function>>> {
-        let mut methods: std::collections::HashMap<u64, Function> =
-            std::collections::HashMap::new();
-        let mut calls_to_map = HashMap::new();
+        // 0.5.0: rebuilt to match Python capa's `calls_to` (callers,
+        // incoming) / `calls_from` (callees, outgoing) convention.
+        // Pre-0.5.0 had two bugs that compounded into a silently-wrong
+        // call graph for every .NET assembly:
+        //   1. `calls_to` was initialised empty and never populated.
+        //   2. The reverse-index loop overwrote `f.calls_from` with the
+        //      caller set instead of populating `f.calls_to`, which
+        //      both inverted the `calls from` characteristic feature
+        //      and broke the `recursive call` detector (it checked
+        //      `f.calls_to`, which was always empty).
+        //
+        // First pass builds `callers_of[target] = {caller, ...}` and
+        // records each function's outgoing callee set. Second pass
+        // assembles the `Function` values with both fields filled in
+        // the correct direction.
+        let mut callers_of: HashMap<u64, HashSet<u64>> = HashMap::new();
+        let mut callees_of: HashMap<u64, HashSet<u64>> = HashMap::new();
+
         for f in self.pe().net()?.functions() {
-            let mut calls_from = HashSet::new();
+            let caller_addr = f.offset as u64;
+            let mut my_callees: HashSet<u64> = HashSet::new();
             for insn in &f.instructions {
                 if ![
                     OpCodeValue::Call,
@@ -195,25 +257,40 @@ impl<'data> super::Extractor for Extractor<'data> {
                 {
                     continue;
                 }
-                let address = insn.operand.value()?;
-                let ee = calls_to_map.entry(address as u64).or_insert(HashSet::new());
-                ee.insert(f.offset as u64);
-                calls_from.insert(address as u64);
+                let target = insn.operand.value()? as u64;
+                my_callees.insert(target);
+                callers_of.entry(target).or_default().insert(caller_addr);
+            }
+            callees_of.insert(caller_addr, my_callees);
+        }
+
+        let mut methods: HashMap<u64, Function> = HashMap::new();
+        for f in self.pe().net()?.functions() {
+            let addr = f.offset as u64;
+            let calls_to = callers_of.remove(&addr).unwrap_or_default();
+            let calls_from = callees_of.remove(&addr).unwrap_or_default();
+            // `inrefs` is just the materialised caller list (the trait
+            // returns `&Vec<u64>`; `calls_to` is a `HashSet`).
+            let inrefs: Vec<u64> = calls_to.iter().copied().collect();
+            // Single-block-per-method shape matches `get_blocks`.
+            // First instruction's offset is the block key; no
+            // intra-function successors at this granularity.
+            let mut blockrefs: HashMap<u64, Vec<u64>> = HashMap::new();
+            if let Some(first) = f.instructions.first() {
+                blockrefs.insert(first.offset as u64, Vec::new());
             }
             methods.insert(
-                f.offset as u64,
+                addr,
                 Function {
                     f: f.clone(),
-                    calls_to: HashSet::new(),
+                    calls_to,
                     calls_from,
+                    inrefs,
+                    blockrefs,
                 },
             );
         }
-        for (a, calls_from) in calls_to_map.into_iter() {
-            if let Some(f) = methods.get_mut(&a) {
-                f.calls_from = calls_from;
-            }
-        }
+
         Ok(methods
             .into_iter()
             .map(|(a, b)| (a, Box::new(b) as Box<dyn super::Function>))
@@ -654,7 +731,13 @@ impl<'data> Extractor<'data> {
         &self,
         f: &Function,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-        Ok(f.calls_to
+        // 0.5.0: read `calls_from` (callees) not `calls_to` (callers).
+        // Pre-0.5.0 this was a copy-paste from
+        // `extract_function_call_to_features` that silently emitted the
+        // caller set for every `characteristic: calls from` rule on
+        // .NET assemblies. Matches Python capa's
+        // `extract_function_calls_from` in dnfile/function.py.
+        Ok(f.calls_from
             .iter()
             .map(|a| {
                 (

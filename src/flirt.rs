@@ -37,10 +37,10 @@
 //!   policy. For most MSVC patterns this gives the same answer
 //!   because the head-bytes + CRC are unique enough. Refinement is
 //!   tracked as a follow-up.
-//! - **No .pat.gz support yet** — only `.sig` (binary) and `.pat`
-//!   (ASCII) are accepted. The Mandiant FLARE corpus ships as
-//!   `.sig`, so this isn't a practical limitation for the default
-//!   workflow.
+//! - **`.pat.gz` is supported as of 0.5.0** via fast-flirt 0.2.2's
+//!   `add_pat_gz` (pure-Rust gunzip — gzip framing stripped, deflate
+//!   stream inflated via `miniz_oxide`). Pre-0.5.0 `.pat.gz` files
+//!   were counted and surfaced in the load summary but skipped.
 //!
 //! ## Why a hand-rolled walker rather than `fast_flirt::FlirtSet::load_dir`
 //!
@@ -81,12 +81,10 @@ pub struct FlirtMatcher {
 }
 
 impl FlirtMatcher {
-    /// Load all `.sig` and `.pat` files from a directory tree
-    /// (recursive). Files that fail to parse are reported through
+    /// Load all `.sig`, `.pat`, and `.pat.gz` files from a directory
+    /// tree (recursive). Files that fail to parse are reported through
     /// `logger` and skipped — they don't abort the build, matching
-    /// Python capa's best-effort behaviour. `.pat.gz` files are
-    /// counted and surfaced in the final summary (gzipped pat is a
-    /// 0.4.x limitation — gunzip ahead of time as a workaround).
+    /// Python capa's best-effort behaviour.
     ///
     /// Returns an error if `path` can't be read or contains no valid
     /// signatures. A successful matcher with zero signatures would
@@ -108,7 +106,6 @@ impl FlirtMatcher {
         // that's not what we want here.
         let mut builder = FlirtSetBuilder::new();
         let mut source_count = 0usize;
-        let mut gz_skipped = 0usize;
 
         for entry in walkdir::WalkDir::new(path)
             .follow_links(false)
@@ -149,11 +146,22 @@ impl FlirtMatcher {
                     }
                 }
             } else if lower.ends_with(".pat.gz") {
-                // 0.4.x limitation: gzipped pat files not yet
-                // unpacked. Counted separately so the summary line
-                // can call attention to it.
-                gz_skipped += 1;
-                false
+                // 0.5.0: gzipped .pat unpacked via fast-flirt's
+                // pure-Rust gunzip (miniz_oxide). Pre-0.5.0 these
+                // were silently counted-and-skipped.
+                match std::fs::read(p) {
+                    Ok(bytes) => match builder.add_pat_gz(&bytes) {
+                        Ok(_) => true,
+                        Err(e) => {
+                            logger(&format!("flirt: failed to parse .pat.gz {}: {}", name, e));
+                            false
+                        }
+                    },
+                    Err(e) => {
+                        logger(&format!("flirt: failed to read .pat.gz {}: {}", name, e));
+                        false
+                    }
+                }
             } else if lower.ends_with(".pat") {
                 match std::fs::read_to_string(p) {
                     Ok(text) => match builder.add_pat(&text) {
@@ -185,29 +193,18 @@ impl FlirtMatcher {
         let sig_count = set.len();
         if sig_count == 0 {
             return Err(Error::InvalidRuleFile(format!(
-                "flirt: no signatures loaded from {} ({} sources attempted, {} .pat.gz skipped)",
+                "flirt: no signatures loaded from {} ({} sources attempted)",
                 path.display(),
                 source_count,
-                gz_skipped
             )));
         }
 
-        if gz_skipped > 0 {
-            logger(&format!(
-                "flirt: loaded {} signatures from {} files in {} ({} .pat.gz skipped — gunzip to enable)",
-                sig_count,
-                source_count,
-                path.display(),
-                gz_skipped
-            ));
-        } else {
-            logger(&format!(
-                "flirt: loaded {} signatures from {} files in {}",
-                sig_count,
-                source_count,
-                path.display()
-            ));
-        }
+        logger(&format!(
+            "flirt: loaded {} signatures from {} files in {}",
+            sig_count,
+            source_count,
+            path.display()
+        ));
 
         Ok(Self {
             set,

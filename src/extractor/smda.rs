@@ -201,6 +201,24 @@ impl<'data> super::Extractor for Extractor<'data> {
         f: &Box<dyn super::Function>,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![]; //extract function calls to
+
+        // 0.5.0 note: function-scope FunctionName emission was
+        // considered (E2 in the parity audit) for parity with Python
+        // capa, but reverted after empirical measurement showed:
+        //   1. The entire capa-rules corpus contains exactly one
+        //      `function-name:` rule, and it's file-scoped, not
+        //      function-scoped. So function-scope emission unlocks
+        //      zero rule matches today.
+        //   2. The emission added ~16% to mimikatz analysis time
+        //      (~0.9s on a 5s baseline) for zero functional benefit
+        //      on real workloads — every emission was a wasted
+        //      String + HashSet alloc that downstream rule eval had
+        //      to probe past.
+        // File-scope FunctionName via `extract_file_function_names`
+        // covers the one rule that exists. If a future Python-capa
+        // release ships function-scope name rules and they're added
+        // to the corpus, revisit this.
+
         for inref in f.inrefs() {
             res.push((
                 crate::rules::features::Feature::Characteristic(
