@@ -3,10 +3,22 @@
 All notable changes to **capa** are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.4] — 2026-05-27 — FLIRT polish
+## [0.4.3] — 2026-05-27 — FLIRT polish
 
 ### Added
-
+  
+- **FLIRT matcher.** `AnalyzeBuilder::signatures(path)` loads
+  `.sig` and `.pat` files from a directory; matched functions are  
+  flagged as library code and excluded from the capability output. 
+  Engine: [`fast-flirt`](https://crates.io/crates/fast-flirt).  
+- **`capa_cli --signatures PATH`** flag.
+- **`flirt-sigs/`** — 195 `.sig` files (~70 MB) covering MSVC CRT,
+  ATL/MFC, OpenSSL, zlib, boost, libcurl, lua, protobuf, DirectX, 
+  and Intel libs on Windows. Sourced from Mandiant FLARE
+  (`mandiant/`, Apache-2.0) and Maktm's FLIRTDB (`flirtdb/`,
+  community-permissive). Credits in `flirt-sigs/README.md`.
+- **`flirt-sigs-vX.Y.Z.tar.gz`** GitHub release artifact carrying
+  the same content; download, extract, point `--signatures` at it.  
 - **`AnalyzeBuilder::with_flirt_matcher(Arc<FlirtMatcher>)`.** Reuse
   one loaded signature corpus across many `from_file` / `from_buffer`
   calls instead of re-walking the directory and rebuilding the trie
@@ -52,22 +64,6 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   gunzip to enable)` so the gap is visible. Hard-fails only when the
   directory yields zero parseable signatures.
 
-## [0.4.3] — 2026-05-26 — FLIRT library-function recognition
-
-### Added
-
-- **FLIRT matcher.** `AnalyzeBuilder::signatures(path)` loads
-  `.sig` and `.pat` files from a directory; matched functions are
-  flagged as library code and excluded from the capability output.
-  Engine: [`fast-flirt`](https://crates.io/crates/fast-flirt).
-- **`capa_cli --signatures PATH`** flag.
-- **`flirt-sigs/`** — 195 `.sig` files (~70 MB) covering MSVC CRT,
-  ATL/MFC, OpenSSL, zlib, boost, libcurl, lua, protobuf, DirectX,
-  and Intel libs on Windows. Sourced from Mandiant FLARE
-  (`mandiant/`, Apache-2.0) and Maktm's FLIRTDB (`flirtdb/`,
-  community-permissive). Credits in `flirt-sigs/README.md`.
-- **`flirt-sigs-vX.Y.Z.tar.gz`** GitHub release artifact carrying
-  the same content; download, extract, point `--signatures` at it.
 
 ## [0.4.2] — 2026-05-26 — Performance, threading, hardening
 
