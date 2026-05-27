@@ -223,12 +223,14 @@ fn noop_logger(_: &str) {}
 
 /// 0.4.3: build the library-function filter closure passed to
 /// [`find_capabilities`]. When the caller has configured a
-/// [`flirt::FlirtMatcher`] (via `AnalyzeBuilder::signatures`), the
-/// closure looks up each function's leading bytes via
-/// `extractor.function_bytes` and asks the matcher. Otherwise — or
-/// when the extractor is dnfile-backed (no raw bytes; managed .NET
-/// code that FLIRT can't pattern-match anyway) — the closure
-/// always returns `false`, leaving the analysis unchanged.
+/// [`flirt::FlirtMatcher`] (via `AnalyzeBuilder::signatures` or
+/// `with_flirt_matcher`), the closure asks the matcher for each
+/// function. Otherwise the closure always returns `false`, leaving
+/// the analysis unchanged.
+///
+/// Routes through `FlirtMatcher::match_function_at`, which owns the
+/// `FLIRT_LOOKAHEAD_BYTES` constant + the byte-read dance — keeping
+/// the lookahead size in exactly one place.
 ///
 /// `Box<dyn>` because the FLIRT and no-op arms produce different
 /// closure types. `'a` is the borrow scope of `extractor` and the
@@ -236,20 +238,11 @@ fn noop_logger(_: &str) {}
 /// (`from_file` / `from_buffer`) and outlive the
 /// [`find_capabilities`] call that consumes the boxed closure.
 fn make_library_filter<'a>(
-    extractor: &'a Box<dyn extractor::Extractor + '_>,
+    extractor: &'a (dyn extractor::Extractor + '_),
     flirt: Option<&'a flirt::FlirtMatcher>,
 ) -> Box<dyn Fn(u64) -> bool + Sync + Send + 'a> {
     if let Some(matcher) = flirt {
-        // 0.4.3: 256 matches Python capa's lookahead (the FLIRT
-        // head pattern is ~32 bytes + a tail; 256 covers every
-        // FLARE-corpus signature with margin).
-        const FLIRT_LOOKAHEAD: u32 = 256;
-        return Box::new(move |addr: u64| {
-            extractor
-                .function_bytes(addr, FLIRT_LOOKAHEAD)
-                .and_then(|b| matcher.match_function(b))
-                .is_some()
-        });
+        return Box::new(move |addr: u64| matcher.match_function_at(addr, extractor).is_some());
     }
     Box::new(|_addr: u64| false)
 }
@@ -296,11 +289,18 @@ pub struct AnalyzeBuilder<'a> {
     logger: &'a (dyn Fn(&str) + Sync + Send),
     features_dump: bool,
     security_checks: Option<BinarySecurityCheckOptions>,
-    // 0.4.3: optional FLIRT signatures directory. When set,
-    // `from_file` / `from_buffer` load the matcher and use it to
-    // mark library functions during analysis. Stored as PathBuf so
-    // the builder doesn't carry a borrow lifetime on the path.
+    // 0.4.3: optional FLIRT signatures directory. When set and
+    // `flirt_matcher` is None, `from_file` / `from_buffer` load the
+    // matcher from this path and use it to mark library functions
+    // during analysis. Stored as PathBuf so the builder doesn't
+    // carry a borrow lifetime on the path.
     flirt_signatures: Option<std::path::PathBuf>,
+    // 0.4.4: pre-built FLIRT matcher, shared via Arc. Set via
+    // `with_flirt_matcher` for batch analysis — avoids re-walking
+    // the corpus + rebuilding the trie on every `from_file` /
+    // `from_buffer` call. Takes precedence over `flirt_signatures`
+    // when both are set.
+    flirt_matcher: Option<std::sync::Arc<flirt::FlirtMatcher>>,
 }
 
 impl<'a> Default for AnalyzeBuilder<'a> {
@@ -315,6 +315,7 @@ impl<'a> Default for AnalyzeBuilder<'a> {
             features_dump: false,
             security_checks: None,
             flirt_signatures: None,
+            flirt_matcher: None,
         }
     }
 }
@@ -400,6 +401,39 @@ impl<'a> AnalyzeBuilder<'a> {
         self
     }
 
+    /// Use a pre-built FLIRT matcher for this analysis. Wraps the
+    /// matcher in `Arc` and clones the handle on each terminal call,
+    /// so the same loaded corpus serves many `from_file` /
+    /// `from_buffer` invocations without re-walking the directory or
+    /// rebuilding the prefix trie.
+    ///
+    /// Construct once with [`flirt::FlirtMatcher::from_directory`],
+    /// then clone the `Arc` per builder. Takes precedence over
+    /// [`Self::signatures`] when both are set.
+    ///
+    /// ```ignore
+    /// use capa::{flirt::FlirtMatcher, FileCapabilities};
+    /// use std::sync::Arc;
+    ///
+    /// let matcher = Arc::new(FlirtMatcher::from_directory(
+    ///     "./flirt-sigs".as_ref(),
+    ///     &|m| eprintln!("{m}"),
+    /// )?);
+    ///
+    /// for path in samples {
+    ///     let fc = FileCapabilities::analyze()
+    ///         .rules("./capa-rules")
+    ///         .with_flirt_matcher(matcher.clone())
+    ///         .from_file(path)?;
+    ///     // ...
+    /// }
+    /// # Ok::<(), capa::Error>(())
+    /// ```
+    pub fn with_flirt_matcher(mut self, matcher: std::sync::Arc<flirt::FlirtMatcher>) -> Self {
+        self.flirt_matcher = Some(matcher);
+        self
+    }
+
     /// Terminal — analyse a binary on disk. Routes through capa-rs's
     /// magic-byte format detection (PE → dnfile-then-smda, ELF →
     /// smda, Mach-O → smda) and runs the binary security checklist.
@@ -428,12 +462,17 @@ impl<'a> AnalyzeBuilder<'a> {
         // 0.4.3: load FLIRT signatures if configured. Failures
         // propagate via `?`, but per-file parse errors inside the
         // directory are logged and skipped (best-effort, matches
-        // Python capa's behaviour).
-        let flirt_matcher = match self.flirt_signatures.as_ref() {
-            Some(p) => Some(flirt::FlirtMatcher::from_directory(p, self.logger)?),
-            None => None,
+        // Python capa's behaviour). 0.4.4: a pre-built matcher
+        // shared via Arc (from `with_flirt_matcher`) takes
+        // precedence and skips the load entirely.
+        let owned_matcher = match (&self.flirt_matcher, self.flirt_signatures.as_ref()) {
+            (Some(_), _) => None,
+            (None, Some(p)) => Some(flirt::FlirtMatcher::from_directory(p, self.logger)?),
+            (None, None) => None,
         };
-        let library_function = make_library_filter(&extractor, flirt_matcher.as_ref());
+        let flirt_ref: Option<&flirt::FlirtMatcher> =
+            self.flirt_matcher.as_deref().or(owned_matcher.as_ref());
+        let library_function = make_library_filter(&*extractor, flirt_ref);
 
         let mut file_capabilities;
         #[cfg(not(feature = "properties"))]
@@ -506,11 +545,16 @@ impl<'a> AnalyzeBuilder<'a> {
         };
 
         // 0.4.3: FLIRT setup — see `from_file` for rationale.
-        let flirt_matcher = match self.flirt_signatures.as_ref() {
-            Some(p) => Some(flirt::FlirtMatcher::from_directory(p, self.logger)?),
-            None => None,
+        // 0.4.4: pre-built matcher via `with_flirt_matcher` takes
+        // precedence over `signatures(path)` and skips the load.
+        let owned_matcher = match (&self.flirt_matcher, self.flirt_signatures.as_ref()) {
+            (Some(_), _) => None,
+            (None, Some(p)) => Some(flirt::FlirtMatcher::from_directory(p, self.logger)?),
+            (None, None) => None,
         };
-        let library_function = make_library_filter(&extractor, flirt_matcher.as_ref());
+        let flirt_ref: Option<&flirt::FlirtMatcher> =
+            self.flirt_matcher.as_deref().or(owned_matcher.as_ref());
+        let library_function = make_library_filter(&*extractor, flirt_ref);
 
         let mut file_capabilities;
         #[cfg(not(feature = "properties"))]
@@ -938,10 +982,10 @@ fn aggregate_matches<'a, T: Clone>(
 // 0.4.3: `library_function` closure — when the closure returns true
 // for a function's address, that function is skipped (no
 // find_function_capabilities call, no contributions to the matches
-// map). The caller decides what counts as a library function. With
-// the `flirt` feature enabled and `.signatures()` set, the closure
-// consults a FlirtMatcher. Otherwise it's a no-op (`|_| false`)
-// and behaviour is identical to pre-0.4.3.
+// map). The caller decides what counts as a library function. When
+// `.signatures(path)` or `.with_flirt_matcher(arc)` is configured the
+// closure consults a `FlirtMatcher`; otherwise it's a no-op
+// (`|_| false`) and behaviour is identical to pre-0.4.3.
 fn find_capabilities(
     ruleset: &rules::RuleSet,
     extractor: &Box<dyn extractor::Extractor + '_>,

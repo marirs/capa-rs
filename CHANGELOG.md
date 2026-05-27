@@ -3,6 +3,55 @@
 All notable changes to **capa** are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] — 2026-05-27 — FLIRT polish
+
+### Added
+
+- **`AnalyzeBuilder::with_flirt_matcher(Arc<FlirtMatcher>)`.** Reuse
+  one loaded signature corpus across many `from_file` / `from_buffer`
+  calls instead of re-walking the directory and rebuilding the trie
+  on every analysis. Amortises the ~360 ms / ~70 MB FLIRT load over
+  the whole batch. Takes precedence over `signatures(path)` when both
+  are set. Pattern: build the matcher once, wrap in `Arc`, clone the
+  handle per builder.
+
+### Changed
+
+- **`fast-flirt` 0.2.0 → 0.2.1.** Picks up th
+   — the NameIter corruption bug when a `.sig` module carries
+  both references and tail bytes (CRIT), the missing arena-bounds
+  validation in `FlirtSetBuilder::build()` (HIGH), the `u8` /
+  `u16` overflows on `names_count` and `tail_bytes_count` from
+  pathological inputs (MED). `FlirtMatcher::from_directory` now maps
+  the new fallible `build()` through `Error::InvalidRuleFile`.
+- **`FlirtMatcher::match_function` returns `Option<&str>`.** Borrowed
+  from the underlying `FlirtSet` arena — no per-call `String`
+  allocation in the hot path. Callers that need an owned name can
+  `.map(str::to_owned)`.
+- **Case-insensitive `.sig` / `.pat` extension matching.** Vendor
+  zips frequently ship uppercase `.SIG`; the directory walker now
+  lowercases before the suffix check, matching `fast-flirt`'s own
+  `load_dir` behaviour.
+- **`make_library_filter` borrows `&dyn Extractor` instead of
+  `&Box<dyn Extractor>`.** Drops the surplus indirection clippy
+  flagged as `borrowed_box`.
+- **`FLIRT_LOOKAHEAD_BYTES` lives only in `flirt.rs`.** The lookahead
+  read + matcher dispatch is encapsulated in
+  `FlirtMatcher::match_function_at`; `make_library_filter` is a
+  one-liner over that.
+
+### Fixed
+
+- **Symlinks in the signature directory are skipped.** `walkdir`
+  with `follow_links(false)` still reads file-typed symlink entries;
+  an explicit `is_symlink()` check now prevents that. Consistent with
+  `fast-flirt`'s own walker policy.
+- **`.pat.gz` files are counted and surfaced in the load summary.**
+  capa-rs 0.4.x doesn't unpack gzipped pat — the load line now reads
+  e.g. `loaded 4982 signatures from 195 files (3 .pat.gz skipped —
+  gunzip to enable)` so the gap is visible. Hard-fails only when the
+  directory yields zero parseable signatures.
+
 ## [0.4.3] — 2026-05-26 — FLIRT library-function recognition
 
 ### Added
