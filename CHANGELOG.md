@@ -3,8 +3,6 @@
 All notable changes to **capa** are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
 ## [0.4.3] — 2026-05-26 — FLIRT library-function recognition
 
 ### Added
@@ -12,8 +10,7 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **FLIRT matcher.** `AnalyzeBuilder::signatures(path)` loads
   `.sig` and `.pat` files from a directory; matched functions are
   flagged as library code and excluded from the capability output.
-  Engine: [`lancelot-flirt`](https://crates.io/crates/lancelot-flirt)
-  0.9 (Apache-2.0, Willi Ballenthin).
+  Engine: [`fast-flirt`](https://crates.io/crates/fast-flirt).
 - **`capa_cli --signatures PATH`** flag.
 - **`flirt-sigs/`** — 195 `.sig` files (~70 MB) covering MSVC CRT,
   ATL/MFC, OpenSSL, zlib, boost, libcurl, lua, protobuf, DirectX,
@@ -22,14 +19,6 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   community-permissive). Credits in `flirt-sigs/README.md`.
 - **`flirt-sigs-vX.Y.Z.tar.gz`** GitHub release artifact carrying
   the same content; download, extract, point `--signatures` at it.
-
-### Notes
-
-- `.sig` and `.pat` are supported; `.pat.gz` is not.
-- Single-pass matching; recursive reference resolution is not
-  implemented.
-- `flirt-sigs/` is excluded from the published `.crate`. Source
-  builds and GitHub releases include it.
 
 ## [0.4.2] — 2026-05-26 — Performance, threading, hardening
 
