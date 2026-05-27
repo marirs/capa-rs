@@ -57,6 +57,9 @@ use crate::security::options::status::SecurityCheckStatus;
 pub(crate) mod consts;
 mod error;
 mod extractor;
+// 0.4.3: FLIRT library-function recognition. Always compiled in;
+// FLIRT only runs when `AnalyzeBuilder::signatures(path)` is set.
+pub mod flirt;
 pub mod rules;
 mod security;
 mod sede;
@@ -218,6 +221,39 @@ impl Default for BinarySecurityCheckOptions {
 /// callers to provide one.
 fn noop_logger(_: &str) {}
 
+/// 0.4.3: build the library-function filter closure passed to
+/// [`find_capabilities`]. When the caller has configured a
+/// [`flirt::FlirtMatcher`] (via `AnalyzeBuilder::signatures`), the
+/// closure looks up each function's leading bytes via
+/// `extractor.function_bytes` and asks the matcher. Otherwise — or
+/// when the extractor is dnfile-backed (no raw bytes; managed .NET
+/// code that FLIRT can't pattern-match anyway) — the closure
+/// always returns `false`, leaving the analysis unchanged.
+///
+/// `Box<dyn>` because the FLIRT and no-op arms produce different
+/// closure types. `'a` is the borrow scope of `extractor` and the
+/// optional matcher; both live in the calling terminal method
+/// (`from_file` / `from_buffer`) and outlive the
+/// [`find_capabilities`] call that consumes the boxed closure.
+fn make_library_filter<'a>(
+    extractor: &'a Box<dyn extractor::Extractor + '_>,
+    flirt: Option<&'a flirt::FlirtMatcher>,
+) -> Box<dyn Fn(u64) -> bool + Sync + Send + 'a> {
+    if let Some(matcher) = flirt {
+        // 0.4.3: 256 matches Python capa's lookahead (the FLIRT
+        // head pattern is ~32 bytes + a tail; 256 covers every
+        // FLARE-corpus signature with margin).
+        const FLIRT_LOOKAHEAD: u32 = 256;
+        return Box::new(move |addr: u64| {
+            extractor
+                .function_bytes(addr, FLIRT_LOOKAHEAD)
+                .and_then(|b| matcher.match_function(b))
+                .is_some()
+        });
+    }
+    Box::new(|_addr: u64| false)
+}
+
 /// 0.4.0: chained builder for [`FileCapabilities`] analysis. The
 /// 0.3.x positional `from_file` / `from_buffer` entry points are
 /// gone — `.rules(...)` is the only required setter; everything
@@ -260,6 +296,11 @@ pub struct AnalyzeBuilder<'a> {
     logger: &'a (dyn Fn(&str) + Sync + Send),
     features_dump: bool,
     security_checks: Option<BinarySecurityCheckOptions>,
+    // 0.4.3: optional FLIRT signatures directory. When set,
+    // `from_file` / `from_buffer` load the matcher and use it to
+    // mark library functions during analysis. Stored as PathBuf so
+    // the builder doesn't carry a borrow lifetime on the path.
+    flirt_signatures: Option<std::path::PathBuf>,
 }
 
 impl<'a> Default for AnalyzeBuilder<'a> {
@@ -273,6 +314,7 @@ impl<'a> Default for AnalyzeBuilder<'a> {
             logger: &noop_logger,
             features_dump: false,
             security_checks: None,
+            flirt_signatures: None,
         }
     }
 }
@@ -335,6 +377,29 @@ impl<'a> AnalyzeBuilder<'a> {
         self
     }
 
+    /// 0.4.3: directory of `.sig` / `.pat` FLIRT signature files.
+    /// When set, capa-rs identifies statically-linked library
+    /// functions inside the analysed binary and excludes their
+    /// capability hits from the user-facing output via the
+    /// existing `lib: true` rule-skip path. Useful primarily on
+    /// stripped MSVC C/C++ binaries.
+    ///
+    /// The capa-rs repo ships a `flirt-sigs/` directory with the
+    /// Mandiant FLARE corpus + Maktm's FLIRTDB (Apache-2.0 and
+    /// community licensed respectively, ~70 MB, ~195 `.sig` files).
+    /// GitHub releases also ship the same content as a
+    /// `flirt-sigs-vX.Y.Z.tar.gz` artifact alongside the CLI
+    /// binaries.
+    ///
+    /// Default: `None` — no FLIRT, behaviour identical to
+    /// pre-0.4.3. Parse errors on individual files are logged via
+    /// the builder's `logger` callback and skipped; an empty
+    /// directory returns `Error::InvalidRuleFile`.
+    pub fn signatures(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.flirt_signatures = Some(path.into());
+        self
+    }
+
     /// Terminal — analyse a binary on disk. Routes through capa-rs's
     /// magic-byte format detection (PE → dnfile-then-smda, ELF →
     /// smda, Mach-O → smda) and runs the binary security checklist.
@@ -360,6 +425,16 @@ impl<'a> AnalyzeBuilder<'a> {
         security_opts.input_file = PathBuf::from(&f);
         let security_checks = security::get_security_checks(&f, &security_opts)?;
 
+        // 0.4.3: load FLIRT signatures if configured. Failures
+        // propagate via `?`, but per-file parse errors inside the
+        // directory are logged and skipped (best-effort, matches
+        // Python capa's behaviour).
+        let flirt_matcher = match self.flirt_signatures.as_ref() {
+            Some(p) => Some(flirt::FlirtMatcher::from_directory(p, self.logger)?),
+            None => None,
+        };
+        let library_function = make_library_filter(&extractor, flirt_matcher.as_ref());
+
         let mut file_capabilities;
         #[cfg(not(feature = "properties"))]
         {
@@ -374,8 +449,13 @@ impl<'a> AnalyzeBuilder<'a> {
         #[cfg(not(feature = "verbose"))]
         {
             file_capabilities.security_checks = BTreeSet::from_iter(security_checks);
-            let (capabilities, _counts, _map_features) =
-                find_capabilities(&rules, &extractor, self.logger, self.features_dump)?;
+            let (capabilities, _counts, _map_features) = find_capabilities(
+                &rules,
+                &extractor,
+                &*library_function,
+                self.logger,
+                self.features_dump,
+            )?;
             if self.features_dump {
                 file_capabilities.map_features = _map_features;
             }
@@ -384,8 +464,13 @@ impl<'a> AnalyzeBuilder<'a> {
         #[cfg(feature = "verbose")]
         {
             file_capabilities.security_checks = BTreeSet::from_iter(security_checks);
-            let (capabilities, counts, _map_features) =
-                find_capabilities(&rules, &extractor, self.logger, self.features_dump)?;
+            let (capabilities, counts, _map_features) = find_capabilities(
+                &rules,
+                &extractor,
+                &*library_function,
+                self.logger,
+                self.features_dump,
+            )?;
             if self.features_dump {
                 file_capabilities.map_features = _map_features;
             }
@@ -420,6 +505,13 @@ impl<'a> AnalyzeBuilder<'a> {
             Ok(Err(_)) | Err(_) => return Err(Error::DescriptionEvaluationError),
         };
 
+        // 0.4.3: FLIRT setup — see `from_file` for rationale.
+        let flirt_matcher = match self.flirt_signatures.as_ref() {
+            Some(p) => Some(flirt::FlirtMatcher::from_directory(p, self.logger)?),
+            None => None,
+        };
+        let library_function = make_library_filter(&extractor, flirt_matcher.as_ref());
+
         let mut file_capabilities;
         #[cfg(not(feature = "properties"))]
         {
@@ -433,8 +525,13 @@ impl<'a> AnalyzeBuilder<'a> {
 
         #[cfg(not(feature = "verbose"))]
         {
-            let (capabilities, _counts, _map_features) =
-                find_capabilities(&rules, &extractor, self.logger, self.features_dump)?;
+            let (capabilities, _counts, _map_features) = find_capabilities(
+                &rules,
+                &extractor,
+                &*library_function,
+                self.logger,
+                self.features_dump,
+            )?;
             if self.features_dump {
                 file_capabilities.map_features = _map_features;
             }
@@ -442,8 +539,13 @@ impl<'a> AnalyzeBuilder<'a> {
         }
         #[cfg(feature = "verbose")]
         {
-            let (capabilities, counts, _map_features) =
-                find_capabilities(&rules, &extractor, self.logger, self.features_dump)?;
+            let (capabilities, counts, _map_features) = find_capabilities(
+                &rules,
+                &extractor,
+                &*library_function,
+                self.logger,
+                self.features_dump,
+            )?;
             if self.features_dump {
                 file_capabilities.map_features = _map_features;
             }
@@ -832,9 +934,18 @@ fn aggregate_matches<'a, T: Clone>(
 // 0.4.0: extractor parameter explicitly carries `'_` to allow
 // non-`'static` trait objects — see `find_function_capabilities` for
 // the underlying reason.
+//
+// 0.4.3: `library_function` closure — when the closure returns true
+// for a function's address, that function is skipped (no
+// find_function_capabilities call, no contributions to the matches
+// map). The caller decides what counts as a library function. With
+// the `flirt` feature enabled and `.signatures()` set, the closure
+// consults a FlirtMatcher. Otherwise it's a no-op (`|_| false`)
+// and behaviour is identical to pre-0.4.3.
 fn find_capabilities(
     ruleset: &rules::RuleSet,
     extractor: &Box<dyn extractor::Extractor + '_>,
+    library_function: &(dyn Fn(u64) -> bool + Sync + Send),
     logger: &(dyn Fn(&str) + Sync + Send),
     features_dump: bool,
 ) -> Result<(
@@ -871,7 +982,23 @@ fn find_capabilities(
     let per_function: Vec<(u64, _, _, usize, HashMap<_, _>)> = function_list
         .par_iter()
         .enumerate()
-        .map(|(index, (function_address, f))| -> Result<_> {
+        .filter_map(|(index, (function_address, f))| {
+            // 0.4.3: FLIRT-marked library functions are skipped entirely.
+            // No find_function_capabilities call → no matches recorded
+            // → the function's bytes don't contribute capability hits.
+            // This is the user-facing payoff of FLIRT: stripped MSVC
+            // CRT functions (memcpy, strlen, _RTC_*) stop polluting
+            // the report.
+            if library_function(**function_address) {
+                logger(&format!(
+                    "flirt: skipping library function at 0x{:02x} ({} of {})",
+                    function_address, index, total
+                ));
+                return None;
+            }
+            Some((index, function_address, f))
+        })
+        .map(|(index, function_address, f)| -> Result<_> {
             // Each worker accumulates into a thread-local map_features
             // map. If `features_dump` is off we never read it so the
             // allocation is essentially free.

@@ -109,6 +109,23 @@ The shellcode is treated as a single section mapped at `base_addr`. dnfile and t
 
 For PE inputs with a CodeView debug record, `FileCapabilities.properties` exposes `pdb_guid`, `pdb_age`, and `pdb_filename` — the keys Microsoft SymSrv / Mozilla / Chromium symbol stores look up. Fields are omitted from the JSON output when the input has no debug directory or isn't a PE.
 
+## FLIRT library-function recognition
+
+Point `.signatures(path)` at a directory of `.sig` / `.pat` files and matched library functions (MSVC CRT, ATL/MFC, OpenSSL, zlib, boost, libcurl, lua, protobuf, DirectX, Intel libs, etc.) are excluded from the capability output.
+
+```rust
+let fc = FileCapabilities::analyze()
+    .rules("path/to/capa-rules")
+    .signatures("path/to/flirt-sigs")
+    .from_file("Sample.exe")?;
+```
+
+```bash
+capa_cli --rules-path capa-rules --signatures flirt-sigs Sample.exe
+```
+
+The repo ships a `flirt-sigs/` directory with 195 signatures sourced from [Mandiant FLARE](https://github.com/mandiant/capa/tree/master/sigs) and [Maktm's FLIRTDB](https://github.com/Maktm/FLIRTDB). GitHub releases include the same content as a `flirt-sigs-vX.Y.Z.tar.gz` artifact.
+
 ## Features
 
 The crate ships two cargo features:
@@ -128,21 +145,6 @@ cargo build --features verbose,properties  # both
 
 - Rust **1.95** or newer (2024 edition).
 - No C/C++ toolchain — pure Rust.
-
-## Architecture
-
-```
-┌──────────────────────────────┐
-│  FileCapabilities (capa-rs)  │  rules engine, capability matching,
-│  src/lib.rs                  │  rendering, security checks
-└──────────────┬───────────────┘
-               │
-               ├──► src/extractor/smda.rs ───► smda 0.5  (PE / ELF / Mach-O /
-               │                                          shellcode disassembly,
-               │                                          function names, hashes,
-               │                                          PDB debug-directory)
-               └──► src/extractor/dnfile.rs ──► dnfile 0.4 (.NET CLR metadata)
-```
 
 ## Related crates in this ecosystem
 

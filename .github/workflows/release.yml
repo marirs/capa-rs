@@ -83,6 +83,51 @@ jobs:
             release/*.sha256
           if-no-files-found: error
 
+  # 0.4.3: separate `flirt-sigs.tar.gz` artifact shipped alongside the
+  # CLI binaries. The `flirt-sigs/` directory in the repo is ~70 MB
+  # raw (~25-35 MB compressed) — too big for crates.io, but a
+  # one-time download for CLI users. Single tarball is platform-
+  # independent; users extract once and point `--signatures` at the
+  # extracted path.
+  package-flirt-sigs:
+    name: package flirt-sigs tarball
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build flirt-sigs tarball
+        run: |
+          tag="${{ steps.tag.outputs.tag }}"
+          mkdir -p release
+          if [ ! -d flirt-sigs ]; then
+            echo "flirt-sigs/ directory missing from checkout — refusing to ship empty bundle"
+            exit 1
+          fi
+          # Tar from the parent so the archive extracts to a clean
+          # `flirt-sigs/` directory at the user's chosen path.
+          tar -czf "release/flirt-sigs-${tag}.tar.gz" flirt-sigs/
+          (cd release && sha256sum "flirt-sigs-${tag}.tar.gz" > "flirt-sigs-${tag}.tar.gz.sha256")
+          ls -lh release
+
+      - name: Upload flirt-sigs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flirt-sigs
+          path: |
+            release/flirt-sigs-*.tar.gz
+            release/flirt-sigs-*.sha256
+          if-no-files-found: error
+
   build-cli:
     name: build capa_cli — ${{ matrix.target }}
     needs: verify
@@ -184,7 +229,7 @@ jobs:
 
   github-release:
     name: create GitHub release
-    needs: [package-source, build-cli]
+    needs: [package-source, package-flirt-sigs, build-cli]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -238,6 +283,12 @@ jobs:
             echo
             echo "Every artifact ships with a matching \`*.sha256\` checksum."
             echo
+            echo "## FLIRT signatures (optional, for library-function recognition)"
+            echo
+            echo "- \`flirt-sigs-${tag}.tar.gz\` — Mandiant FLARE + Maktm FLIRTDB \`.sig\` corpora (~25-35 MB compressed, ~70 MB extracted)"
+            echo
+            echo "Extract anywhere and pass \`--signatures /path/to/flirt-sigs\` to \`capa_cli\`. Optional — analysis works without it, but stripped MSVC binaries produce cleaner output when FLIRT is wired up. Signature content remains the work of Mandiant FLARE and Michael Kiros (Maktm); see \`flirt-sigs/README.md\` for licensing and credits."
+            echo
             echo "Publishing to crates.io is performed manually with \`cargo publish\` and is not part of this workflow."
             echo EOF
           } >> "$GITHUB_OUTPUT"
@@ -251,7 +302,7 @@ jobs:
         run: |
           mkdir -p release
           # Each artifacts/<name>/ folder contains files we want at release/ top-level.
-          find artifacts -type f \( -name 'capa-*' -o -name 'capa_cli-*' \) -exec cp {} release/ \;
+          find artifacts -type f \( -name 'capa-*' -o -name 'capa_cli-*' -o -name 'flirt-sigs-*' \) -exec cp {} release/ \;
           ls -la release
 
       - name: Create release

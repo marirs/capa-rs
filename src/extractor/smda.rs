@@ -115,6 +115,17 @@ impl<'data> super::Extractor for Extractor<'data> {
         false
     }
 
+    /// 0.4.3: surface raw function bytes for the FLIRT matcher.
+    /// `bytes_at_best_effort` truncates gracefully at section
+    /// boundaries — returning at least a non-empty prefix is enough
+    /// for FLIRT's leading-pattern + CRC matcher to operate on.
+    fn function_bytes(&self, addr: u64, max_len: u32) -> Option<&[u8]> {
+        self.report()
+            .binary_info
+            .bytes_at_best_effort(addr, max_len)
+            .ok()
+    }
+
     fn get_base_address(&self) -> Result<u64> {
         Ok(self.report().base_addr)
     }

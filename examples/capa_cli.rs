@@ -55,6 +55,17 @@ struct CliOpts {
     /// Use an internal list of checked functions as specified by a specification. Provide the version of the specification. eg 3.2.0
     #[clap(long, value_name = "LIBC_SPEC")]
     libc_spec: Option<String>,
+
+    /// 0.4.3: directory of FLIRT signature files (.sig / .pat).
+    /// When present, capa-rs identifies statically-linked library
+    /// functions and excludes their capability hits from the
+    /// report. The capa-rs repo ships a `flirt-sigs/` directory
+    /// with the Mandiant FLARE corpus + Maktm's FLIRTDB
+    /// (~195 .sig files, ~70 MB). GitHub releases also ship a
+    /// `flirt-sigs-vX.Y.Z.tar.gz` artifact alongside the CLI
+    /// binaries.
+    #[clap(long, value_name = "SIGNATURES_DIR")]
+    signatures: Option<String>,
 }
 
 fn main() {
@@ -74,14 +85,21 @@ fn main() {
     // `FileCapabilities::from_file(...)`. Same arguments, just
     // self-documenting at call sites — and no more counting bool
     // positions.
-    match FileCapabilities::analyze()
+    //
+    // 0.4.3: optional `.signatures()` for FLIRT library-function
+    // recognition. Always available — engine is in the lib by
+    // default; absence of a path = no FLIRT, same as pre-0.4.3.
+    let builder = FileCapabilities::analyze()
         .rules(rules_path)
         .high_accuracy(true)
         .resolve_tailcalls(true)
         .features_dump(map_features)
-        .security_checks(security_check_opts)
-        .from_file(filename)
-    {
+        .security_checks(security_check_opts);
+    let builder = match cli.signatures {
+        Some(path) => builder.signatures(path),
+        None => builder,
+    };
+    match builder.from_file(filename) {
         Err(e) => println!("{:?}", e),
         Ok(mut s) => {
             match to_value(&s) {

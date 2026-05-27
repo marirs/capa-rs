@@ -1,6 +1,6 @@
 [package]
 name = "capa"
-version = "0.4.2"
+version = "0.4.3"
 description = "File capability extractor."
 authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>", "Jorge Alejandro Durán Royo<jorge.duran.royo@gmail.com>"]
 keywords = ["capa", "fce", "capability", "aslr", "reverse"]
@@ -11,7 +11,12 @@ homepage = "https://github.com/marirs/capa-rs"
 # Drop `examples` from `exclude` so the [[example]] target below ships
 # with the crate (was inconsistent: example target referenced an
 # excluded path). `data/` stays excluded — those are test fixtures.
-exclude = ["data"]
+# `flirt-sigs/` stays excluded — 70 MB of FLIRT .sig files would
+# blow past crates.io's 10 MB upload limit. The GitHub release ships
+# them as a separate `flirt-sigs.tar.gz` artifact alongside the CLI
+# binaries; source builds (`git clone`) get them automatically since
+# the directory lives in the repo.
+exclude = ["data", "flirt-sigs"]
 edition = "2024"
 # 0.3.21: bumped from 1.85 → 1.95 because smda 0.5.x sets MSRV 1.95
 # (needed for some 2024-edition features it leans on). Pure-Rust dep
@@ -62,6 +67,19 @@ dynamic-loader-cache = "0.2.2"
 # decoder swap. Match the feature set smda uses to keep monomorphisation
 # overhead identical.
 iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "intel", "instr_info"] }
+# 0.4.3: fast-flirt is our pure-Rust FLIRT engine — Apache-2.0,
+# zero-copy arena + multi-level prefix trie matcher. capa-rs uses it
+# to identify statically-linked library functions (MSVC CRT, ATL/MFC,
+# OpenSSL, zlib, boost, libcurl, lua, protobuf, DirectX, Intel libs,
+# etc.) and exclude them from the user-facing capability output via
+# the existing `lib: true` rule-skip path. Always compiled in —
+# `AnalyzeBuilder::signatures` is the opt-in (no signatures path →
+# no FLIRT, identical behaviour to pre-0.4.3).
+#
+# Three direct deps (`miniz_oxide`, `smallvec`, `thiserror`); ~240×
+# faster on `matches()` and ~70% less resident memory than the
+# upstream-FLIRT engine we briefly piloted on.
+fast-flirt = "0.2"
 # 0.4.2: rayon for inter-function parallelism in `find_capabilities`.
 # Each function's analysis is pure — reads the extractor, evaluates
 # rules, returns matches. Parallelising the outer loop gives ~4-8×

@@ -5,12 +5,33 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.4.2] — 2026-05-26 — Performance, threading, hardening
+## [0.4.3] — 2026-05-26 — FLIRT library-function recognition
 
-Patch release. No public-API breaks from 0.4.1. Focused on the audit
-findings that surfaced after the 0.4.1 parity work: an O(N²) rule
-loader, no inter-function parallelism, a ReDoS surface in user-rule
-regexes, and a handful of latent correctness bugs.
+### Added
+
+- **FLIRT matcher.** `AnalyzeBuilder::signatures(path)` loads
+  `.sig` and `.pat` files from a directory; matched functions are
+  flagged as library code and excluded from the capability output.
+  Engine: [`lancelot-flirt`](https://crates.io/crates/lancelot-flirt)
+  0.9 (Apache-2.0, Willi Ballenthin).
+- **`capa_cli --signatures PATH`** flag.
+- **`flirt-sigs/`** — 195 `.sig` files (~70 MB) covering MSVC CRT,
+  ATL/MFC, OpenSSL, zlib, boost, libcurl, lua, protobuf, DirectX,
+  and Intel libs on Windows. Sourced from Mandiant FLARE
+  (`mandiant/`, Apache-2.0) and Maktm's FLIRTDB (`flirtdb/`,
+  community-permissive). Credits in `flirt-sigs/README.md`.
+- **`flirt-sigs-vX.Y.Z.tar.gz`** GitHub release artifact carrying
+  the same content; download, extract, point `--signatures` at it.
+
+### Notes
+
+- `.sig` and `.pat` are supported; `.pat.gz` is not.
+- Single-pass matching; recursive reference resolution is not
+  implemented.
+- `flirt-sigs/` is excluded from the published `.crate`. Source
+  builds and GitHub releases include it.
+
+## [0.4.2] — 2026-05-26 — Performance, threading, hardening
 
 ### Performance
 
@@ -92,12 +113,6 @@ regexes, and a handful of latent correctness bugs.
 
 ## [0.4.1] — 2026-05-26 — Python-capa rule-loader parity (P0 + P1)
 
-Patch release. No public-API breaks from 0.4.0. Closes the rule-loader
-parity gaps the 0.3.21 → 0.4.0 work surfaced: two `capa-rules` files
-that previously failed to load with `InvalidRule(...)` errors now load
-cleanly, and `lib: true` building-block rules no longer pollute the
-final capability output.
-
 ### Fixed
 
 - **Bare `property:` feature key.** `parse_feature_type` had arms for
@@ -127,25 +142,10 @@ final capability output.
   synthetic rule evaluates at its own scope, so feature addresses
   are meaningful and bubble up correctly through the existing
   match-rule feature index.
-  - **Behavioural fix as side effect:** rules with a `basic block:`
-    subscope inside a function-scope rule (or similar
-    higher-scope-with-lower-subscope patterns) now correctly
-    require the inner features to occur **in the same basic
-    block**, not aggregated across all basic blocks of the
-    function. Pre-0.4.1 capa-rs evaluated subscopes inline against
-    aggregated higher-scope features, which produced false-positive
-    matches when an outer rule's `basic block:` features actually
-    lived in different basic blocks. Mimikatz example: pre-0.4.1
-    matched `encode data using ADD XOR SUB operations` (which
-    requires tight-loop + nzxor + 1 add + 1 sub in the same BB);
-    0.4.1 correctly does not match it because mimikatz spreads those
-    features across BBs. Python upstream behaves the same way.
-  - **Instruction subscopes left inline** (continued use of
-    `SubscopeInstructionEvaluator`'s per-address matching). Same
-    for dynamic-scope subscopes (`process:`, `thread:`, `call:`,
-    `span of calls:`). Extracting these requires an
-    `instruction_rules` evaluation bucket and the dynamic-analysis
-    pipeline, both deferred to 0.5.0.
+  - **Side effect:** `basic block:` subscope features are now
+    correctly required to occur in the same basic block, matching
+    Python upstream. Some rules that previously matched on
+    cross-BB feature combinations no longer fire.
 
 ### Internal
 

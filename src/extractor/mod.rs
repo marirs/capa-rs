@@ -63,4 +63,15 @@ pub trait Extractor: Send + Sync {
         insn: &Box<dyn Instruction>,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>>;
     fn is_dot_net(&self) -> bool;
+
+    /// 0.4.3: raw function-leading bytes, used by the FLIRT matcher
+    /// to identify statically-linked library functions. Returns up to
+    /// `max_len` bytes starting at `addr`; `None` when the extractor
+    /// doesn't expose raw bytes (dnfile / managed .NET code — FLIRT
+    /// signatures only target native machine code anyway). Default
+    /// impl returns `None`; smda extractor overrides via
+    /// `binary_info.bytes_at_best_effort`.
+    fn function_bytes(&self, _addr: u64, _max_len: u32) -> Option<&[u8]> {
+        None
+    }
 }
