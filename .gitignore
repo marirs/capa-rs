@@ -7,6 +7,12 @@ target/
 *.raw*
 .DS_Store
 
-rules/
+# Top-level only — must NOT match `src/rules/`, which is real
+# tracked source. `rules/` (no leading slash) is a recursive
+# match in gitignore semantics and silently dropped
+# `src/rules/com_db.rs` from the index when the generator first
+# emitted it, breaking `cargo publish` (tarball was missing the
+# `include!`-d 5.8 MB GUID database).
+/rules/
 
 tmp/
