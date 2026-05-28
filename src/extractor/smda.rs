@@ -8,18 +8,28 @@ use regex::Regex;
 use std::collections::{BTreeMap, HashMap};
 
 lazy_static! {
-    static ref RE_NUMBER_HEX_SPACED: Regex =
-        Regex::new(r"(?P<sign>[+\-]) (?P<num>0x[a-fA-F0-9]+)").unwrap();
-    static ref RE_NUMBER_INT_SPACED: Regex =
-        Regex::new(r"(?P<sign>[+\-]) (?P<num>[0-9]+)").unwrap();
+    // Used by `parse_operand_to_number` to parse signed immediates of the
+    // form `-0x10` / `+0x10` out of formatted operand strings. The
+    // 0.4.2 `_SPACED` variants (handled `- 0x10` with whitespace) were
+    // dropped in 0.5.0 along with E1's string-based offset extraction
+    // — the typed iced operand walk doesn't need them.
     static ref RE_NUMBER_HEX: Regex =
         Regex::new(r"(?P<sign>[+\-])(?P<num>0x[a-fA-F0-9]+)").unwrap();
     static ref RE_NUMBER_INT: Regex = Regex::new(r"(?P<sign>[+\-])(?P<num>[0-9]+)").unwrap();
 }
 
-use iced_x86::{FlowControl, Mnemonic};
+use iced_x86::{FlowControl, Mnemonic, OpKind, Register};
 use smda::{
-    Disassembler, SmdaConfig,
+    Disassembler,
+    SmdaConfig,
+    // 0.5.0: AArch64 operand decoders for the ARM64 paths in
+    // `extract_insn_offset_features` and
+    // `extract_insn_peb_access_characteristic_features`. smda
+    // exposes these as `pub mod aarch64_ops;` under `disassembler`.
+    disassembler::{
+        DecodedInsn,
+        aarch64_ops::{decode_adr, decode_adrp, decode_ldr_str_uimm},
+    },
     function::{Function, Instruction},
     report::DisassemblyReport,
 };
@@ -73,7 +83,11 @@ impl super::Function for FunctionS {
         for (u, b) in self.f.get_blocks()? {
             let mut instr: Vec<Box<dyn super::Instruction>> = vec![];
             for i in b {
-                instr.push(Box::new(InstructionS { i: i.clone() }));
+                // `Instruction` is `Copy` in smda 0.6 (it's a thin
+                // wrapper over `DecodedInsn` + offset/length); `.clone()`
+                // worked but clippy::clone_on_copy flags the redundant
+                // call. Dereference to take the value directly.
+                instr.push(Box::new(InstructionS { i: *i }));
             }
             res.insert(*u, instr);
         }
@@ -128,6 +142,15 @@ impl<'data> super::Extractor for Extractor<'data> {
 
     fn get_base_address(&self) -> Result<u64> {
         Ok(self.report().base_addr)
+    }
+
+    fn arch(&self) -> Result<crate::FileArchitecture> {
+        // smda's `DisassemblyReport.architecture` is already
+        // `FileArchitecture` (the same enum capa re-exports), so this
+        // is a direct passthrough. For smda 0.6+ binaries this
+        // correctly surfaces `Aarch64` instead of letting upstream
+        // mislabel them as AMD64 via bitness inference.
+        Ok(self.report().architecture)
     }
 
     fn format(&self) -> FileFormat {
@@ -327,6 +350,89 @@ impl<'data> super::Extractor for Extractor<'data> {
     }
 }
 
+/// 0.5.0 (task #236): ARM64 equivalent of the x86 iced operand walk
+/// in `extract_insn_offset_features`. Walks the disarm64 operand
+/// surface to recover memory displacements with the same semantic as
+/// the x86 path emits:
+///
+///   `LDR Xt, [Xn, #imm12]` → Offset(imm12) + OperandOffset(1, imm12)
+///   `STR Xt, [Xn, #imm12]` → same
+///   `ADR Xn, label`        → Number(label_va)
+///
+/// Stack-frame addressing (base = SP = R31 or X29 = frame pointer) is
+/// skipped — matches the x86 path's RBP/EBP filter. The ADR Number
+/// emission mirrors the x86 LEA path: both materialise a constant
+/// address into a register.
+///
+/// Free function (not a method) so the `extract_insn_offset_features`
+/// dispatch above can `return` it directly without re-entering the
+/// `&self` borrow.
+fn extract_insn_offset_features_aarch64(
+    f: &Function,
+    insn: &Instruction,
+    raw: u32,
+) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+    let mut res = vec![];
+
+    // LDR / STR (immediate offset) — the load/store form that carries
+    // a meaningful displacement. Register-indexed (`LDR Xt, [Xn, Xm
+    // LSL #N]`) is excluded because it has no immediate of its own.
+    if let Some(op) = decode_ldr_str_uimm(raw) {
+        // Skip stack-frame addressing: SP (R31) and X29 (Apple-clang
+        // / GCC frame pointer on AArch64). x86 path filters
+        // EBP/RBP for the same reason.
+        if op.rn != 31 && op.rn != 29 {
+            let disp = op.offset as i64 as i128;
+            res.push((
+                crate::rules::features::Feature::Offset(
+                    crate::rules::features::OffsetFeature::new(f.bitness, &disp, "")?,
+                ),
+                insn.offset,
+            ));
+            // Operand index 1 — Xt is op0 (destination/source),
+            // [Xn, #imm] is op1. Matches the x86 indexing convention
+            // (memory operand is typically operand 1 for `mov reg, mem`
+            // / `mov mem, reg`).
+            res.push((
+                crate::rules::features::Feature::OperandOffset(
+                    crate::rules::features::OperandOffsetFeature::new(&1usize, &disp, "")?,
+                ),
+                insn.offset,
+            ));
+        }
+    }
+
+    // ADR Xd, label — PC-relative byte-granular load. Equivalent to
+    // x86 `lea rax, [rip+const]` semantically: materialises a constant
+    // address into a register. Emit Number to match the x86 LEA path.
+    if let Some((_rd, target)) = decode_adr(raw, insn.offset) {
+        let disp = target as i64 as i128;
+        res.push((
+            crate::rules::features::Feature::Number(crate::rules::features::NumberFeature::new(
+                f.bitness, &disp, "",
+            )?),
+            insn.offset,
+        ));
+    }
+
+    // ADRP Xd, page — PC-relative page load (4 KiB granularity). Same
+    // semantic as ADR but at page granularity. Compilers emit ADRP
+    // followed by ADD/LDR to materialise a full address; for capa's
+    // `number:` rules we surface the page VA — it's not exact but
+    // close enough for the typical "constant in code" pattern.
+    if let Some((_rd, page_va)) = decode_adrp(raw, insn.offset) {
+        let disp = page_va as i64 as i128;
+        res.push((
+            crate::rules::features::Feature::Number(crate::rules::features::NumberFeature::new(
+                f.bitness, &disp, "",
+            )?),
+            insn.offset,
+        ));
+    }
+
+    Ok(res)
+}
+
 impl<'data> Extractor<'data> {
     /// 0.4.0: takes `&'data [u8]` borrowed from the caller. The
     /// returned `Extractor<'data>` borrows from that slice for the
@@ -419,20 +525,33 @@ impl<'data> Extractor<'data> {
         }
     }
     pub fn extract_os(&self) -> Result<Os> {
-        // 0.4.0: Mach-O and Buffer (shellcode) sources don't survive
-        // `goblin::Object::parse` as PE/ELF — short-circuit those off
-        // smda's already-classified `report.format` before calling
-        // goblin. Mach-O reports as LINUX as a placeholder since the
-        // `Os` enum has no Darwin variant; Buffer assumes Windows
-        // because most analysed shellcode targets Win32.
+        // 0.5.0: Mach-O now resolves to the real Darwin family
+        // (Os::MACOS) instead of the pre-0.5.0 Os::LINUX placeholder.
+        // The `Os` enum gained `MACOS` + `IOS` in 0.5.0 — without
+        // this, capa rules `os: macos` never fired and `os: linux`
+        // rules fired incorrectly on Mach-O input. iOS isn't
+        // distinguishable from macOS by cputype alone (both share
+        // CPU_TYPE_ARM64) without extra Mach-O metadata
+        // (LC_VERSION_MIN_IPHONEOS vs LC_VERSION_MIN_MACOSX); for
+        // now Mach-O collapses to MACOS, and IOS is reserved for
+        // future fat-slice-aware promotion.
+        //
+        // Buffer (shellcode) keeps the WINDOWS default — most
+        // analysed shellcode targets Win32.
         match self.report().format {
-            smda::FileFormat::MachO => return Ok(Os::LINUX),
+            smda::FileFormat::MachO => return Ok(Os::MACOS),
             smda::FileFormat::Buffer => return Ok(Os::WINDOWS),
             _ => {}
         }
         match goblin::Object::parse(self.buf())? {
             goblin::Object::Elf(elf) => Extractor::get_elf_os(&elf),
             goblin::Object::PE(_) => Ok(Os::WINDOWS),
+            // Defensive: if smda labelled the format as MachO but
+            // goblin sees a fat-Mach-O wrapper (cafebabe) here,
+            // still report MACOS. The earlier `report().format`
+            // match should already have caught this; the fallthrough
+            // is kept for safety.
+            goblin::Object::Mach(_) => Ok(Os::MACOS),
             _ => Err(Error::UnsupportedOsError),
         }
     }
@@ -770,6 +889,34 @@ impl<'data> Extractor<'data> {
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
+
+        // 0.5.0 (task #273): ARM64 path. Windows on ARM64 reserves x18
+        // as the TEB pointer (Microsoft's "x18 = platform register" ABI
+        // — see Windows ARM64 calling convention docs). PEB is at
+        // [x18 + 0x60] on 64-bit Windows, mirroring `gs:[0x60]` on x64.
+        //
+        // We flag every load with base = x18 as a TEB access (capa's
+        // "peb access" characteristic) regardless of displacement —
+        // that matches how the x86 path treats `gs:`/`fs:` segment
+        // reads as TEB-touching, and avoids hard-coding a single
+        // displacement (rules look for the broader "touches TEB"
+        // signal, then narrower offset-based features layer on top).
+        // Stores are excluded: writing through x18 is exotic and
+        // doesn't pattern-match "read PEB to do X".
+        if let DecodedInsn::Aarch64(a) = insn.decoded {
+            if let Some(op) = decode_ldr_str_uimm(a.opcode) {
+                if op.rn == 18 && !op.is_store {
+                    res.push((
+                        crate::rules::features::Feature::Characteristic(
+                            crate::rules::features::CharacteristicFeature::new("peb access", "")?,
+                        ),
+                        insn.offset,
+                    ));
+                }
+            }
+            return Ok(res);
+        }
+
         if !matches!(insn.mnemonic_enum(), Mnemonic::Push | Mnemonic::Mov) {
             return Ok(res);
         }
@@ -796,9 +943,27 @@ impl<'data> Extractor<'data> {
         _f: &Function,
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+        // 0.5.0 (task #236): branch on architecture.
+        //
+        //   x86  → `format_mnemonic()` returns the iced mnemonic name
+        //          ("mov", "push", "lea", …).
+        //   ARM64 → `format_mnemonic()` returns "invalid" because the
+        //          underlying iced `Mnemonic` enum is `INVALID` for
+        //          non-x86 decodes. The disarm64 mnemonic string is
+        //          available via `mnemonic_aarch64()` instead.
+        //
+        // Picking the right source matches the rule-author intent:
+        // `mnemonic: mov` should fire on x86 `mov`; the disarm64 ARM64
+        // equivalent is also called `mov` (and `ldr`, `str`, etc. have
+        // their own names) — both surfaces are lowercase, no
+        // architecture qualifier in the rule.
+        let name = match insn.mnemonic_aarch64() {
+            Some(arm64_name) => arm64_name,
+            None => insn.format_mnemonic(),
+        };
         Ok(vec![(
             crate::rules::features::Feature::Mnemonic(
-                crate::rules::features::MnemonicFeature::new(&insn.format_mnemonic(), "")?,
+                crate::rules::features::MnemonicFeature::new(&name, "")?,
             ),
             insn.offset,
         )])
@@ -810,6 +975,51 @@ impl<'data> Extractor<'data> {
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
         let mut res = vec![];
+
+        // 0.5.0 (audit HIGH): ARM64 path. Pre-0.5.0 this function
+        // only checked the iced x86 mnemonic enum, which returns
+        // `Mnemonic::INVALID` on AArch64 decodes — so the `nzxor`
+        // characteristic never fired on ARM64 binaries at all.
+        // EOR/EOR3 are the AArch64 XOR family (general + SHA3
+        // 3-way). Self-XOR (`eor xd, xn, xn`) is the AArch64
+        // zeroing idiom — skipped, mirroring the x86 `xor eax,eax`
+        // dst==src filter.
+        if let DecodedInsn::Aarch64(a) = insn.decoded {
+            // mnemonic_aarch64() returns lowercase disarm64 mnemonic
+            // ("eor", "eor3", or one of the vector forms). Match
+            // by prefix to catch the NEON/SVE variants without
+            // enumerating every encoding (`eor` covers `eor.16b`,
+            // `eor.8b`, etc. once the formatter folds them).
+            let mnem = insn.mnemonic_aarch64();
+            let is_eor = matches!(mnem.as_deref(), Some("eor") | Some("eor3") | Some("eors"));
+            if !is_eor {
+                return Ok(res);
+            }
+            // Self-XOR detection: EOR (shifted register) bit layout
+            //   bits [20:16] = Rm, bits  [9:5]  = Rn, bits [4:0] = Rd
+            // (ARM ARM §C6.2.96). Rn == Rm means "xor a register
+            // with itself" — same zeroing idiom as x86's
+            // `xor eax, eax`. Don't fire the characteristic for it.
+            let rn = (a.opcode >> 5) & 0x1f;
+            let rm = (a.opcode >> 16) & 0x1f;
+            if rn == rm {
+                return Ok(res);
+            }
+            // Security-cookie filter is x86-specific (stack-canary
+            // load + xor pattern uses RBP-relative addressing that
+            // doesn't exist verbatim on ARM64; AArch64 uses
+            // `__stack_chk_guard` reads instead). Skip the
+            // `is_security_cookie` call on ARM64 — it would always
+            // return false (operand-string match on `[rbp-…]`).
+            res.push((
+                crate::rules::features::Feature::Characteristic(
+                    crate::rules::features::CharacteristicFeature::new("nzxor", "")?,
+                ),
+                insn.offset,
+            ));
+            return Ok(res);
+        }
+
         if !matches!(
             insn.mnemonic_enum(),
             Mnemonic::Xor | Mnemonic::Xorpd | Mnemonic::Xorps | Mnemonic::Pxor
@@ -865,59 +1075,102 @@ impl<'data> Extractor<'data> {
         f: &Function,
         insn: &Instruction,
     ) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-        let mut res = vec![];
+        // 0.5.0 (E1): rewritten to walk iced's typed operands instead
+        // of parsing `format_operands()` strings.
+        //
+        // Pre-0.5.0 split the formatted operand string on commas and
+        // ran regexes against each piece. That silently lost offsets
+        // for:
+        //   - SIB-displacement forms like `[rax + rcx*4 + 0x10]`
+        //     where the displacement is buried in a multi-component
+        //     operand the regex couldn't always isolate
+        //   - operand strings that didn't contain the substring
+        //     "ptr" (some iced formatter modes drop the size prefix)
+        //   - operands whose base register was matched by string
+        //     containment (`ebp`/`rbp` for stack locals) but the
+        //     containment check also fired on incidental substrings
+        //     in larger formatter outputs
+        //
+        // The typed walk consults `op_kind(i)`, `memory_base()`, and
+        // `memory_displacement64()` directly — exactly what Python
+        // capa's vivisect operand walker does. Same algorithm:
+        //
+        //   for each operand:
+        //     if it's a memory operand (or the instruction is LEA):
+        //       skip if base register is EBP/RBP (stack-local
+        //       addressing — should be a stack-var feature, not an
+        //       offset feature)
+        //       emit Offset + OperandOffset[i]
+        //       if LEA: also emit Number (the constant load)
+        //
         //# examples:
         //#
-        //#     mov eax, [esi + 4]
-        //#     mov eax, [esi + ecx + 16384]
-        if let Some(o) = insn.format_operands() {
-            let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
-            for (i, operand) in operands.iter().enumerate() {
-                if insn.mnemonic_enum() != Mnemonic::Lea && !operand.contains("ptr") {
-                    continue;
-                }
-                //NOTE not sure
-                if
-                /*operand.contains("esp") ||*/
-                operand.contains("ebp") || operand.contains("rbp") {
-                    continue;
-                }
-                let mut number = 0;
+        //#     mov eax, [esi + 4]          → emit offset:4
+        //#     mov eax, [esi + ecx + 16384] → emit offset:16384
+        //#     lea rax, [rip + 0x100]      → emit offset:0x100 + number:0x100
+        //#     mov eax, [ebp - 8]          → skipped (stack local)
+        //
+        // 0.5.0 (task #236): ARM64 path uses smda 0.6's
+        // `aarch64_ops` decoders for the same semantic.
+        if let DecodedInsn::Aarch64(a) = insn.decoded {
+            return extract_insn_offset_features_aarch64(f, insn, a.opcode);
+        }
 
-                let number_hex = RE_NUMBER_HEX_SPACED.captures(operand);
-                let number_int = RE_NUMBER_INT_SPACED.captures(operand);
-                if let Some(n) = number_hex {
-                    number = i128::from_str_radix(&n["num"][2..], 16)?;
-                    if &n["sign"] == "-" {
-                        number *= -1;
-                    }
-                } else if let Some(n) = number_int {
-                    number = (n["num"]).parse::<i128>()?;
-                    if &n["sign"] == "-" {
-                        number *= -1;
-                    }
-                }
+        let mut res = vec![];
+        let is_lea = insn.mnemonic_enum() == Mnemonic::Lea;
+
+        for i in 0..insn.op_count() {
+            // Only memory-operand kinds carry a displacement. LEA's
+            // operand is also Memory-kind (it's loading the *address*,
+            // not dereferencing) — handled the same way.
+            if insn.op_kind(i) != OpKind::Memory {
+                continue;
+            }
+
+            // Stack-frame addressing → skip. Frame-pointer-relative
+            // operands are stack locals, not data offsets, and Python
+            // capa treats them the same way.
+            //
+            // ESP/RSP omitted intentionally — Python capa's
+            // `extractor/viv` walker also doesn't filter ESP-relative
+            // because non-frame-pointer compiles can address locals
+            // off SP and a rule looking for `offset: 0x...` should
+            // still see them. The pre-0.5.0 code had ESP commented
+            // out for the same reason; preserved here.
+            let base = insn.memory_base();
+            if matches!(base, Register::EBP | Register::RBP) {
+                continue;
+            }
+
+            // `memory_displacement64` returns the unsigned form; cast
+            // through i64 sign-extends 32-bit displacements correctly
+            // (iced stores them sign-extended in the u64 already).
+            let disp = insn.memory_displacement64() as i64 as i128;
+
+            res.push((
+                crate::rules::features::Feature::Offset(
+                    crate::rules::features::OffsetFeature::new(f.bitness, &disp, "")?,
+                ),
+                insn.offset,
+            ));
+            res.push((
+                crate::rules::features::Feature::OperandOffset(
+                    crate::rules::features::OperandOffsetFeature::new(&(i as usize), &disp, "")?,
+                ),
+                insn.offset,
+            ));
+
+            if is_lea {
+                // LEA is also a constant-load: `lea rax, [rip+0x100]`
+                // produces the value 0x100 (or rip+0x100 in absolute
+                // form) into rax. Surface the displacement as a
+                // Number feature too — matches Python capa.
                 res.push((
-                    crate::rules::features::Feature::Offset(
-                        crate::rules::features::OffsetFeature::new(f.bitness, &number, "")?,
+                    crate::rules::features::Feature::Number(
+                        crate::rules::features::NumberFeature::new(f.bitness, &disp, "")?,
                     ),
                     insn.offset,
                 ));
-                res.push((
-                    crate::rules::features::Feature::OperandOffset(
-                        crate::rules::features::OperandOffsetFeature::new(&i, &number, "")?,
-                    ),
-                    insn.offset,
-                ));
-
-                if insn.mnemonic_enum() == Mnemonic::Lea {
-                    res.push((
-                        crate::rules::features::Feature::Number(
-                            crate::rules::features::NumberFeature::new(f.bitness, &number, "")?,
-                        ),
-                        insn.offset,
-                    ));
-                }
             }
         }
         Ok(res)

@@ -6,6 +6,7 @@ use crate::{
 use std::path::Path;
 
 pub(crate) mod elf;
+mod macho;
 pub(crate) mod options;
 mod parser;
 mod pe;
@@ -30,11 +31,18 @@ pub fn get_security_checks(
         }
 
         Object::Mach(_mach) => {
-            // "Binary file format is 'MACH'."
-            Err(Error::UnsupportedBinaryFormat {
-                format: "MACH".into(),
-                path: path.as_ref().into(),
-            })
+            // 0.5.0: real Mach-O security checklist (capa-rs
+            // 0.5.0 → security/macho.rs). Pre-0.5.0 returned
+            // UnsupportedBinaryFormat (blocked analysis entirely);
+            // a brief intermediate cut returned Ok(Vec::new())
+            // (empty table, analysis ran but the security column
+            // was useless). Now: PIE, DATA-EXEC-PREVENT,
+            // STACK-CANARY, RESTRICT, CODE-SIGNATURE,
+            // TWO-LEVEL-NAMESPACE, NO-UNDEF-SYMS,
+            // HARDENED-RUNTIME (Unknown — code-sig blob parser
+            // deferred), ALLOW-JIT (Unknown — entitlements PLIST
+            // parser deferred). 9 entries total.
+            macho::analyze_binary(&parser, options)
         }
 
         Object::Unknown(_magic) => Err(Error::UnknownBinaryFormat(path.as_ref().into())),

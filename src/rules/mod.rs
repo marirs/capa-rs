@@ -1,3 +1,4 @@
+mod com_db;
 pub mod features;
 mod statement;
 
@@ -10,13 +11,54 @@ use statement::{
 use std::collections::HashMap;
 use yaml_rust::{Yaml, YamlLoader, yaml::Hash};
 
-use self::features::ComType;
+use self::features::{BytesFeature, ComType};
 
 const MAX_BYTES_FEATURE_SIZE: usize = 0x100;
 
-fn translate_com_features(_name: &str, _com_type: &ComType) -> Vec<StatementElement> {
-    //TODO
-    vec![]
+/// 0.5.0: resolve a `com/class:` or `com/interface:` feature into a list
+/// of `Feature::Bytes` patterns — one per known CLSID/IID for the named
+/// class or interface. Some COM types had multiple GUIDs over Windows
+/// versions; all variants are emitted.
+///
+/// Wrapped in an `OrStatement` by the caller (`mod.rs:1113`), so a rule
+/// `com/class: WbemLocator` becomes `or: [bytes: <guid1>, bytes: <guid2>]`
+/// at rule-load time and downstream evaluation is just normal Bytes
+/// matching against extractor-emitted byte features. No runtime
+/// ComFeature evaluator needed.
+///
+/// Returns an empty Vec if the name is unknown. Caller's `OrStatement`
+/// of an empty list evaluates to "never matches", which is the right
+/// semantic for an unrecognised COM name (matches Python capa's
+/// behaviour — Python raises a `parse error` at rule load, we
+/// gracefully no-match).
+///
+/// The GUID database lives in `src/rules/com_db.rs`, generated from
+/// Python capa's `capa/features/com/{classes,interfaces}.py` via
+/// `scripts/gen_com_tables.py`. ~29k entries; ~4 MB of source, ~470 KB
+/// of `.rodata` in the final binary.
+fn translate_com_features(name: &str, com_type: &ComType) -> Vec<StatementElement> {
+    let table: &[(&str, &[[u8; 16]])] = match com_type {
+        ComType::Class => com_db::COM_CLASSES,
+        ComType::Interface => com_db::COM_INTERFACES,
+    };
+    // Binary search by name (the static table is sorted). Returns
+    // empty Vec on miss — Python capa raises at load; we no-match.
+    let guids: &[[u8; 16]] = match table.binary_search_by(|(n, _)| n.cmp(&name)) {
+        Ok(idx) => table[idx].1,
+        Err(_) => return Vec::new(),
+    };
+
+    guids
+        .iter()
+        .filter_map(|guid| {
+            // Each GUID becomes a `bytes: <16 raw bytes>` feature.
+            // Empty description — the COM rule already names the
+            // class in its own description.
+            BytesFeature::new(guid.as_slice(), "")
+                .ok()
+                .map(|bf| StatementElement::Feature(Box::new(Feature::Bytes(bf))))
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

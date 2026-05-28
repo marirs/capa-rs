@@ -49,6 +49,15 @@ pub enum Os {
     CLOUD,
     UNDEFINED,
     ANDROID,
+    // 0.5.0 (audit HIGH): Mach-O is a fully analysable input format
+    // since 0.4.0, but `extract_os` was hard-coded to return
+    // `Os::LINUX` for Mach-O because this enum had no Darwin
+    // variant. Result: capa rules `os: macos` / `os: ios` never
+    // fired on Mach-O input, and `os: linux` rules fired
+    // incorrectly. Adding both variants here + plumbing them from
+    // the Mach-O cputype in `extract_os` fixes both directions.
+    MACOS,
+    IOS,
     #[allow(non_camel_case_types)]
     ARCH_SPECIFIC,
 }
@@ -76,6 +85,8 @@ impl Display for Os {
             Os::CLOUD => write!(f, "Cloud"),
             Os::UNDEFINED => write!(f, "undefined"),
             Os::ANDROID => write!(f, "Android"),
+            Os::MACOS => write!(f, "macOS"),
+            Os::IOS => write!(f, "iOS"),
             Os::ARCH_SPECIFIC => write!(f, "Architecture-specific"),
         }
     }

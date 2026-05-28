@@ -1,6 +1,6 @@
 [package]
 name = "capa"
-version = "0.4.3"
+version = "0.5.0"
 description = "File capability extractor."
 authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>", "Jorge Alejandro Durán Royo<jorge.duran.royo@gmail.com>"]
 keywords = ["capa", "fce", "capability", "aslr", "reverse"]
@@ -16,7 +16,13 @@ homepage = "https://github.com/marirs/capa-rs"
 # them as a separate `flirt-sigs.tar.gz` artifact alongside the CLI
 # binaries; source builds (`git clone`) get them automatically since
 # the directory lives in the repo.
-exclude = ["data", "flirt-sigs"]
+# `scripts/` (0.5.0) stays excluded — the only file is
+# `gen_com_tables.py`, the Python generator that produced
+# `src/rules/com_db.rs` (the 29k-entry COM GUID database, included!
+# at build time). The generated table ships in src/; the generator
+# itself is only useful for regenerating from a newer upstream
+# Python capa, which crates.io consumers don't need.
+exclude = ["data", "flirt-sigs", "scripts"]
 edition = "2024"
 # 0.3.21: bumped from 1.85 → 1.95 because smda 0.5.x sets MSRV 1.95
 # (needed for some 2024-edition features it leans on). Pure-Rust dep
@@ -31,10 +37,19 @@ petgraph = "0.8"
 regex = "1.11.1"
 fancy-regex = "0.18"
 serde = { version = "1", features = ["derive"] }
-# 0.3.21: smda 0.2 → 0.5 picks up months of security fixes + the new
-# function-name pipeline (Go pclntab, MinGW DWARF, Delphi VMT, Rust
-# demangling), structural function hashes, and Mach-O loader.
-smda = "0.5"
+# 0.5.0: smda 0.5 → 0.6.4 picks up the AArch64 backend
+# (`FileArchitecture::Aarch64`, ARM64 Mach-O / ELF / PE routing),
+# the seven AArch64 analyser ports (jump-table, indirect-call,
+# tail-call, .pdata, NOP, exit-syscall, is_api_thunk), GOT/PLT
+# ELF API resolution, the code-hygiene patches, the 0.6.3
+# tail-call resolver fix (so `resolve_tailcalls(true)` survives
+# analysis without aborting on benign CollisionErrors), and the
+# 0.6.4 Mach-O imports → `disassembly.apis` bridge (so
+# `Feature::Api` actually surfaces on Mach-O input — pre-0.6.4
+# every Mach-O analysis returned zero API features and therefore
+# zero capa-rule matches). `0.6.4` is the minimum; semver-
+# compatible with future 0.6.x.
+smda = "0.6.4"
 thiserror = "2.0.12"
 walkdir = "2.5.0"
 yaml-rust = "0.4.5"

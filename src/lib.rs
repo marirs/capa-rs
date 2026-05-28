@@ -501,15 +501,17 @@ impl<'a> AnalyzeBuilder<'a> {
         #[cfg(not(feature = "verbose"))]
         {
             file_capabilities.security_checks = BTreeSet::from_iter(security_checks);
-            let (capabilities, counts, _map_features, library_funcs) = find_capabilities(
-                &rules,
-                &extractor,
-                &*library_function,
-                self.logger,
-                self.features_dump,
-            )?;
+            let (capabilities, counts, _map_features, library_funcs, _map_features_by_scope) =
+                find_capabilities(
+                    &rules,
+                    &extractor,
+                    &*library_function,
+                    self.logger,
+                    self.features_dump,
+                )?;
             if self.features_dump {
                 file_capabilities.map_features = _map_features;
+                file_capabilities.map_features_by_scope = _map_features_by_scope;
             }
             file_capabilities.library_functions = library_funcs;
             // 0.5.0 (D2): direct move — no iteration, no filter, no
@@ -520,15 +522,17 @@ impl<'a> AnalyzeBuilder<'a> {
         #[cfg(feature = "verbose")]
         {
             file_capabilities.security_checks = BTreeSet::from_iter(security_checks);
-            let (capabilities, counts, _map_features, library_funcs) = find_capabilities(
-                &rules,
-                &extractor,
-                &*library_function,
-                self.logger,
-                self.features_dump,
-            )?;
+            let (capabilities, counts, _map_features, library_funcs, _map_features_by_scope) =
+                find_capabilities(
+                    &rules,
+                    &extractor,
+                    &*library_function,
+                    self.logger,
+                    self.features_dump,
+                )?;
             if self.features_dump {
                 file_capabilities.map_features = _map_features;
+                file_capabilities.map_features_by_scope = _map_features_by_scope;
             }
             file_capabilities.library_functions = library_funcs;
             // 0.5.0 (D2): verbose path still needs &counts for
@@ -592,15 +596,17 @@ impl<'a> AnalyzeBuilder<'a> {
 
         #[cfg(not(feature = "verbose"))]
         {
-            let (capabilities, counts, _map_features, library_funcs) = find_capabilities(
-                &rules,
-                &extractor,
-                &*library_function,
-                self.logger,
-                self.features_dump,
-            )?;
+            let (capabilities, counts, _map_features, library_funcs, _map_features_by_scope) =
+                find_capabilities(
+                    &rules,
+                    &extractor,
+                    &*library_function,
+                    self.logger,
+                    self.features_dump,
+                )?;
             if self.features_dump {
                 file_capabilities.map_features = _map_features;
+                file_capabilities.map_features_by_scope = _map_features_by_scope;
             }
             file_capabilities.library_functions = library_funcs;
             // 0.5.0 (D2): see `from_file` for rationale.
@@ -609,15 +615,17 @@ impl<'a> AnalyzeBuilder<'a> {
         }
         #[cfg(feature = "verbose")]
         {
-            let (capabilities, counts, _map_features, library_funcs) = find_capabilities(
-                &rules,
-                &extractor,
-                &*library_function,
-                self.logger,
-                self.features_dump,
-            )?;
+            let (capabilities, counts, _map_features, library_funcs, _map_features_by_scope) =
+                find_capabilities(
+                    &rules,
+                    &extractor,
+                    &*library_function,
+                    self.logger,
+                    self.features_dump,
+                )?;
             if self.features_dump {
                 file_capabilities.map_features = _map_features;
+                file_capabilities.map_features_by_scope = _map_features_by_scope;
             }
             file_capabilities.library_functions = library_funcs;
             // 0.5.0 (D2): see `from_file` for rationale.
@@ -697,6 +705,9 @@ impl FileCapabilities {
             // alongside `library_functions` from the `counts` slot
             // returned by `find_capabilities`. Empty until that fill.
             feature_counts: HashMap::new(),
+            // 0.5.0 (D3): scope-keyed feature dump. Only populated
+            // when `features_dump` is true; otherwise empty.
+            map_features_by_scope: HashMap::new(),
         };
         Ok(ss)
     }
@@ -900,23 +911,26 @@ impl FileCapabilities {
 
     #[cfg(feature = "properties")]
     fn get_arch(extractor: &Box<dyn extractor::Extractor + '_>) -> Result<FileArchitecture> {
-        if extractor.bitness() == 32 {
-            return Ok(FileArchitecture::I386);
-        } else if extractor.bitness() == 64 {
-            return Ok(FileArchitecture::AMD64);
-        }
-        Err(Error::UnsupportedArchError)
+        // 0.5.0 (task #236): ask the extractor for the real
+        // architecture instead of inferring from bitness. The old
+        // path mapped `bitness == 64 → AMD64` unconditionally, which
+        // silently mislabelled every AArch64 binary that smda 0.6
+        // started producing as AMD64. The trait method
+        // `arch()` now returns smda's `DisassemblyReport.architecture`
+        // directly for the smda backend, and the existing CIL-
+        // bitness inference for dnfile.
+        extractor.arch()
     }
 
     #[cfg(feature = "properties")]
     fn get_os(extractor: &Box<dyn extractor::Extractor + '_>) -> Result<Os> {
-        // 0.4.0: Mach-O routes to LINUX as a placeholder — capa's Os
-        // enum doesn't yet model macOS / Darwin. The format-level
-        // `format: macho` rule filter still works; only the
-        // OS-tagged matches are affected, and most existing rules
-        // use format, not os, for platform discrimination.
+        // 0.5.0: capa's `Os` enum gained `MACOS` + `IOS`; route
+        // Mach-O to MACOS so `os: macos` rules fire and `os: linux`
+        // rules stop firing incorrectly. Pre-0.5.0 the fall-through
+        // (`_ => Os::LINUX`) caught Mach-O as a placeholder.
         match extractor.format() {
             FileFormat::PE | FileFormat::DOTNET => Ok(Os::WINDOWS),
+            FileFormat::Macho => Ok(Os::MACOS),
             _ => Ok(Os::LINUX),
         }
     }
@@ -933,7 +947,14 @@ fn find_function_capabilities<'a>(
     extractor: &Box<dyn extractor::Extractor + '_>,
     f: &Box<dyn extractor::Function>,
     logger: &(dyn Fn(&str) + Sync + Send),
-    map_features: &mut HashMap<rules::features::Feature, Vec<u64>>,
+    // 0.5.0 (D3): scope-keyed feature dump. Outer key is one of
+    // "function", "basic_block", "instruction" (file scope is filled
+    // by `find_file_capabilities`). When `features_dump` is false
+    // this stays empty; when true each extractor call's output is
+    // tagged with the scope it came from before being merged. The
+    // existing flat `map_features` field on `FileCapabilities` is
+    // derived from this by collapsing the scope keys.
+    map_features_by_scope: &mut HashMap<&'static str, HashMap<rules::features::Feature, Vec<u64>>>,
     features_dump: bool,
 ) -> Result<(
     HashMap<&'a rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
@@ -943,16 +964,43 @@ fn find_function_capabilities<'a>(
     let mut function_features: HashMap<rules::features::Feature, Vec<u64>> = HashMap::new();
 
     for (feature, va) in extractor.extract_global_features()? {
+        // Globals are conceptually function-scope (they fold into
+        // each function's evaluation set). Tagged "function" for the
+        // dump.
+        if features_dump {
+            map_features_by_scope
+                .entry("function")
+                .or_default()
+                .entry(feature.clone())
+                .or_default()
+                .push(va);
+        }
         function_features.entry(feature).or_default().push(va);
     }
 
     for (feature, va) in extractor.extract_function_features(f)? {
+        if features_dump {
+            map_features_by_scope
+                .entry("function")
+                .or_default()
+                .entry(feature.clone())
+                .or_default()
+                .push(va);
+        }
         function_features.entry(feature).or_default().push(va);
     }
 
     // Condition for .NET and add file features if necessary
     if extractor.is_dot_net() {
         for (feature, va) in extractor.extract_file_features()? {
+            if features_dump {
+                map_features_by_scope
+                    .entry("file")
+                    .or_default()
+                    .entry(feature.clone())
+                    .or_default()
+                    .push(va);
+            }
             function_features.entry(feature).or_default().push(va);
         }
     }
@@ -965,6 +1013,14 @@ fn find_function_capabilities<'a>(
             extractor.extract_basic_block_features(f, &bb)?,
             extractor.extract_global_features()?
         ) {
+            if features_dump {
+                map_features_by_scope
+                    .entry("basic_block")
+                    .or_default()
+                    .entry(feature.clone())
+                    .or_default()
+                    .push(va);
+            }
             bb_features.entry(feature.clone()).or_default().push(va);
             function_features.entry(feature).or_default().push(va);
         }
@@ -972,6 +1028,14 @@ fn find_function_capabilities<'a>(
         let insns = extractor.get_instructions(f, &bb)?;
         for insn in insns.iter() {
             for (feature, va) in extractor.extract_insn_features(f, insn)? {
+                if features_dump {
+                    map_features_by_scope
+                        .entry("instruction")
+                        .or_default()
+                        .entry(feature.clone())
+                        .or_default()
+                        .push(va);
+                }
                 bb_features.entry(feature.clone()).or_default().push(va);
                 function_features.entry(feature).or_default().push(va);
             }
@@ -997,10 +1061,6 @@ fn find_function_capabilities<'a>(
         &f.offset(),
         logger,
     )?;
-
-    if features_dump {
-        map_features.extend(function_features.clone());
-    }
 
     Ok((function_matches, bb_matches, function_features.len()))
 }
@@ -1043,8 +1103,15 @@ fn find_capabilities(
 ) -> Result<(
     HashMap<rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
     HashMap<u64, usize>,
+    // 0.5.0 (D3): flat dump (backwards-compat). Derived from the
+    // scope-keyed accumulator by collapsing scope keys.
     HashMap<String, HashMap<String, HashSet<u64>>>,
     BTreeMap<u64, String>,
+    // 0.5.0 (D3): scope-keyed dump. Outer key is the scope name
+    // ("file" | "function" | "basic_block" | "instruction"); inner
+    // shape matches the flat dump. Empty when `features_dump` is
+    // false. Parity with Python capa's per-scope feature breakdown.
+    HashMap<String, HashMap<String, HashMap<String, HashSet<u64>>>>,
 )> {
     use rayon::prelude::*;
 
@@ -1057,7 +1124,12 @@ fn find_capabilities(
     let functions = extractor.get_functions()?;
     logger("functions capabilities started");
 
-    let mut map_features: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
+    // 0.5.0 (D3): scope-keyed accumulator. The flat `map_features` is
+    // derived at the end by collapsing scope keys.
+    let mut map_features_by_scope: HashMap<
+        &'static str,
+        HashMap<crate::rules::features::Feature, Vec<u64>>,
+    > = HashMap::new();
 
     // 0.5.0: pre-partition FLIRT-marked library functions out of the
     // analysis set. The names are collected for the
@@ -1104,17 +1176,19 @@ fn find_capabilities(
         .par_iter()
         .enumerate()
         .map(|(index, (function_address, f))| -> Result<_> {
-            // Each worker accumulates into a thread-local map_features
-            // map. If `features_dump` is off we never read it so the
-            // allocation is essentially free.
-            let mut local_map_features: HashMap<crate::rules::features::Feature, Vec<u64>> =
-                HashMap::new();
+            // Each worker accumulates into a thread-local scope-keyed
+            // dump. If `features_dump` is off we never write to it so
+            // the allocation is essentially free.
+            let mut local_by_scope: HashMap<
+                &'static str,
+                HashMap<crate::rules::features::Feature, Vec<u64>>,
+            > = HashMap::new();
             let (function_matches, bb_matches, feature_count) = find_function_capabilities(
                 ruleset,
                 extractor,
                 f,
                 logger,
-                &mut local_map_features,
+                &mut local_by_scope,
                 features_dump,
             )?;
             logger(&format!(
@@ -1129,7 +1203,7 @@ fn find_capabilities(
                 function_matches,
                 bb_matches,
                 feature_count,
-                local_map_features,
+                local_by_scope,
             ))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1138,13 +1212,16 @@ fn find_capabilities(
     // shared accumulators. With ~hundreds of functions and ~thousands
     // of matches total this is microseconds; the parallel work above
     // is the only place that benefits from threading.
-    for (addr, function_matches, bb_matches, feature_count, local_map) in per_function {
+    for (addr, function_matches, bb_matches, feature_count, local_by_scope) in per_function {
         meta.insert(addr, feature_count);
         aggregate_matches(&mut all_function_matches, &function_matches);
         aggregate_matches(&mut all_bb_matches, &bb_matches);
         if features_dump {
-            for (k, v) in local_map {
-                map_features.entry(k).or_default().extend(v);
+            for (scope, scope_map) in local_by_scope {
+                let dest = map_features_by_scope.entry(scope).or_default();
+                for (k, v) in scope_map {
+                    dest.entry(k).or_default().extend(v);
+                }
             }
         }
     }
@@ -1163,7 +1240,7 @@ fn find_capabilities(
         extractor,
         &function_and_lower_features,
         logger,
-        &mut map_features,
+        &mut map_features_by_scope,
         features_dump,
     )?;
 
@@ -1174,22 +1251,60 @@ fn find_capabilities(
     }
 
     meta.insert(0, feature_count);
+
+    // 0.5.0 (D3): build both outputs from the scope-keyed
+    // accumulator. The flat `map_features_string` collapses across
+    // scopes (parity with pre-0.5.0 shape); the scope-keyed
+    // `map_features_by_scope_string` preserves the scope dimension.
+    // Both are populated only when features_dump was true; otherwise
+    // they're empty (no extractor calls wrote into
+    // `map_features_by_scope`).
     let mut map_features_string: HashMap<String, HashMap<String, HashSet<u64>>> = HashMap::new();
+    let mut map_features_by_scope_string: HashMap<
+        String,
+        HashMap<String, HashMap<String, HashSet<u64>>>,
+    > = HashMap::new();
 
-    for (key, offsets) in &map_features {
-        let feature_type = key.get_name();
-        let feature_value = key.get_value()?;
+    for (scope, scope_map) in &map_features_by_scope {
+        let scope_string = (*scope).to_string();
+        let scope_dest = map_features_by_scope_string
+            .entry(scope_string)
+            .or_default();
+        for (key, offsets) in scope_map {
+            let feature_type = key.get_name();
+            let feature_value = key.get_value()?;
 
-        let feature_map = map_features_string.entry(feature_type).or_default();
+            // Scope-keyed copy.
+            let by_value = scope_dest
+                .entry(feature_type.clone())
+                .or_default()
+                .entry(feature_value.clone())
+                .or_default();
+            for offset in offsets {
+                by_value.insert(*offset);
+            }
 
-        let offsets_set = feature_map.entry(feature_value).or_default();
-
-        for offset in offsets {
-            offsets_set.insert(*offset);
+            // Flat copy — collapsed across scopes for backwards
+            // compatibility with pre-0.5.0 consumers reading
+            // `map_features`.
+            let flat_by_value = map_features_string
+                .entry(feature_type)
+                .or_default()
+                .entry(feature_value)
+                .or_default();
+            for offset in offsets {
+                flat_by_value.insert(*offset);
+            }
         }
     }
 
-    Ok((matches, meta, map_features_string, library_functions))
+    Ok((
+        matches,
+        meta,
+        map_features_string,
+        library_functions,
+        map_features_by_scope_string,
+    ))
 }
 
 // 0.4.0: extractor parameter explicitly carries `'_` to allow
@@ -1200,7 +1315,13 @@ fn find_file_capabilities<'a>(
     extractor: &Box<dyn extractor::Extractor + '_>,
     function_features: &HashMap<rules::features::Feature, Vec<u64>>,
     logger: &(dyn Fn(&str) + Sync + Send),
-    map_features: &mut HashMap<rules::features::Feature, Vec<u64>>,
+    // 0.5.0 (D3): see `find_function_capabilities` for shape. This
+    // call populates the "file" scope bucket with features extracted
+    // at file scope + globals. Function-scope features cascaded into
+    // the file evaluation set (for cross-scope match support) are
+    // NOT re-tagged "file" — they keep their original scope to avoid
+    // double-counting in the dump.
+    map_features_by_scope: &mut HashMap<&'static str, HashMap<rules::features::Feature, Vec<u64>>>,
     features_dump: bool,
 ) -> Result<(
     HashMap<&'a rules::Rule, Vec<(u64, (bool, Vec<u64>))>>,
@@ -1211,6 +1332,14 @@ fn find_file_capabilities<'a>(
         extractor.extract_file_features()?,
         extractor.extract_global_features()?
     ) {
+        if features_dump {
+            map_features_by_scope
+                .entry("file")
+                .or_default()
+                .entry(feature.clone())
+                .or_default()
+                .push(va);
+        }
         file_features.entry(feature.clone()).or_default().push(va);
     }
 
@@ -1222,10 +1351,6 @@ fn find_file_capabilities<'a>(
     }
 
     let (_, matches) = match_fn(&ruleset.file_rules, &file_features, &0x0, logger)?;
-
-    if features_dump {
-        map_features.extend(file_features.clone());
-    }
 
     Ok((matches, file_features.len()))
 }
@@ -1395,6 +1520,21 @@ pub struct FileCapabilities {
     /// (cheap one-shot sort on the way out).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub feature_counts: HashMap<u64, usize>,
+
+    /// 0.5.0 (D3): scope-keyed feature dump. Outer key is the scope
+    /// name (`"file"`, `"function"`, `"basic_block"`,
+    /// `"instruction"`); inner shape matches `map_features`. Only
+    /// populated when `AnalyzeBuilder::features_dump(true)` is set —
+    /// otherwise empty, like `map_features`.
+    ///
+    /// Parity with Python capa's per-scope feature breakdown. The
+    /// existing flat `map_features` field is preserved (and derived
+    /// from this by collapsing scope keys) so pre-0.5.0 consumers
+    /// reading `map_features` continue to work unchanged. New code
+    /// that needs to know whether a feature was emitted at function
+    /// vs instruction scope should consult this field instead.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub map_features_by_scope: HashMap<String, HashMap<String, HashMap<String, HashSet<u64>>>>,
 }
 
 fn match_fn<'a>(
@@ -1481,9 +1621,19 @@ fn get_format(f: &str) -> Result<(FileFormat, Vec<u8>)> {
 
 /// 0.4.0: returns true if `buf` starts with any Mach-O magic — thin
 /// 32-bit (`feedface`), thin 64-bit (`feedfacf`), or the byte-swapped
-/// variants for the opposite endianness. Fat/universal magics
-/// (`cafebabe`, `bebafeca`) are intentionally excluded here — smda's
-/// Mach-O loader handles slice selection when given the fat file.
+/// variants for the opposite endianness.
+///
+/// 0.5.0: fat/universal magics (`cafebabe` + 64-bit `cafebabf`, plus
+/// the byte-swapped pair) are now also accepted. Apple-Silicon macOS
+/// system binaries (`/bin/ls`, `/usr/bin/file`, …) ship as universal
+/// binaries — without this, `capa /bin/ls` returned
+/// `UnsupportedFormatError` even though smda's
+/// `extract_macho_with_offset` has explicit fat-slice selection wired
+/// up. Caveat: `cafebabe` is also the Java `.class` file magic.
+/// goblin's `Mach::parse` rejects class files (the nfat_arch field
+/// fails its sanity check), so misrouting a `.class` file here
+/// surfaces as a smda parse error rather than a silent
+/// misinterpretation.
 fn is_macho_magic(buf: &[u8]) -> bool {
     if buf.len() < 4 {
         return false;
@@ -1494,6 +1644,10 @@ fn is_macho_magic(buf: &[u8]) -> bool {
         | b"\xce\xfa\xed\xfe" // MH_CIGAM      (32-bit, swapped)
         | b"\xfe\xed\xfa\xcf" // MH_MAGIC_64   (64-bit, host-endian)
         | b"\xcf\xfa\xed\xfe" // MH_CIGAM_64   (64-bit, swapped)
+        | b"\xca\xfe\xba\xbe" // FAT_MAGIC     (32-bit fat header)
+        | b"\xbe\xba\xfe\xca" // FAT_CIGAM     (swapped)
+        | b"\xca\xfe\xba\xbf" // FAT_MAGIC_64  (64-bit fat header)
+        | b"\xbf\xba\xfe\xca" // FAT_CIGAM_64  (swapped)
     )
 }
 

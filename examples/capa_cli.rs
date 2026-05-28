@@ -164,6 +164,23 @@ fn main() {
                     }
                     println!();
 
+                    // 0.5.0 (D3): print scope-keyed feature dump summary
+                    // when `-m` is set. The full per-feature breakdown
+                    // is in the JSON output (`-o`); this stdout view
+                    // gives a quick "how many of each feature type per
+                    // scope" sanity check.
+                    if map_features {
+                        if let Some(by_scope) = data.get("map_features_by_scope") {
+                            if let Some(obj) = by_scope.as_object() {
+                                if !obj.is_empty() {
+                                    let tbl = get_features_by_scope_summary(obj);
+                                    tbl.printstd();
+                                    println!();
+                                }
+                            }
+                        }
+                    }
+
                     //print tags
 
                     if let Some(tags) = data.get("tags") {
@@ -339,6 +356,52 @@ fn get_namespace(namespace: &Map<String, Value>) -> Table {
                 .with_style(Attr::Bold),
             Cell::new(&ns),
         ]));
+    }
+
+    tbl
+}
+
+/// 0.5.0 (D3): summarises the scope-keyed feature dump as
+/// `scope → feature_type → count` so users running with `-m` get a
+/// quick visual signal that scope info is being tracked. The full
+/// per-value breakdown is in the JSON output (`-o`).
+fn get_features_by_scope_summary(by_scope: &Map<String, Value>) -> Table {
+    let mut tbl = Table::new();
+    tbl.set_titles(Row::new(vec![
+        Cell::new_align("Features by Scope (D3 dump)", Alignment::CENTER).with_hspan(3),
+    ]));
+    tbl.set_titles(Row::new(vec![
+        Cell::new_align("Scope", Alignment::LEFT),
+        Cell::new_align("Feature Type", Alignment::LEFT),
+        Cell::new_align("Distinct Values", Alignment::RIGHT),
+    ]));
+
+    // Sort scopes for stable output (file → function → basic_block → instruction is roughly outer-to-inner).
+    let mut scopes: Vec<&String> = by_scope.keys().collect();
+    scopes.sort_by_key(|s| match s.as_str() {
+        "file" => 0,
+        "function" => 1,
+        "basic_block" => 2,
+        "instruction" => 3,
+        _ => 99,
+    });
+    for scope in scopes {
+        let scope_obj = by_scope.get(scope).and_then(|v| v.as_object());
+        let Some(scope_obj) = scope_obj else { continue };
+        let mut ftypes: Vec<&String> = scope_obj.keys().collect();
+        ftypes.sort();
+        for ftype in ftypes {
+            let count = scope_obj
+                .get(ftype)
+                .and_then(|v| v.as_object())
+                .map(|m| m.len())
+                .unwrap_or(0);
+            tbl.add_row(Row::new(vec![
+                Cell::new(scope).with_style(Attr::ForegroundColor(color::CYAN)),
+                Cell::new(ftype),
+                Cell::new(&count.to_string()),
+            ]));
+        }
     }
 
     tbl

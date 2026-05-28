@@ -3,6 +3,181 @@
 All notable changes to **capa** are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — AArch64 thread-through
+
+Threads the AArch64 surface from smda 0.6.x into the analysis
+pipeline. No API breaks at the `AnalyzeBuilder` / `FileCapabilities`
+level; the `Extractor` trait gains one new method (`arch()`) so
+downstream consumers implementing the trait need to add it.
+
+### Dependency bumps
+
+- **smda 0.5 → 0.6.** Picks up AArch64 (Apple-silicon Mach-O,
+  Linux EM_AARCH64, Windows ARM64 PE), the seven AArch64 analyser
+  ports (jump-table, indirect-call, tail-call, .pdata, NOP,
+  exit-syscall, is_api_thunk), ELF GOT/PLT API resolution, and
+  the 0.6.2 hygiene patches. Semver-compatible with all future
+  0.6.x.
+
+### Added
+
+- typed iced operand walking in `extract_insn_offset_features`.
+  Pre-0.5.0 split formatted operand strings on commas and ran
+  regexes; missed offsets buried in SIB-displacement forms like
+  `[rax + rcx*4 + 0x10]`. Now consults `op_kind(i)`, `memory_base()`,
+  and `memory_displacement64()`
+- real `translate_com_features` impl backed by a generated
+  ~29 k-entry GUID database (`src/rules/com_db.rs`, ~5.8 MB) for
+  every COM class and interface known to upstream Python capa.
+  Rule-load-time rewrite of `com/class: WbemLocator` →
+  `or: [bytes: <guid1>, bytes: <guid2>]`. Database regenerated via
+  `scripts/gen_com_tables.py`.
+- scope-keyed feature dump
+  (`map_features_by_scope: HashMap<&'static str, …>`) so the
+  `--map-features` CLI flag surfaces feature counts per scope
+  (file / function / basic_block / instruction). New CLI summary
+  table in `capa_cli`.
+
+### Added — AArch64 thread-through (task #236)
+
+- **`Extractor::arch()`** trait method. Both `Smda` and `DnFile`
+  impls provided. Surfaces the real `FileArchitecture` from the
+  underlying disassembler instead of the previous bitness-based
+  guess.
+- **`FileCapabilities::get_arch`** now calls `extractor.arch()`
+  instead of mapping `bitness == 64 → AMD64` unconditionally —
+  which had been silently mislabelling every AArch64 binary that
+  smda 0.6 started producing.
+- **`extract_insn_mnemonic_features`** branches on
+  `Instruction::mnemonic_aarch64()` so ARM64 instructions emit
+  their disarm64 mnemonic (`ldr`, `str`, `bl`, …) instead of the
+  iced sentinel string `"invalid"`. Rules `mnemonic: ldr` etc.
+  now fire on ARM64 binaries.
+
+### Added — AArch64 instruction-scope feature parity
+
+- **`extract_insn_offset_features` ARM64 path.** Routes through
+  smda 0.6's `disassembler::aarch64_ops` decoders instead of the
+  x86-only iced operand walk (which returned sentinel/zero on
+  ARM64 and silently dropped every offset feature). Now emits:
+  - `LDR/STR Xt, [Xn, #imm12]` → `Offset(imm12)` +
+    `OperandOffset(1, imm12)` — base = SP (R31) / X29 (frame
+    pointer) skipped, matching the x86 path's EBP/RBP filter.
+  - `ADR  Xd, label`             → `Number(label_va)` — mirrors
+    x86 LEA's "constant address into register" emission.
+  - `ADRP Xd, page`              → `Number(page_va)` — same shape
+    at 4 KiB granularity (compilers emit ADRP+ADD/LDR to
+    materialise a full address; the page VA is close enough for
+    the typical "constant in code" pattern that `number:` rules
+    look for).
+- **`extract_insn_peb_access_characteristic_features` ARM64
+  path.** Windows on ARM64 reserves x18 as the TEB pointer
+  (Microsoft "platform register" ABI; PEB lives at
+  `[x18 + 0x60]`, mirroring `gs:[0x60]` on x64). Loads with
+  base = x18 are flagged as `peb access` regardless of
+  displacement — same "touches TEB" granularity as the x86
+  `fs:`/`gs:` segment-read match. Stores are excluded; writing
+  through x18 is exotic and doesn't pattern-match the rule.
+
+### Fixed — Mach-O closeout (audit findings)
+
+- **Fat (universal) Mach-O now routed to smda instead of
+  rejected.** `is_macho_magic` previously excluded `cafebabe` /
+  `cafebabf` (and their byte-swapped variants), so every
+  Apple-Silicon system binary that ships as a universal binary
+  (`/bin/ls`, `/usr/bin/file`, …) returned
+  `UnsupportedFormatError` even though smda's
+  `extract_macho_with_offset` already has fat-slice selection
+  wired up. Now accepted; smda picks the matching slice via
+  the `MachoArchPreference::HostNative` default. Caveat: the
+  `cafebabe` magic is also Java `.class` file magic — goblin's
+  `Mach::parse` rejects class files cleanly (the nfat_arch
+  sanity check fails), so a misrouted `.class` surfaces as a
+  parse error rather than silent misinterpretation.
+- **`security::get_security_checks` no longer aborts on
+  Mach-O.** Pre-0.5.0 returned `UnsupportedBinaryFormat` for
+  every Mach-O input, which `from_file` propagates via `?` —
+  so even with the fat-Mach-O fix above, no Mach-O could
+  actually reach the capability engine. The PE/ELF security
+  checklist (ASLR, DEP, SEH, CHECKSUM, RELRO, CANARY, …) has
+  no 1:1 equivalent on Darwin, so the path now returns an
+  empty `Vec` and lets analysis continue — mirrors how
+  `from_buffer` skips security checks for shellcode.
+- **`extract_insn_nzxor_characteristic_features` ARM64 path.**
+  Pre-0.5.0 the function checked iced's x86 `Mnemonic` enum
+  only, which is `INVALID` on AArch64 decodes — so the `nzxor`
+  characteristic never fired on ARM64 binaries. Now branches
+  on `insn.decoded` and detects AArch64 `EOR` / `EOR3` /
+  `EORS` via `mnemonic_aarch64()`, with a self-XOR exclusion
+  (`Rn == Rm`, the AArch64 zeroing idiom) mirroring the x86
+  `dst == src` filter. Security-cookie filter is skipped on
+  ARM64 — the RBP-relative cookie pattern doesn't exist
+  verbatim (Darwin uses `__stack_chk_guard` loads instead).
+- **Mach-O OS now reports `MACOS`, not the `LINUX`
+  placeholder.** Added `Os::MACOS` and `Os::IOS` to the
+  public `consts::Os` enum (additive — non-breaking for
+  matchers using `_`). `extract_os` + `get_os` route Mach-O
+  through `MACOS`. Rules `os: macos` now fire on Mach-O
+  input; `os: linux` rules no longer fire incorrectly. iOS
+  vs macOS isn't distinguishable from cputype alone
+  (CPU_TYPE_ARM64 covers both); future work could promote to
+  `IOS` based on `LC_VERSION_MIN_IPHONEOS`.
+
+### Dependency bumps (continued)
+
+- **smda 0.6.2 → 0.6.4.** Picks up two Mach-O fixes that
+  capa-rs 0.5.0 depends on:
+  - **0.6.3 tail-call resolver fix:** when
+    `resolve_tailcalls(true)` is active (capa_cli default),
+    `TailCallAnalyser::resolve_tailcalls` used to fatally
+    propagate `CollisionError` from `analyse_function` —
+    aborting the whole `Disassembler::parse` call. Now treats
+    CollisionError as expected (skip candidate, continue),
+    matching the main candidate loop's `.ok()` pattern. Pre-fix
+    repro: `SMDAError(CollisionError(0x100003698))` in ~95 ms
+    on every Apple-Silicon /bin/ls invocation.
+  - **0.6.4 Mach-O imports → `disassembly.apis` bridge:**
+    `analyse_buffer` had an explicit ELF→apis bridge and PE was
+    handled by the WinApiResolver, but Mach-O had neither.
+    Imports stopped at file-scope `binary_info.imports` and
+    never reached `disassembly.apis` / `addr_to_api`, so
+    `Function::apirefs` was empty for every Mach-O function and
+    capa's `extract_insn_api_features` emitted zero
+    `Feature::Api` for Mach-O input — making /bin/ls match zero
+    capa rules. Now a Mach-O-symmetric block in `analyse_buffer`
+    walks `macho::extract_macho_dynamic_apis` (new in 0.6.4) and
+    populates both `apis` and `addr_to_api` directly. Coverage:
+    `__DATA,__got` / `__DATA,__la_symbol_ptr` slot VAs, reached
+    by the canonical ARM64 PIC patterns (`adrp+ldr+blr` inlined
+    or via __TEXT,__stubs thunks).
+
+### Added — Mach-O security checklist
+
+- **Real `security/macho.rs` module** replacing the placeholder
+  `Ok(Vec::new())` that pre-0.5.0 shipped (an empty Security
+  Checks table on every Mach-O input). Nine checks emitted:
+  - **PIE** — `MH_PIE` (`0x200000`), Darwin ASLR equivalent.
+  - **DATA-EXEC-PREVENT** — `MH_NO_HEAP_EXECUTION` (`0x01000000`)
+    OR no `__DATA*` segment with `VM_PROT_EXECUTE` in
+    `initprot`.
+  - **STACK-CANARY** — `___stack_chk_guard` /
+    `___stack_chk_fail` in the symbol table.
+  - **RESTRICT** — presence of a `__RESTRICT` segment
+    (anti-`DYLD_INSERT_LIBRARIES` marker).
+  - **CODE-SIGNATURE** — `LC_CODE_SIGNATURE` load command with
+    non-zero `datasize`.
+  - **TWO-LEVEL-NAMESPACE** — `MH_TWOLEVEL` (`0x80`).
+  - **NO-UNDEF-SYMS** — `MH_NOUNDEFS` (`0x01`).
+  - **HARDENED-RUNTIME** — `Unknown` (requires `CS_SuperBlob` →
+    `CS_CodeDirectory.flags & CS_RUNTIME (0x10000)` walk;
+    deferred to a follow-up, ~80 LOC of big-endian parsing
+    inside `__LINKEDIT`).
+  - **ALLOW-JIT** — `Unknown` (requires
+    `CS_EmbeddedEntitlements` PLIST parsing; deferred).
+  Fat binaries: first parseable slice's checks are reported,
+  same convention as smda's `MachoArchPreference::HostNative`
+  picks for analysis.
+
 ## [0.4.3] — 2026-05-27 — FLIRT polish
 
 ### Added

@@ -185,6 +185,14 @@ impl<'data> super::Extractor for Extractor<'data> {
         Ok(0)
     }
 
+    fn arch(&self) -> Result<crate::FileArchitecture> {
+        // .NET assemblies surface the CIL bitness via the existing
+        // `extract_arch()` (CorFlags.32BIT_REQUIRED → I386, otherwise
+        // AMD64). No AArch64 path — .NET assemblies are bitness-
+        // agnostic at the CIL level and capa rules don't distinguish.
+        self.extract_arch()
+    }
+
     fn format(&self) -> super::FileFormat {
         super::FileFormat::DOTNET
     }

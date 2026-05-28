@@ -228,8 +228,21 @@ impl Feature {
                 OperandOffsetFeature::new(&a, &value.get_int()? as &i128, description)?,
             )),
             RuleFeatureType::ComType(_ct) => {
-                //TODO
-                unimplemented!()
+                // 0.5.0: `com/class:` and `com/interface:` are
+                // rewritten at rule-load time by `translate_com_features`
+                // in `mod.rs` — they become an `OrStatement` of
+                // `Feature::Bytes` over each known CLSID/IID for the
+                // named class. By the time we'd reach this match
+                // arm, the CommandType::ComType branch in
+                // `Rule::parse_feature_type`'s caller has already
+                // produced the rewrite, so this is dead. Loud
+                // unreachable so any future refactor that misroutes
+                // a ComType through Feature::new gets caught.
+                unreachable!(
+                    "RuleFeatureType::ComType should be handled by \
+                     translate_com_features at rule load, not via \
+                     Feature::new"
+                )
             }
         }
     }

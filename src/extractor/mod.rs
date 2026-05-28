@@ -36,6 +36,13 @@ pub trait Extractor: Send + Sync {
     #[allow(dead_code)]
     fn format(&self) -> FileFormat;
     fn bitness(&self) -> u32;
+    /// 0.5.0: surface the actual architecture instead of guessing it
+    /// from `bitness()` upstream. Required because smda 0.6's
+    /// `FileArchitecture::Aarch64` is also 64-bit — the previous
+    /// "64 → AMD64" inference in `FileCapabilities::get_arch`
+    /// mislabelled every ARM64 binary as AMD64.
+    #[allow(dead_code)]
+    fn arch(&self) -> Result<crate::FileArchitecture>;
     fn extract_global_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>>;
     fn extract_file_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>>;
     fn get_functions(&self) -> Result<std::collections::BTreeMap<u64, Box<dyn Function>>>;
