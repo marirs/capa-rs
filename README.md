@@ -7,7 +7,9 @@
 
 Try it online: <https://www.analyze.rs/>
 
-`capa-rs` detects capabilities in executable files. Point it at a PE, ELF, Mach-O, .NET binary, or raw shellcode and it tells you what the program can do — for example, that the file is a backdoor, installs Windows services, communicates over HTTP, or uses RC4. It also runs a binary-security checklist (ASLR, NX, stack canary, CFG, etc.).
+`capa-rs` detects capabilities in executable files. Point it at a PE, ELF, Mach-O, .NET binary, or raw shellcode and it tells you what the program can do — for example, that the file is a backdoor, installs Windows services, communicates over HTTP, or uses RC4. It also runs a binary-security checklist (PE: ASLR, NX, stack canary, CFG, SafeSEH, App-Container, …; ELF: ASLR, immediate-bind, RELRO, stack-prot; Mach-O: PIE, NX, stack-canary, restrict, code-signature, hardened-runtime, allow-JIT, two-level-namespace, no-undef-syms).
+
+Supported inputs: **PE / .NET / ELF / Mach-O** (thin and fat / universal) across **x86, x86_64, AArch64** — on Windows / Linux / macOS / iOS targets.
 
 This is a Rust port of Mandiant's [Python capa](https://github.com/mandiant/capa) without the IDA / Ghidra plugins — a pure library that emits capability reports. The bundled `capa_cli` example wraps it as a command-line tool. Rules come from the official [capa-rules](https://github.com/mandiant/capa-rules) repository.
 
@@ -15,7 +17,7 @@ This is a Rust port of Mandiant's [Python capa](https://github.com/mandiant/capa
 
 ```toml
 [dependencies]
-capa = "0.4"
+capa = "0.5"
 ```
 
 ```rust
@@ -144,12 +146,12 @@ cargo build --features verbose,properties  # both
 ## Requirements
 
 - Rust **1.95** or newer (2024 edition).
-- No C/C++ toolchain — pure Rust.
 
 ## Related crates in this ecosystem
 
-- [`smda`](https://crates.io/crates/smda) — recursive x86/x64 disassembler (zero-copy, iced-x86 backend).
+- [`smda`](https://crates.io/crates/smda) — recursive **x86 / x86_64 / AArch64** disassembler (zero-copy, iced-x86 + disarm64 backends). PE / ELF / Mach-O loader, full Mach-O API resolution via bind-opcode stream + `LC_DYSYMTAB` stub walker.
 - [`dnfile`](https://crates.io/crates/dnfile) — .NET CLR metadata parser (zero-copy).
+- [`fast-flirt`](https://crates.io/crates/fast-flirt) — pure-Rust FLIRT (`.sig` / `.pat`) signature matcher. Always linked into capa-rs; only does work when you pass `--signatures`.
 
 ## License
 

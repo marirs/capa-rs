@@ -3,6 +3,70 @@
 All notable changes to **capa** are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — Mach-O closeout: zero `Unknown` rows, stub-VA API resolution, iOS distinction
+
+Closes every `Unknown` placeholder in the 0.5.0 Mach-O security
+table, picks up smda 0.6.5's `__TEXT,__stubs` walker so direct
+`bl _stub` calls resolve to API names, and distinguishes iOS
+binaries from macOS via `LC_BUILD_VERSION.platform`.
+
+### Dependency bumps
+
+- **smda 0.6.4 → 0.6.5.** Mach-O closeout — see smda CHANGELOG
+  0.6.5 entry. `__TEXT,__stubs` walker via `LC_DYSYMTAB`
+  registers stub VAs (catches direct `bl _stub` calls, the most
+  common ARM64 PIC call shape); `MachoArchPreference` plumbed
+  through `BinaryInfo` so import extraction parses the same
+  slice the analyser disassembled.
+- **`plist = "1"` (pure-rust, no native deps).** New dep used
+  by `security/macho.rs` to parse the Mach-O entitlements PLIST
+  payload for the ALLOW-JIT check. No openssl / aws-lc /
+  native-tls in the transitive tree — matches the project's
+  pure-Rust stance.
+
+### Fixed — security checklist closeout
+
+- **HARDENED-RUNTIME** no longer emits `Unknown`. Walks the
+  `CS_SuperBlob` (magic `0xfade0cc0`) at
+  `LC_CODE_SIGNATURE.dataoff`, locates the `CS_CodeDirectory`
+  blob (magic `0xfade0c02`), reads its big-endian `flags` field
+  at offset 0x0c, checks `flags & CS_RUNTIME (0x10000)`. Fat
+  binaries: slice offset folded in so `dataoff` resolves to the
+  correct absolute file position. Unsigned binaries (no
+  `LC_CODE_SIGNATURE`) report Fail; malformed blobs report
+  Unknown.
+- **ALLOW-JIT** no longer emits `Unknown`. Same SuperBlob walk
+  finds the `CS_EmbeddedEntitlements` blob (magic `0xfade7171`);
+  the PLIST payload is parsed via the `plist` crate (handles
+  both XML and binary forms transparently) and checked for
+  `com.apple.security.cs.allow-jit = true`. No entitlements →
+  Fail (the absence of the key means JIT is not permitted).
+
+### Added — iOS vs macOS distinction
+
+- **`Os::IOS` is now actually emitted** (0.5.0 defined the
+  variant but always collapsed Mach-O to `MACOS`). New
+  `classify_macho_os` walker inspects load commands:
+  - `LC_BUILD_VERSION.platform` (Xcode-10+ binaries) — modern,
+    authoritative. Maps `PLATFORM_IOS (2)` / `PLATFORM_TVOS (3)`
+    / `PLATFORM_WATCHOS (4)` / `PLATFORM_BRIDGEOS (5)` /
+    iOS-family simulators → `Os::IOS`. `PLATFORM_MACOS (1)` /
+    `PLATFORM_MACCATALYST (6)` / `PLATFORM_DRIVERKIT (10)` →
+    `Os::MACOS`.
+  - `LC_VERSION_MIN_*` (legacy / pre-Xcode-10) — fallback. cmd
+    id `LC_VERSION_MIN_IPHONEOS (0x25)` / `_TVOS (0x2F)` /
+    `_WATCHOS (0x30)` → `Os::IOS`; `LC_VERSION_MIN_MACOSX
+    (0x24)` → `Os::MACOS`.
+  - No version commands → defaults to `Os::MACOS`.
+  Both the smda-extractor `extract_os()` (CLI surface) and
+  `FileCapabilities::get_os()` (properties feature) route
+  through the same helper for consistency.
+
+### Maintenance
+
+- `cargo update` — clears the `goblin v0.10.6` yanked warning
+  carried over from 0.5.0's publish.
+
 ## [0.5.0] — AArch64 thread-through
 
 Threads the AArch64 surface from smda 0.6.x into the analysis

@@ -525,21 +525,23 @@ impl<'data> Extractor<'data> {
         }
     }
     pub fn extract_os(&self) -> Result<Os> {
-        // 0.5.0: Mach-O now resolves to the real Darwin family
-        // (Os::MACOS) instead of the pre-0.5.0 Os::LINUX placeholder.
-        // The `Os` enum gained `MACOS` + `IOS` in 0.5.0 — without
-        // this, capa rules `os: macos` never fired and `os: linux`
-        // rules fired incorrectly on Mach-O input. iOS isn't
-        // distinguishable from macOS by cputype alone (both share
-        // CPU_TYPE_ARM64) without extra Mach-O metadata
-        // (LC_VERSION_MIN_IPHONEOS vs LC_VERSION_MIN_MACOSX); for
-        // now Mach-O collapses to MACOS, and IOS is reserved for
-        // future fat-slice-aware promotion.
+        // 0.5.0: Mach-O resolves to the real Darwin family
+        // (Os::MACOS / Os::IOS) instead of the pre-0.5.0 Os::LINUX
+        // placeholder.
+        //
+        // 0.5.1: macOS / iOS distinction now wired. cputype alone
+        // can't distinguish (both share CPU_TYPE_ARM64 on
+        // Apple-Silicon Macs / iOS devices), but the load commands
+        // do: `LC_BUILD_VERSION.platform` is `PLATFORM_MACOS (1)` /
+        // `PLATFORM_IOS (2)` / `PLATFORM_TVOS (3)` / etc. on
+        // Xcode-10+ binaries; legacy binaries use the older
+        // `LC_VERSION_MIN_MACOSX` / `LC_VERSION_MIN_IPHONEOS`
+        // commands. We inspect both — first match wins.
         //
         // Buffer (shellcode) keeps the WINDOWS default — most
         // analysed shellcode targets Win32.
         match self.report().format {
-            smda::FileFormat::MachO => return Ok(Os::MACOS),
+            smda::FileFormat::MachO => return classify_macho_os(self.buf()),
             smda::FileFormat::Buffer => return Ok(Os::WINDOWS),
             _ => {}
         }
@@ -548,10 +550,10 @@ impl<'data> Extractor<'data> {
             goblin::Object::PE(_) => Ok(Os::WINDOWS),
             // Defensive: if smda labelled the format as MachO but
             // goblin sees a fat-Mach-O wrapper (cafebabe) here,
-            // still report MACOS. The earlier `report().format`
-            // match should already have caught this; the fallthrough
-            // is kept for safety.
-            goblin::Object::Mach(_) => Ok(Os::MACOS),
+            // route through the same classifier. The earlier
+            // `report().format` match should already have caught
+            // this; the fallthrough is kept for safety.
+            goblin::Object::Mach(_) => classify_macho_os(self.buf()),
             _ => Err(Error::UnsupportedOsError),
         }
     }
@@ -1814,4 +1816,115 @@ fn buf_filled_with(data: &[u8], character: &u8) -> bool {
         offset += SLICE_SIZE;
     }
     true
+}
+
+/// 0.5.1: distinguish macOS / iOS / tvOS / watchOS Mach-O.
+///
+/// Apple-Silicon Macs and modern iOS devices both ship
+/// `CPU_TYPE_ARM64` binaries — cputype alone can't tell them apart.
+/// The load commands do: `LC_BUILD_VERSION` (Xcode-10+) carries a
+/// `platform` field with `PLATFORM_MACOS (1)` / `PLATFORM_IOS (2)`
+/// / etc. Legacy binaries use the older `LC_VERSION_MIN_*` family
+/// where the load-command id (`cmd`) itself encodes the target OS.
+///
+/// We honour both. Order of resolution:
+///   1. Walk `LC_BUILD_VERSION.platform` — modern, authoritative.
+///   2. Fall back to `LC_VERSION_MIN_*` (cmd id → OS).
+///   3. Default: `Os::MACOS` (matches the 0.5.0 placeholder for
+///      binaries with no version commands at all — typical of
+///      hand-crafted / very old Mach-O).
+///
+/// Platform-id taxonomy (Apple `<mach-o/loader.h>`):
+///   PLATFORM_MACOS              = 1   → Os::MACOS
+///   PLATFORM_IOS                = 2   → Os::IOS
+///   PLATFORM_TVOS               = 3   → Os::IOS  (tvOS shares
+///                                                  iOS userland)
+///   PLATFORM_WATCHOS            = 4   → Os::IOS
+///   PLATFORM_BRIDGEOS           = 5   → Os::IOS
+///   PLATFORM_MACCATALYST        = 6   → Os::MACOS (Catalyst apps
+///                                                   run on macOS)
+///   PLATFORM_IOSSIMULATOR       = 7   → Os::IOS
+///   PLATFORM_TVOSSIMULATOR      = 8   → Os::IOS
+///   PLATFORM_WATCHOSSIMULATOR   = 9   → Os::IOS
+///   PLATFORM_DRIVERKIT          = 10  → Os::MACOS
+///
+/// Fat binaries: first parseable Mach-O slice wins (matches the
+/// rest of capa-rs's fat handling — security/macho.rs and smda's
+/// `extract_macho` both iterate in fat order).
+pub(crate) fn classify_macho_os(buf: &[u8]) -> Result<Os> {
+    use goblin::mach::{Mach, load_command::CommandVariant};
+
+    // PLATFORM_* constants (Apple <mach-o/loader.h>).
+    const PLATFORM_MACOS: u32 = 1;
+    const PLATFORM_IOS: u32 = 2;
+    const PLATFORM_TVOS: u32 = 3;
+    const PLATFORM_WATCHOS: u32 = 4;
+    const PLATFORM_BRIDGEOS: u32 = 5;
+    const PLATFORM_MACCATALYST: u32 = 6;
+    const PLATFORM_IOSSIMULATOR: u32 = 7;
+    const PLATFORM_TVOSSIMULATOR: u32 = 8;
+    const PLATFORM_WATCHOSSIMULATOR: u32 = 9;
+    const PLATFORM_DRIVERKIT: u32 = 10;
+
+    // LC_VERSION_MIN_* command ids (Apple <mach-o/loader.h>) —
+    // listed for documentation; goblin splits these into separate
+    // CommandVariant variants so we don't need the cmd id at
+    // runtime.
+    //   LC_VERSION_MIN_MACOSX     = 0x24
+    //   LC_VERSION_MIN_IPHONEOS   = 0x25
+    //   LC_VERSION_MIN_TVOS       = 0x2f
+    //   LC_VERSION_MIN_WATCHOS    = 0x30
+
+    fn classify(slice: &goblin::mach::MachO) -> Os {
+        // 1. Prefer LC_BUILD_VERSION (Xcode-10+ binaries — the
+        //    common case on anything built since ~2018).
+        for lc in &slice.load_commands {
+            if let CommandVariant::BuildVersion(bv) = &lc.command {
+                return match bv.platform {
+                    PLATFORM_MACOS | PLATFORM_MACCATALYST | PLATFORM_DRIVERKIT => Os::MACOS,
+                    PLATFORM_IOS
+                    | PLATFORM_TVOS
+                    | PLATFORM_WATCHOS
+                    | PLATFORM_BRIDGEOS
+                    | PLATFORM_IOSSIMULATOR
+                    | PLATFORM_TVOSSIMULATOR
+                    | PLATFORM_WATCHOSSIMULATOR => Os::IOS,
+                    // Unknown platform id from a future SDK — most
+                    // future Apple platforms are iOS-family, but
+                    // default to MACOS to keep the surface
+                    // conservative (matches the 0.5.0 placeholder).
+                    _ => Os::MACOS,
+                };
+            }
+        }
+        // 2. Fall back to LC_VERSION_MIN_* (pre-Xcode-10). Goblin
+        // splits these into four separate CommandVariant variants
+        // (one per Apple OS) instead of a single VersionMin variant
+        // with a cmd field — so we match on the variant directly.
+        for lc in &slice.load_commands {
+            match &lc.command {
+                CommandVariant::VersionMinMacosx(_) => return Os::MACOS,
+                CommandVariant::VersionMinIphoneos(_)
+                | CommandVariant::VersionMinTvos(_)
+                | CommandVariant::VersionMinWatchos(_) => return Os::IOS,
+                _ => {}
+            }
+        }
+        // 3. No version commands — default to MACOS.
+        Os::MACOS
+    }
+
+    match goblin::Object::parse(buf)? {
+        goblin::Object::Mach(Mach::Binary(m)) => Ok(classify(&m)),
+        goblin::Object::Mach(Mach::Fat(fat)) => {
+            for (i, _arch) in fat.iter_arches().enumerate() {
+                if let Ok(goblin::mach::SingleArch::MachO(m)) = fat.get(i) {
+                    return Ok(classify(&m));
+                }
+            }
+            // No parseable slice — fall back to MACOS.
+            Ok(Os::MACOS)
+        }
+        _ => Ok(Os::MACOS),
+    }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "capa"
-version = "0.5.0"
+version = "0.5.1"
 description = "File capability extractor."
 authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>", "Jorge Alejandro Durán Royo<jorge.duran.royo@gmail.com>"]
 keywords = ["capa", "fce", "capability", "aslr", "reverse"]
@@ -37,19 +37,15 @@ petgraph = "0.8"
 regex = "1.11.1"
 fancy-regex = "0.18"
 serde = { version = "1", features = ["derive"] }
-# 0.5.0: smda 0.5 → 0.6.4 picks up the AArch64 backend
-# (`FileArchitecture::Aarch64`, ARM64 Mach-O / ELF / PE routing),
-# the seven AArch64 analyser ports (jump-table, indirect-call,
-# tail-call, .pdata, NOP, exit-syscall, is_api_thunk), GOT/PLT
-# ELF API resolution, the code-hygiene patches, the 0.6.3
-# tail-call resolver fix (so `resolve_tailcalls(true)` survives
-# analysis without aborting on benign CollisionErrors), and the
-# 0.6.4 Mach-O imports → `disassembly.apis` bridge (so
-# `Feature::Api` actually surfaces on Mach-O input — pre-0.6.4
-# every Mach-O analysis returned zero API features and therefore
-# zero capa-rule matches). `0.6.4` is the minimum; semver-
-# compatible with future 0.6.x.
-smda = "0.6.4"
+# 0.5.1: smda 0.6.4 → 0.6.5. Picks up the Mach-O closeout:
+# `__TEXT,__stubs` walker via `LC_DYSYMTAB.indirectsymoff` so
+# direct `bl _stub` calls resolve to their API names (0.6.4 only
+# covered the GOT-slot indirect form, missing the most common
+# ARM64 PIC call shape), and `MachoArchPreference` plumbed through
+# `BinaryInfo` so post-parse passes honour the slice preference
+# set at parse time. `0.6.5` is the minimum; semver-compatible
+# with future 0.6.x.
+smda = "0.6.5"
 thiserror = "2.0.12"
 walkdir = "2.5.0"
 yaml-rust = "0.4.5"
@@ -70,6 +66,13 @@ memmap2 = "0.9.5"
 scroll = "0.13"
 once_cell = "1.21.1"
 dynamic-loader-cache = "0.2.2"
+# (0.5.1) Pure-Rust PLIST parser for Mach-O code-signing
+# entitlements blob (CS_EmbeddedEntitlements, magic 0xfade7171).
+# Used by security/macho.rs to detect ALLOW-JIT
+# (com.apple.security.cs.allow-jit). No openssl / aws-lc /
+# native-tls in the transitive tree — matches the project's
+# pure-Rust stance.
+plist = { version = "1", default-features = false }
 # 0.3.21 introduced ouroboros as a self-referential wrapper around
 # `buf: Vec<u8>` + `DisassemblyReport<'_>` so the public Extractor::new
 # could keep its 0.3.20 signature. 0.4.0 completes the zero-copy

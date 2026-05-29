@@ -679,7 +679,7 @@ impl FileCapabilities {
             properties: Properties {
                 format: FileCapabilities::get_format(extractor)?,
                 arch: FileCapabilities::get_arch(extractor)?,
-                os: FileCapabilities::get_os(extractor)?,
+                os: FileCapabilities::get_os(extractor, raw)?,
                 base_address: extractor.get_base_address()? as usize,
                 pdb_guid,
                 pdb_age,
@@ -923,14 +923,25 @@ impl FileCapabilities {
     }
 
     #[cfg(feature = "properties")]
-    fn get_os(extractor: &Box<dyn extractor::Extractor + '_>) -> Result<Os> {
-        // 0.5.0: capa's `Os` enum gained `MACOS` + `IOS`; route
-        // Mach-O to MACOS so `os: macos` rules fire and `os: linux`
-        // rules stop firing incorrectly. Pre-0.5.0 the fall-through
-        // (`_ => Os::LINUX`) caught Mach-O as a placeholder.
+    fn get_os(extractor: &Box<dyn extractor::Extractor + '_>, raw: Option<&[u8]>) -> Result<Os> {
+        // 0.5.1: Mach-O now resolves to either MACOS or IOS based
+        // on the load commands (`LC_BUILD_VERSION.platform` or
+        // legacy `LC_VERSION_MIN_*`). 0.5.0 collapsed everything
+        // Mach-O to MACOS; 0.5.1 closes that with the same
+        // classifier the smda extractor uses (kept in
+        // `extractor::smda::classify_macho_os` so both paths agree).
+        //
+        // For non-Mach-O formats we don't touch raw — PE / DOTNET
+        // collapse to WINDOWS and the ELF / Buffer / fallback
+        // remains LINUX (the ELF path's proper OS detection lives
+        // in `Extractor::extract_os` for the CLI surface; this
+        // helper is the properties-feature one-liner).
         match extractor.format() {
             FileFormat::PE | FileFormat::DOTNET => Ok(Os::WINDOWS),
-            FileFormat::Macho => Ok(Os::MACOS),
+            FileFormat::Macho => match raw {
+                Some(bytes) => extractor::smda::classify_macho_os(bytes),
+                None => Ok(Os::MACOS),
+            },
             _ => Ok(Os::LINUX),
         }
     }
