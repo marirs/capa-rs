@@ -8,7 +8,7 @@ use statement::{
     AndStatement, Description, NotStatement, OrStatement, RangeStatement, SomeStatement, Statement,
     StatementElement, SubscopeStatement,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use yaml_rust::{Yaml, YamlLoader, yaml::Hash};
 
 use self::features::{BytesFeature, ComType};
@@ -1281,7 +1281,7 @@ pub fn get_rules(rule_path: &str) -> Result<Vec<Rule>> {
     Ok(rules)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RuleSet {
     pub rules: Vec<Rule>,
     pub basic_block_rules: Vec<Rule>,
@@ -1301,6 +1301,192 @@ impl RuleSet {
             function_rules: function_rules.iter().map(|r| (*r).clone()).collect(),
             file_rules: file_rules.iter().map(|r| (*r).clone()).collect(),
         })
+    }
+
+    /// 0.5.2 (upstream parity mandiant/capa#2929): return a new
+    /// `RuleSet` with rules removed whose global-feature requirements
+    /// (`os:`, `arch:`, `format:`) cannot be satisfied by the binary
+    /// under analysis.
+    ///
+    /// Global features are determined once at the start of analysis
+    /// from the binary's headers. Any rule that requires, for example,
+    /// `os: windows` while we're analysing a Linux ELF can never match
+    /// and is safe to discard *before* the per-function matching loop
+    /// — eliminating those rules from every per-function /
+    /// per-basic-block / per-instruction evaluation downstream.
+    ///
+    /// Conservative: a rule is only removed when its global-feature
+    /// constraints are *provably* unsatisfiable. Rules with no global
+    /// constraints, with `os: any`-style wildcards, or with negated
+    /// constraints (`not:`) are always kept. Transitive dependencies
+    /// of kept rules are also retained so internal RuleSet
+    /// dependency invariants hold.
+    ///
+    /// Returns a clone of `self` (cheap — the per-scope vecs already
+    /// re-clone) if no rules can be pruned.
+    pub fn filter_rules_by_meta_features(
+        &self,
+        features: &HashMap<Feature, Vec<u64>>,
+    ) -> Result<RuleSet> {
+        // Restrict the input features to *actual* globals (OS / Arch / Format).
+        let global_features: HashMap<Feature, Vec<u64>> = features
+            .iter()
+            .filter(|(f, _)| f.is_global_feature())
+            .map(|(f, l)| (f.clone(), l.clone()))
+            .collect();
+        if global_features.is_empty() {
+            return Ok(self.clone());
+        }
+
+        // Build the namespace index from the *full* ruleset so dependency
+        // closure later picks up rules referenced by namespace.
+        let namespaces = index_rules_by_namespace(&self.rules)?;
+
+        // 1. Determine which rules' global constraints are satisfiable.
+        let mut keep: HashSet<String> = HashSet::with_capacity(self.rules.len());
+        for rule in &self.rules {
+            if can_match_globals(&rule.statement, &global_features) {
+                keep.insert(rule.name.clone());
+            }
+        }
+
+        // Fast exit when nothing would be pruned.
+        if keep.len() == self.rules.len() {
+            return Ok(self.clone());
+        }
+
+        // 2. Expand to include transitive dependencies of every surviving
+        // rule, so `match: foo` references still resolve.
+        let mut stack: Vec<String> = keep.iter().cloned().collect();
+        while let Some(name) = stack.pop() {
+            let rule = match self.rules.iter().find(|r| r.name == name) {
+                Some(r) => r,
+                None => continue,
+            };
+            for dep in rule.get_dependencies(&namespaces)? {
+                if keep.insert(dep.clone()) {
+                    stack.push(dep);
+                }
+            }
+        }
+        if keep.len() == self.rules.len() {
+            return Ok(self.clone());
+        }
+
+        // 3. Rebuild the per-scope vectors from the filtered list, the same
+        // way `RuleSet::new` does.
+        let filtered: Vec<Rule> = self
+            .rules
+            .iter()
+            .filter(|r| keep.contains(&r.name))
+            .cloned()
+            .collect();
+        let basic_block_rules = get_basic_block_rules(&filtered)?
+            .iter()
+            .map(|r| (*r).clone())
+            .collect();
+        let function_rules = get_function_rules(&filtered)?
+            .iter()
+            .map(|r| (*r).clone())
+            .collect();
+        let file_rules = get_file_rules(&filtered)?
+            .iter()
+            .map(|r| (*r).clone())
+            .collect();
+
+        Ok(RuleSet {
+            rules: filtered,
+            basic_block_rules,
+            function_rules,
+            file_rules,
+        })
+    }
+}
+
+/// 0.5.2 (upstream parity mandiant/capa#2929): recursive walker over a
+/// rule's `StatementElement` AST that returns `true` if the rule
+/// *might* still match given the binary's global feature set, and
+/// `false` only when the rule's global constraints are provably
+/// unsatisfiable. Non-global features always return `true` —
+/// pre-pruning only reasons about Os/Arch/Format.
+///
+/// Mirrors the `can_match` helper in upstream's Python implementation
+/// (capa/rules/__init__.py, filter_rules_by_meta_features).
+fn can_match_globals(node: &StatementElement, globals: &HashMap<Feature, Vec<u64>>) -> bool {
+    match node {
+        StatementElement::Feature(f) => {
+            if f.is_global_feature() {
+                // `os: any` / `arch: any` / `format: any` are the
+                // explicit "don't care" wildcard form and are always
+                // satisfiable — short-circuit before the strict
+                // value-equality lookup in `OsFeature::evaluate`
+                // (etc.) would otherwise wrongly return false because
+                // the binary's globals carry a concrete value.
+                let wildcard = match f.as_ref() {
+                    Feature::Os(o) => o.value() == "any",
+                    Feature::Arch(a) => a.value() == "any",
+                    Feature::Format(fmt) => fmt.value() == "any",
+                    _ => false,
+                };
+                if wildcard {
+                    return true;
+                }
+                // `evaluate` returns (bool, locations); we only need
+                // the bool. On any error fall back to "might match"
+                // — pruning errs on the side of keeping the rule.
+                f.evaluate(globals).map(|(b, _)| b).unwrap_or(true)
+            } else {
+                // Non-global features can't be ruled out from globals alone.
+                true
+            }
+        }
+        // Description nodes carry no constraints — transparent.
+        StatementElement::Description(_) => true,
+        StatementElement::Statement(boxed) => match boxed.as_ref() {
+            Statement::And(s) => match s.get_children() {
+                Ok(children) => children.iter().all(|c| can_match_globals(c, globals)),
+                Err(_) => true,
+            },
+            Statement::Or(s) => match s.get_children() {
+                Ok(children) => children.iter().any(|c| can_match_globals(c, globals)),
+                Err(_) => true,
+            },
+            // Negation: we can't prove unsatisfiability from globals alone,
+            // since the global constraint might appear inside the `not:` and
+            // be exactly what makes the rule satisfiable. Keep the rule.
+            Statement::Not(_) => true,
+            Statement::Some(s) => {
+                if s.count() == 0 {
+                    return true;
+                }
+                let children = match s.get_children() {
+                    Ok(c) => c,
+                    Err(_) => return true,
+                };
+                let satisfiable: u32 = children
+                    .iter()
+                    .map(|c| if can_match_globals(c, globals) { 1 } else { 0 })
+                    .sum();
+                satisfiable >= s.count()
+            }
+            Statement::Range(s) => {
+                // `min == 0` means the feature can be absent — always satisfiable.
+                if s.min() == 0 {
+                    return true;
+                }
+                match s.get_children() {
+                    Ok(children) => children.iter().all(|c| can_match_globals(c, globals)),
+                    Err(_) => true,
+                }
+            }
+            // Subscope is normally rewritten before matching (task #155);
+            // if we still see one, treat it transparently — recurse into
+            // its single child.
+            Statement::Subscope(_) => match boxed.get_children() {
+                Ok(children) => children.iter().all(|c| can_match_globals(c, globals)),
+                Err(_) => true,
+            },
+        },
     }
 }
 
@@ -1667,4 +1853,246 @@ pub fn topologically_order_rules(rules: Vec<&Rule>) -> Result<Vec<&Rule>> {
         ret.append(&mut rec(rule, &mut seen, &rules_by_name, &namespaces)?);
     }
     Ok(ret)
+}
+
+// 0.5.2 (upstream parity mandiant/capa#2929): tests for
+// `RuleSet::filter_rules_by_meta_features`. Mirror the upstream
+// `tests/test_match.py::test_filter_rules_by_meta_features_*` cases,
+// adapted to capa-rs's `Rule::from_yaml` constructor and the local
+// `RuleSet` struct layout.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rules::features::OsFeature;
+
+    fn make_ruleset(rules: Vec<Rule>) -> Result<RuleSet> {
+        let basic_block_rules = get_basic_block_rules(&rules)?
+            .iter()
+            .map(|r| (*r).clone())
+            .collect();
+        let function_rules = get_function_rules(&rules)?
+            .iter()
+            .map(|r| (*r).clone())
+            .collect();
+        let file_rules = get_file_rules(&rules)?
+            .iter()
+            .map(|r| (*r).clone())
+            .collect();
+        Ok(RuleSet {
+            rules,
+            basic_block_rules,
+            function_rules,
+            file_rules,
+        })
+    }
+
+    fn os_globals(value: &str) -> HashMap<Feature, Vec<u64>> {
+        let mut m = HashMap::new();
+        m.insert(
+            Feature::Os(OsFeature::new(value, "").expect("OsFeature::new")),
+            vec![0],
+        );
+        m
+    }
+
+    fn names(rs: &RuleSet) -> HashSet<String> {
+        rs.rules.iter().map(|r| r.name.clone()).collect()
+    }
+
+    const WINDOWS_RULE: &str = r#"
+rule:
+  meta:
+    name: windows only
+    scopes:
+      static: function
+      dynamic: process
+  features:
+    - and:
+      - os: windows
+      - api: CreateFile
+"#;
+
+    const LINUX_RULE: &str = r#"
+rule:
+  meta:
+    name: linux only
+    scopes:
+      static: function
+      dynamic: process
+  features:
+    - and:
+      - os: linux
+      - api: open
+"#;
+
+    const ANY_OS_RULE: &str = r#"
+rule:
+  meta:
+    name: any os
+    scopes:
+      static: function
+      dynamic: process
+  features:
+    - and:
+      - os: any
+      - api: malloc
+"#;
+
+    const NO_OS_RULE: &str = r#"
+rule:
+  meta:
+    name: no os
+    scopes:
+      static: function
+      dynamic: process
+  features:
+    - api: calloc
+"#;
+
+    #[test]
+    fn upstream_parity_2929_prunes_incompatible_os() {
+        let rs = make_ruleset(vec![
+            Rule::from_yaml(WINDOWS_RULE).expect("windows yaml"),
+            Rule::from_yaml(LINUX_RULE).expect("linux yaml"),
+        ])
+        .expect("RuleSet");
+
+        // Linux binary: windows-only rule pruned, linux-only kept.
+        let filtered = rs
+            .filter_rules_by_meta_features(&os_globals("linux"))
+            .expect("filter");
+        let ns = names(&filtered);
+        assert!(ns.contains("linux only"), "kept: {:?}", ns);
+        assert!(!ns.contains("windows only"), "kept: {:?}", ns);
+
+        // Windows binary: linux-only rule pruned, windows-only kept.
+        let filtered = rs
+            .filter_rules_by_meta_features(&os_globals("windows"))
+            .expect("filter");
+        let ns = names(&filtered);
+        assert!(ns.contains("windows only"), "kept: {:?}", ns);
+        assert!(!ns.contains("linux only"), "kept: {:?}", ns);
+    }
+
+    #[test]
+    fn upstream_parity_2929_keeps_any_os_and_no_os() {
+        let rs = make_ruleset(vec![
+            Rule::from_yaml(ANY_OS_RULE).expect("any-os yaml"),
+            Rule::from_yaml(NO_OS_RULE).expect("no-os yaml"),
+        ])
+        .expect("RuleSet");
+
+        for os in ["windows", "linux"] {
+            let filtered = rs
+                .filter_rules_by_meta_features(&os_globals(os))
+                .expect("filter");
+            let ns = names(&filtered);
+            assert!(
+                ns.contains("any os"),
+                "any-os pruned for os={os}, kept: {ns:?}"
+            );
+            assert!(
+                ns.contains("no os"),
+                "no-os pruned for os={os}, kept: {ns:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn upstream_parity_2929_empty_globals_returns_clone() {
+        let rs = make_ruleset(vec![
+            Rule::from_yaml(WINDOWS_RULE).expect("yaml"),
+            Rule::from_yaml(LINUX_RULE).expect("yaml"),
+        ])
+        .expect("RuleSet");
+        let filtered = rs
+            .filter_rules_by_meta_features(&HashMap::new())
+            .expect("filter");
+        assert_eq!(
+            filtered.rules.len(),
+            2,
+            "empty globals should keep all rules"
+        );
+    }
+
+    const PARENT_USES_LINUX_DEP: &str = r#"
+rule:
+  meta:
+    name: windows parent
+    scopes:
+      static: function
+      dynamic: process
+  features:
+    - and:
+      - os: windows
+      - or:
+        - api: CreateFile
+        - match: linux dep
+"#;
+
+    const LINUX_DEP: &str = r#"
+rule:
+  meta:
+    name: linux dep
+    scopes:
+      static: function
+      dynamic: process
+  features:
+    - and:
+      - os: linux
+      - api: open
+"#;
+
+    #[test]
+    fn upstream_parity_2929_keeps_dependencies_of_surviving_rules() {
+        let rs = make_ruleset(vec![
+            Rule::from_yaml(LINUX_DEP).expect("dep yaml"),
+            Rule::from_yaml(PARENT_USES_LINUX_DEP).expect("parent yaml"),
+        ])
+        .expect("RuleSet");
+
+        // Windows binary: parent kept (os: windows), and its transitive
+        // `match: linux dep` dependency must survive too even though the
+        // dep itself has os:linux that would otherwise be pruned.
+        let filtered = rs
+            .filter_rules_by_meta_features(&os_globals("windows"))
+            .expect("filter");
+        let ns = names(&filtered);
+        assert!(ns.contains("windows parent"), "parent pruned: {ns:?}");
+        assert!(
+            ns.contains("linux dep"),
+            "transitive dep pruned (broken dependency invariant): {ns:?}"
+        );
+    }
+
+    const UNREACHABLE_SOME_RULE: &str = r#"
+rule:
+  meta:
+    name: unreachable some
+    scopes:
+      static: function
+      dynamic: process
+  features:
+    - 3 or more:
+      - os: windows
+      - os: linux
+      - os: macos
+"#;
+
+    #[test]
+    fn upstream_parity_2929_prunes_unreachable_some_count() {
+        let rs = make_ruleset(vec![Rule::from_yaml(UNREACHABLE_SOME_RULE).expect("yaml")])
+            .expect("RuleSet");
+
+        // The rule requires 3 satisfied global constraints out of 3
+        // mutually-exclusive OSes — impossible on any single binary.
+        let filtered = rs
+            .filter_rules_by_meta_features(&os_globals("windows"))
+            .expect("filter");
+        let ns = names(&filtered);
+        assert!(
+            !ns.contains("unreachable some"),
+            "unsatisfiable Some-count rule was not pruned: {ns:?}"
+        );
+    }
 }

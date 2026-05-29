@@ -1,6 +1,6 @@
 [package]
 name = "capa"
-version = "0.5.1"
+version = "0.5.2"
 description = "File capability extractor."
 authors = ["Marirs <marirs@gmail.com>", "Andrey Mnatsakanov <andrey@3ig.kiev.ua>", "Jorge Alejandro Durán Royo<jorge.duran.royo@gmail.com>"]
 keywords = ["capa", "fce", "capability", "aslr", "reverse"]
@@ -8,25 +8,8 @@ readme = "README.md"
 license-file = "LICENSE"
 repository = "https://github.com/marirs/capa-rs"
 homepage = "https://github.com/marirs/capa-rs"
-# Drop `examples` from `exclude` so the [[example]] target below ships
-# with the crate (was inconsistent: example target referenced an
-# excluded path). `data/` stays excluded — those are test fixtures.
-# `flirt-sigs/` stays excluded — 70 MB of FLIRT .sig files would
-# blow past crates.io's 10 MB upload limit. The GitHub release ships
-# them as a separate `flirt-sigs.tar.gz` artifact alongside the CLI
-# binaries; source builds (`git clone`) get them automatically since
-# the directory lives in the repo.
-# `scripts/` (0.5.0) stays excluded — the only file is
-# `gen_com_tables.py`, the Python generator that produced
-# `src/rules/com_db.rs` (the 29k-entry COM GUID database, included!
-# at build time). The generated table ships in src/; the generator
-# itself is only useful for regenerating from a newer upstream
-# Python capa, which crates.io consumers don't need.
 exclude = ["data", "flirt-sigs", "scripts"]
 edition = "2024"
-# 0.3.21: bumped from 1.85 → 1.95 because smda 0.5.x sets MSRV 1.95
-# (needed for some 2024-edition features it leans on). Pure-Rust dep
-# tree below — no aws-lc / openssl / native-tls.
 rust-version = "1.95"
 
 [dependencies]
@@ -37,26 +20,12 @@ petgraph = "0.8"
 regex = "1.11.1"
 fancy-regex = "0.18"
 serde = { version = "1", features = ["derive"] }
-# 0.5.1: smda 0.6.4 → 0.6.5. Picks up the Mach-O closeout:
-# `__TEXT,__stubs` walker via `LC_DYSYMTAB.indirectsymoff` so
-# direct `bl _stub` calls resolve to their API names (0.6.4 only
-# covered the GOT-slot indirect form, missing the most common
-# ARM64 PIC call shape), and `MachoArchPreference` plumbed through
-# `BinaryInfo` so post-parse passes honour the slice preference
-# set at parse time. `0.6.5` is the minimum; semver-compatible
-# with future 0.6.x.
 smda = "0.6.5"
 thiserror = "2.0.12"
 walkdir = "2.5.0"
 yaml-rust = "0.4.5"
 goblin = { version = "0.10.0", features = ["alloc"] }
 maplit = "1.0.2"
-# 0.4.2: dnfile 0.4 → 0.5 picks up `Send + Sync` supertrait bounds on
-# the public trait family (MDTableTrait, MDTableRowTrait,
-# MDTableRowTraitT, CodedIndex) so `DnPe<'_>` — and the capa-rs
-# `dnfile::Extractor<'_>` that wraps it — can cross thread
-# boundaries. Required by the rayon-parallel function loop in
-# `find_capabilities`. No runtime behaviour change.
 dnfile = "0.5"
 lazy_static = "1.5.0"
 parking_lot = "0.12.3"
@@ -66,49 +35,12 @@ memmap2 = "0.9.5"
 scroll = "0.13"
 once_cell = "1.21.1"
 dynamic-loader-cache = "0.2.2"
-# (0.5.1) Pure-Rust PLIST parser for Mach-O code-signing
-# entitlements blob (CS_EmbeddedEntitlements, magic 0xfade7171).
-# Used by security/macho.rs to detect ALLOW-JIT
-# (com.apple.security.cs.allow-jit). No openssl / aws-lc /
-# native-tls in the transitive tree — matches the project's
-# pure-Rust stance.
 plist = { version = "1", default-features = false }
-# 0.3.21 introduced ouroboros as a self-referential wrapper around
-# `buf: Vec<u8>` + `DisassemblyReport<'_>` so the public Extractor::new
-# could keep its 0.3.20 signature. 0.4.0 completes the zero-copy
-# refactor — `Extractor<'a>` takes `&'a [u8]` from the caller and
-# borrows the smda/dnfile reports directly. The ouroboros dep is gone.
-# 0.3.21: iced-x86 is already in the transitive dep tree via smda.
-# Pulling it in directly lets the smda extractor compare instructions
-# against typed `Mnemonic` / `FlowControl` enums instead of re-formatting
-# strings — the same hot-path perf win smda itself got from the iced
-# decoder swap. Match the feature set smda uses to keep monomorphisation
-# overhead identical.
 iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "intel", "instr_info"] }
-# 0.4.3: fast-flirt is our pure-Rust FLIRT engine — Apache-2.0,
-# zero-copy arena + multi-level prefix trie matcher. capa-rs uses it
-# to identify statically-linked library functions (MSVC CRT, ATL/MFC,
-# OpenSSL, zlib, boost, libcurl, lua, protobuf, DirectX, Intel libs,
-# etc.) and exclude them from the user-facing capability output via
-# the existing `lib: true` rule-skip path. Always compiled in —
-# `AnalyzeBuilder::signatures` is the opt-in (no signatures path →
-# no FLIRT, identical behaviour to pre-0.4.3).
-#
-# Three direct deps (`miniz_oxide`, `smallvec`, `thiserror`); ~240×
-# faster on `matches()` and ~70% less resident memory than the
-# upstream-FLIRT engine we briefly piloted on.
-fast-flirt = "0.2.2"
-# 0.4.2: rayon for inter-function parallelism in `find_capabilities`.
-# Each function's analysis is pure — reads the extractor, evaluates
-# rules, returns matches. Parallelising the outer loop gives ~4-8×
-# end-to-end speedup on multi-core machines for binaries with more
-# than a handful of functions. Also used in `rules::get_rules` to
-# parallelise YAML parsing across the rule corpus.
 rayon = "1.10"
 
 [dev-dependencies]
 clap = { version = "4.5", features = ["cargo", "derive"] }
-
 prettytable-rs = "0.10.0"
 
 [lib]

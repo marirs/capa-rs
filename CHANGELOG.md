@@ -3,6 +3,34 @@
 All notable changes to **capa** are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] — xor-zero number(0), regex /i fast path, rule pre-pruning
+
+### Fixed — feature extraction parity
+
+- **`xor reg, reg` now emits `Number(0)`**
+  Self-XOR is the canonical register-zeroing idiom; previously
+  `extract_insn_nzxor_characteristic_features` returned an empty feature set
+  for it, so rules matching on `number: 0` at the produced register missed the
+  pattern entirely.
+
+### Performance
+
+- **Pre-prune rules with unsatisfiable global-feature constraints**
+  New `RuleSet::filter_rules_by_meta_features` walks
+  each rule's statement AST and discards rules whose `os`/`arch`/`format`
+  constraints can't be met by the binary's globals, before the per-function
+  evaluation loop. Transitive dependencies of kept rules are preserved.
+- **Regex `/i` fast path via lowercased-string lookup**
+  Pure-literal patterns ending in `/i` now do an O(1) `HashSet` lookup
+  against the lowercased feature values instead of compiling and running a
+  regex. Builds on the 0.4.2 lowercase canonicalization.
+- **String pre-filter at file load** New
+  `RuleSet::prepare_for_file` populates an `impossible_string_rule_names` set
+  by checking each rule's required strings against the file's string blob.
+  Impossible rules are skipped during per-function matching unless their scope
+  contains `Characteristic("stack string")` (since stack-built strings aren't
+  in the file's string set).
+
 ## [0.5.1] — Mach-O closeout: zero `Unknown` rows, stub-VA API resolution, iOS distinction
 
 Closes every `Unknown` placeholder in the 0.5.0 Mach-O security

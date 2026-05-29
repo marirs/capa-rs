@@ -109,6 +109,17 @@ pub enum Feature {
 }
 
 impl Feature {
+    /// 0.5.2 (upstream parity #2929): is this a "global" feature —
+    /// one that's constant per binary (OS, architecture, file
+    /// format), determined once from headers, and therefore
+    /// suitable for pre-pruning rules whose constraints can't be
+    /// satisfied?
+    ///
+    /// Mirrors Python capa's `capa.features.common.is_global_feature`.
+    pub fn is_global_feature(&self) -> bool {
+        matches!(self, Feature::Os(_) | Feature::Arch(_) | Feature::Format(_))
+    }
+
     pub fn new(t: RuleFeatureType, value: &Value, description: &str) -> Result<Feature> {
         // let readpro = "property/read".to_string();
 
@@ -1530,6 +1541,11 @@ impl ArchFeature {
         }
         Ok((false, vec![]))
     }
+
+    /// 0.5.2 (upstream parity #2929): see `OsFeature::value`.
+    pub fn value(&self) -> &str {
+        &self.value
+    }
 }
 
 impl Hash for ArchFeature {
@@ -1689,6 +1705,13 @@ impl OsFeature {
         }
         Ok((false, vec![]))
     }
+
+    /// 0.5.2 (upstream parity #2929): expose the canonicalised
+    /// (lowercased) OS string so the `filter_rules_by_meta_features`
+    /// pre-prune walker can detect the `os: any` wildcard.
+    pub fn value(&self) -> &str {
+        &self.value
+    }
 }
 
 impl Hash for OsFeature {
@@ -1743,6 +1766,11 @@ impl FormatFeature {
             return Ok((true, features[&Feature::Format(self.clone())].clone()));
         }
         Ok((false, vec![]))
+    }
+
+    /// 0.5.2 (upstream parity #2929): see `OsFeature::value`.
+    pub fn value(&self) -> &str {
+        &self.value
     }
 }
 

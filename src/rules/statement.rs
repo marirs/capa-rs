@@ -173,6 +173,12 @@ impl SomeStatement {
         }
         Ok(res)
     }
+    /// 0.5.2 (upstream parity #2929): read the required matching
+    /// child count, used by the `filter_rules_by_meta_features`
+    /// pre-prune walker.
+    pub fn count(&self) -> u32 {
+        self.count
+    }
     pub fn evaluate(&self, features: &HashMap<Feature, Vec<u64>>) -> Result<(bool, Vec<u64>)> {
         let mut res = 0;
         for child in &self.children {
@@ -208,6 +214,13 @@ impl RangeStatement {
     }
     pub fn get_children(&self) -> Result<Vec<&StatementElement>> {
         Ok(vec![&self.child])
+    }
+    /// 0.5.2 (upstream parity #2929): read the minimum required
+    /// occurrence count, used by the `filter_rules_by_meta_features`
+    /// pre-prune walker. `min == 0` means the feature is allowed to
+    /// be absent (always satisfiable).
+    pub fn min(&self) -> u32 {
+        self.min
     }
     pub fn evaluate(&self, features: &HashMap<Feature, Vec<u64>>) -> Result<(bool, Vec<u64>)> {
         if let StatementElement::Feature(f) = &self.child {

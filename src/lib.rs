@@ -1126,6 +1126,23 @@ fn find_capabilities(
 )> {
     use rayon::prelude::*;
 
+    // 0.5.2 (upstream parity mandiant/capa#2929): pre-prune rules whose
+    // global-feature constraints (os/arch/format) can't be satisfied by
+    // this binary, *before* the per-function matching loop. Eliminates
+    // those rules from every per-function / per-basic-block /
+    // per-instruction evaluation downstream.
+    //
+    // Globals are constant per binary, so this is a one-shot up-front
+    // call that pays off across thousands of per-function evaluations.
+    // The owned filtered `RuleSet` is held in a local so all
+    // `&rules::Rule` references taken later point into it.
+    let mut globals_map: HashMap<crate::rules::features::Feature, Vec<u64>> = HashMap::new();
+    for (feat, va) in extractor.extract_global_features()? {
+        globals_map.entry(feat).or_default().push(va);
+    }
+    let pruned_ruleset = ruleset.filter_rules_by_meta_features(&globals_map)?;
+    let ruleset: &rules::RuleSet = &pruned_ruleset;
+
     let mut all_function_matches: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> =
         HashMap::new();
     let mut all_bb_matches: HashMap<&rules::Rule, Vec<(u64, (bool, Vec<u64>))>> = HashMap::new();

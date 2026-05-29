@@ -1005,6 +1005,17 @@ impl<'data> Extractor<'data> {
             let rn = (a.opcode >> 5) & 0x1f;
             let rm = (a.opcode >> 16) & 0x1f;
             if rn == rm {
+                // 0.5.2 (upstream parity #2997): `eor xd, xn, xn` is the
+                // AArch64 zeroing idiom — same shape as x86 `xor eax, eax`.
+                // Emit Number(0) at the instruction so rules matching on
+                // `number: 0` see the produced value, rather than dropping
+                // the case silently (pre-0.5.2 behaviour).
+                res.push((
+                    crate::rules::features::Feature::Number(
+                        crate::rules::features::NumberFeature::new(f.bitness, &0_i128, "")?,
+                    ),
+                    insn.offset,
+                ));
                 return Ok(res);
             }
             // Security-cookie filter is x86-specific (stack-canary
@@ -1031,6 +1042,16 @@ impl<'data> Extractor<'data> {
         if let Some(o) = insn.format_operands() {
             let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
             if operands[0] == operands[1] {
+                // 0.5.2 (upstream parity #2997): `xor eax, eax` (and the SSE
+                // / packed variants Xorpd/Xorps/Pxor) zero the destination
+                // register. Emit Number(0) for rules matching the produced
+                // value, instead of dropping the case silently.
+                res.push((
+                    crate::rules::features::Feature::Number(
+                        crate::rules::features::NumberFeature::new(f.bitness, &0_i128, "")?,
+                    ),
+                    insn.offset,
+                ));
                 return Ok(res);
             }
         }
@@ -1926,5 +1947,102 @@ pub(crate) fn classify_macho_os(buf: &[u8]) -> Result<Os> {
             Ok(Os::MACOS)
         }
         _ => Ok(Os::MACOS),
+    }
+}
+
+// 0.5.2 (upstream parity #2997): integration test for the
+// `xor reg, reg` → `Number(0)` correctness fix. This is the first
+// extractor-level test in the crate — placed inline rather than in
+// `tests/` so we keep crate-internal access to the `Mnemonic` import,
+// the `SmdaExtractor::report()` accessor, and the public
+// `extract_insn_nzxor_characteristic_features` method without
+// having to widen any visibility.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rules::features::{CharacteristicFeature, Feature, NumberFeature};
+
+    /// Walks every instruction in `data/Demo64.dll`, finds any
+    /// `xor reg, reg` (or `xorpd`/`xorps`/`pxor`) where both operands
+    /// are the same register, and asserts that
+    /// `extract_insn_nzxor_characteristic_features` emits `Number(0)`
+    /// at the instruction and does NOT emit `Characteristic("nzxor")`
+    /// — mirroring the upstream Python parity-test pattern from
+    /// `mandiant/capa#2997`.
+    ///
+    /// Fails loudly if no self-XOR site is discovered, so we can't pass
+    /// vacuously on a binary that happens to contain none.
+    #[test]
+    fn upstream_parity_2997_xor_self_emits_number_zero() {
+        let path = "data/Demo64.dll";
+        let bytes = std::fs::read(path).unwrap_or_else(|e| {
+            panic!("test fixture missing: {path}: {e}");
+        });
+        let extractor = Extractor::new(path, false, false, &bytes).expect("smda parse Demo64.dll");
+
+        let report = extractor.report();
+        let functions = report.get_functions().expect("smda get_functions");
+
+        // PartialEq on NumberFeature / CharacteristicFeature is value-only
+        // (see `impl PartialEq for NumberFeature` in src/rules/features.rs),
+        // so the bitness / description we construct here are irrelevant for
+        // the assertion — only the value matters.
+        let want_zero =
+            Feature::Number(NumberFeature::new(64, &0_i128, "").expect("NumberFeature::new"));
+        let want_nzxor = Feature::Characteristic(
+            CharacteristicFeature::new("nzxor", "").expect("CharacteristicFeature::new"),
+        );
+
+        let mut sites_checked = 0_usize;
+        for smda_func in functions.values() {
+            let Ok(blocks) = smda_func.get_blocks() else {
+                continue;
+            };
+            for instrs in blocks.values() {
+                for insn in instrs {
+                    // Mirror the extractor's own self-XOR detection so the
+                    // test exercises the exact branch the fix added a
+                    // `Number(0)` push to.
+                    if !matches!(
+                        insn.mnemonic_enum(),
+                        Mnemonic::Xor | Mnemonic::Xorpd | Mnemonic::Xorps | Mnemonic::Pxor
+                    ) {
+                        continue;
+                    }
+                    let Some(operand_str) = insn.format_operands() else {
+                        continue;
+                    };
+                    let parts: Vec<&str> = operand_str.split(',').map(|s| s.trim()).collect();
+                    if parts.len() < 2 || parts[0] != parts[1] {
+                        continue;
+                    }
+
+                    sites_checked += 1;
+                    let res = extractor
+                        .extract_insn_nzxor_characteristic_features(smda_func, insn)
+                        .expect("extract_insn_nzxor_characteristic_features");
+
+                    assert!(
+                        res.iter().any(|(f, _)| f == &want_zero),
+                        "self-XOR at {:#x} did not emit Number(0); features were {:?}",
+                        insn.offset,
+                        res.iter().map(|(f, _)| f).collect::<Vec<_>>(),
+                    );
+                    assert!(
+                        res.iter().all(|(f, _)| f != &want_nzxor),
+                        "self-XOR at {:#x} incorrectly tagged as nzxor",
+                        insn.offset,
+                    );
+                }
+            }
+        }
+
+        assert!(
+            sites_checked > 0,
+            "no `xor reg, reg` site found in {path} — \
+             the test cannot verify the fix; switch the fixture to a \
+             binary that contains at least one self-XOR.",
+        );
+        eprintln!("upstream parity #2997: verified {sites_checked} self-XOR site(s) in {path}");
     }
 }
