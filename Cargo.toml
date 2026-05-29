@@ -37,6 +37,7 @@ once_cell = "1.21.1"
 dynamic-loader-cache = "0.2.2"
 plist = { version = "1", default-features = false }
 iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "intel", "instr_info"] }
+fast-flirt = "0.2.2"
 rayon = "1.10"
 
 [dev-dependencies]
