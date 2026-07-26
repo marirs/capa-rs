@@ -1574,14 +1574,25 @@ pub fn derefs(report: &DisassemblyReport<'_>, p: &u64) -> Result<Vec<u64>> {
     let mut res = vec![];
     let mut depth = 0;
     let mut pp = *p;
+    // Pointers are bitness-sized: reading only 4 bytes on x64 truncates
+    // VAs above 4 GiB (e.g. 0x140000000-based images) and kills every
+    // chain after the first hop.
+    let ptr_size = (report.bitness / 8).clamp(4, 8) as usize;
     loop {
         if !report.is_addr_within_memory_image(&pp)? {
             break;
         }
         res.push(pp);
 
-        let bytes_: [u8; 4] = read_bytes(report, &pp, 4)?.try_into()?;
-        let val = u32::from_le_bytes(bytes_) as u64;
+        let bytes_ = read_bytes(report, &pp, ptr_size)?;
+        if bytes_.len() < ptr_size {
+            // Truncated read at the end of the image — stop the chain.
+            break;
+        }
+        let val = bytes_
+            .iter()
+            .enumerate()
+            .fold(0u64, |acc, (i, b)| acc | ((*b as u64) << (8 * i)));
         // sanity: pointer points to self
         if val == pp {
             break;
@@ -1792,7 +1803,7 @@ pub fn extract_unicode_strings(data: &[u8], min_length: usize) -> Result<Vec<(St
         let matched_bytes = mat.as_bytes();
         let utf16_units = matched_bytes
             .chunks(2)
-            .map(|chunk| u16::from_be_bytes([chunk[1], chunk[0]]))
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
             .collect::<Vec<u16>>();
         if let Ok(decoded_string) = String::from_utf16(&utf16_units) {
             results.push((decoded_string, mat.start() as u64));
@@ -2044,5 +2055,51 @@ mod tests {
              binary that contains at least one self-XOR.",
         );
         eprintln!("upstream parity #2997: verified {sites_checked} self-XOR site(s) in {path}");
+    }
+
+    /// Regression test for marirs/capa-rs#16: `derefs` must read
+    /// bitness-sized pointers. On x64, reading only 4 bytes truncates VAs
+    /// above 4 GiB and stops every pointer chain after the first hop.
+    #[test]
+    fn derefs_follows_64bit_pointers() {
+        let base: u64 = 0x140000000;
+        let mut data = vec![0u8; 0x100];
+        data[0x20..0x28].copy_from_slice(&(base + 0x80).to_le_bytes());
+        data[0x80..0x88].copy_from_slice(&(base + 0xf0).to_le_bytes());
+        // null pointer at the end of the chain -> outside the image -> stop
+        let extractor =
+            Extractor::from_buffer(&data, base, 64, false, false).expect("parse buffer");
+        let chain = derefs(extractor.report(), &(base + 0x20)).expect("derefs");
+        assert_eq!(chain, vec![base + 0x20, base + 0x80, base + 0xf0]);
+    }
+
+    /// Same chain on a 32-bit image: pointers are 4 bytes wide.
+    #[test]
+    fn derefs_follows_32bit_pointers() {
+        let base: u64 = 0x400000;
+        let mut data = vec![0u8; 0x100];
+        data[0x20..0x24].copy_from_slice(&((base + 0x80) as u32).to_le_bytes());
+        data[0x80..0x84].copy_from_slice(&0u32.to_le_bytes());
+        let extractor =
+            Extractor::from_buffer(&data, base, 32, false, false).expect("parse buffer");
+        let chain = derefs(extractor.report(), &(base + 0x20)).expect("derefs");
+        assert_eq!(chain, vec![base + 0x20, base + 0x80]);
+    }
+
+    /// Regression test for marirs/capa-rs#16: UTF-16BE units were decoded
+    /// with swapped bytes, turning every BE string into non-ASCII garbage
+    /// that `clean_string` then dropped.
+    #[test]
+    fn utf16be_strings_decode_without_byte_swap() {
+        // "WIDE" as UTF-16BE, after 8 bytes of padding. Note: the same
+        // byte run also matches the UTF-16LE pattern one byte later, so
+        // assert on the offset too — only the BE decode can start at 8.
+        let mut data = vec![0u8; 8];
+        data.extend_from_slice(&[0x00, b'W', 0x00, b'I', 0x00, b'D', 0x00, b'E']);
+        let strings = extract_unicode_strings(&data, 4).expect("extract_unicode_strings");
+        assert!(
+            strings.iter().any(|(s, off)| s == "WIDE" && *off == 8),
+            "UTF-16BE string not decoded at offset 8: {strings:?}"
+        );
     }
 }
