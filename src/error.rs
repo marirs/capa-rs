@@ -109,4 +109,9 @@ pub enum Error {
     // nothing to match capabilities against.
     #[error("AnalyzeBuilder: .rules(path) must be called before .from_file() / .from_buffer()")]
     BuilderMissingRules,
+
+    // 0.5.3 (#22): strict `LibCSpec::from_str` rejects unknown LSB
+    // version strings (the lenient `From<String>` fallback stays).
+    #[error("invalid libc spec version: {0}")]
+    InvalidLibCSpec(String),
 }

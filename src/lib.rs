@@ -26,7 +26,6 @@ use std::{
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use smda::FileArchitecture;
 use yaml_rust::Yaml;
 
 // 0.4.2: regexes used in tag-string parsing — compiled once per
@@ -43,16 +42,16 @@ static PARTS_ID_RE: Lazy<regex::Regex> = Lazy::new(|| {
         .expect("compile-time regex literal — pattern is valid")
 });
 
-use consts::FileFormat;
-// 0.4.0: `Os` is referenced only by the properties-gated
-// `FileCapabilities::get_os` — gating the import avoids the
-// `--no-default-features` unused-import warning.
-#[cfg(feature = "properties")]
-use consts::Os;
-use sede::{from_hex, to_hex};
-
+// 0.5.3 (#22): types that appear in public fields (`Properties::format`,
+// `Properties::os`, `Properties::arch`, `FileCapabilities::security_checks`)
+// are re-exported from the crate root — previously downstream could not
+// name them (their modules are private), making the fields unusable for
+// anything but Debug-printing.
+pub use crate::consts::{FileFormat, Os};
 pub use crate::error::Error;
-use crate::security::options::status::SecurityCheckStatus;
+pub use crate::security::options::status::SecurityCheckStatus;
+use sede::{from_hex, to_hex};
+pub use smda::FileArchitecture;
 
 pub(crate) mod consts;
 mod error;
@@ -148,22 +147,37 @@ impl LibCSpec {
 
 // Used for options for binary security checks.
 impl From<String> for LibCSpec {
+    /// Lenient conversion kept for API compatibility: unknown versions
+    /// fall back to the newest spec. Prefer `LibCSpec::from_str`
+    /// (0.5.3, #22), which rejects unknown versions.
     fn from(value: String) -> Self {
-        match value.as_str() {
-            "1.0.0" => LibCSpec::LSB1,
-            "1.1.0" => LibCSpec::LSB1dot1,
-            "1.2.0" => LibCSpec::LSB1dot2,
-            "1.3.0" => LibCSpec::LSB1dot3,
-            "2.0.0" => LibCSpec::LSB2,
-            "2.0.1" => LibCSpec::LSB2dot0dot1,
-            "2.1.0" => LibCSpec::LSB2dot1,
-            "3.0.0" => LibCSpec::LSB3,
-            "3.1.0" => LibCSpec::LSB3dot1,
-            "3.2.0" => LibCSpec::LSB3dot2,
-            "4.0.0" => LibCSpec::LSB4,
-            "4.1.0" => LibCSpec::LSB4dot1,
-            "5.0.0" => LibCSpec::LSB5,
-            _ => LibCSpec::LSB5,
+        value.parse().unwrap_or(LibCSpec::LSB5)
+    }
+}
+
+impl std::str::FromStr for LibCSpec {
+    type Err = Error;
+
+    /// Strict version parse — unknown versions are an error.
+    /// 0.5.3 (#22): previously the only way in was `From<String>`,
+    /// which silently mapped any typo (e.g. `4.0.1`) to `LSB5` and
+    /// changed fortify-check semantics without a word.
+    fn from_str(s: &str) -> Result<Self> {
+        match s {
+            "1.0.0" => Ok(LibCSpec::LSB1),
+            "1.1.0" => Ok(LibCSpec::LSB1dot1),
+            "1.2.0" => Ok(LibCSpec::LSB1dot2),
+            "1.3.0" => Ok(LibCSpec::LSB1dot3),
+            "2.0.0" => Ok(LibCSpec::LSB2),
+            "2.0.1" => Ok(LibCSpec::LSB2dot0dot1),
+            "2.1.0" => Ok(LibCSpec::LSB2dot1),
+            "3.0.0" => Ok(LibCSpec::LSB3),
+            "3.1.0" => Ok(LibCSpec::LSB3dot1),
+            "3.2.0" => Ok(LibCSpec::LSB3dot2),
+            "4.0.0" => Ok(LibCSpec::LSB4),
+            "4.1.0" => Ok(LibCSpec::LSB4dot1),
+            "5.0.0" => Ok(LibCSpec::LSB5),
+            _ => Err(Error::InvalidLibCSpec(s.to_string())),
         }
     }
 }
@@ -205,6 +219,15 @@ impl BinarySecurityCheckOptions {
             no_libc: false,
             input_file: PathBuf::new(),
         }
+    }
+
+    /// Assume that input files do not use any C runtime libraries
+    /// (disables the libc-dependent ELF checks such as FORTIFY-SOURCE).
+    /// 0.5.3 (#22): the option existed but was unreachable — the field
+    /// is crate-private and `new()` hard-coded it to `false`.
+    pub fn no_libc(mut self, no_libc: bool) -> Self {
+        self.no_libc = no_libc;
+        self
     }
 }
 
@@ -450,9 +473,17 @@ impl<'a> AnalyzeBuilder<'a> {
     /// Terminal — analyse a binary on disk. Routes through capa-rs's
     /// magic-byte format detection (PE → dnfile-then-smda, ELF →
     /// smda, Mach-O → smda) and runs the binary security checklist.
-    pub fn from_file(self, file_name: impl AsRef<str>) -> Result<FileCapabilities> {
+    ///
+    /// Accepts any `AsRef<Path>` (0.5.3 — was `AsRef<str>`); non-UTF-8
+    /// paths are converted with `to_string_lossy`.
+    pub fn from_file(self, file_name: impl AsRef<std::path::Path>) -> Result<FileCapabilities> {
         let rule_path = self.rules.ok_or(Error::BuilderMissingRules)?;
-        let f = file_name.as_ref().to_string();
+        let f = file_name.as_ref().to_string_lossy().into_owned();
+        // Spawn the rules load FIRST so it overlaps with format
+        // detection and (eager) disassembly below — pre-#22 the thread
+        // was spawned after the extractor was built, so `join` blocked
+        // immediately and ~1000 rule files loaded strictly serially.
+        let rules_thread_handle = spawn(move || rules::RuleSet::new(&rule_path));
         let (format, buffer) = get_format(&f)?;
         let extractor = get_file_extractors(
             &f,
@@ -461,10 +492,14 @@ impl<'a> AnalyzeBuilder<'a> {
             self.high_accuracy,
             self.resolve_tailcalls,
         )?;
-        let rules_thread_handle = spawn(move || rules::RuleSet::new(&rule_path));
         let rules = match rules_thread_handle.join() {
             Ok(Ok(rules)) => rules,
-            Ok(Err(_)) | Err(_) => return Err(Error::DescriptionEvaluationError),
+            // Propagate the real RuleSet error (bad YAML, missing
+            // dependency, …) — pre-#22 every failure was misreported
+            // as DescriptionEvaluationError. A loader panic is a bug;
+            // keep it a panic rather than mislabeling it.
+            Ok(Err(e)) => return Err(e),
+            Err(panic) => std::panic::resume_unwind(panic),
         };
 
         // Security checks — defaults if caller didn't override.
@@ -553,6 +588,7 @@ impl<'a> AnalyzeBuilder<'a> {
     /// (pass `0` if the caller has no preference).
     pub fn from_buffer(self, raw: &[u8], base_addr: u64, bitness: u32) -> Result<FileCapabilities> {
         let rule_path = self.rules.ok_or(Error::BuilderMissingRules)?;
+        let rules_thread_handle = spawn(move || rules::RuleSet::new(&rule_path));
         // Construct the extractor directly via smda's parse_buffer —
         // get_file_extractors routes on PE/ELF/Mach-O magic, which
         // a raw buffer doesn't have.
@@ -565,10 +601,12 @@ impl<'a> AnalyzeBuilder<'a> {
                 self.resolve_tailcalls,
             )?);
 
-        let rules_thread_handle = spawn(move || rules::RuleSet::new(&rule_path));
         let rules = match rules_thread_handle.join() {
             Ok(Ok(rules)) => rules,
-            Ok(Err(_)) | Err(_) => return Err(Error::DescriptionEvaluationError),
+            // See `from_file`: real error propagates, a loader panic
+            // stays a panic (#22).
+            Ok(Err(e)) => return Err(e),
+            Err(panic) => std::panic::resume_unwind(panic),
         };
 
         // 0.4.3: FLIRT setup — see `from_file` for rationale.
@@ -1389,6 +1427,23 @@ pub struct FunctionCapabilities {
     address: usize,
     features: usize,
     capabilities: Vec<String>,
+}
+
+impl FunctionCapabilities {
+    /// Address of the analysed function.
+    pub fn address(&self) -> usize {
+        self.address
+    }
+
+    /// Number of features extracted from the function.
+    pub fn features(&self) -> usize {
+        self.features
+    }
+
+    /// Names of the rules that matched inside the function.
+    pub fn capabilities(&self) -> &[String] {
+        &self.capabilities
+    }
 }
 
 fn parse_parts_id(s: &str) -> Result<(Vec<String>, String)> {

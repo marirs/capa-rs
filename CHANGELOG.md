@@ -26,6 +26,33 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `u16::from_be_bytes` received the chunk bytes in reverse order, turning
   every UTF-16BE string into non-ASCII garbage that was then dropped.
 
+### Fixed — public API gaps (closes [#22](https://github.com/marirs/capa-rs/issues/22))
+
+- **Types in public fields are now nameable downstream** `pub use`
+  from the crate root for `FileFormat`, `Os`, `FileArchitecture`
+  (`Properties::format` / `os` / `arch`) and `SecurityCheckStatus`
+  (`FileCapabilities::security_checks`) — previously their modules
+  were private, so the fields were Debug-print-only.
+- **`FunctionCapabilities` gained getters** `address()`, `features()`,
+  `capabilities()` — fields stay private (additive, non-breaking).
+- **`BinarySecurityCheckOptions.no_libc` is reachable** via a new
+  builder-style `no_libc(bool)` method; the field is crate-private and
+  `new()` hard-coded `false`, so the documented option could not be
+  enabled before.
+- **Rule loading reports its real error and actually runs in
+  parallel** the loader thread was spawned *after* the extractor was
+  built (smda disassembles eagerly, so `join` blocked immediately and
+  ~1000 YAML files loaded serially), and every failure was misreported
+  as `DescriptionEvaluationError`. The thread now spawns before format
+  detection/disassembly, the real `RuleSet::new` error propagates, and
+  a loader panic is re-thrown instead of mislabeled.
+- **Strict `LibCSpec::from_str`** unknown LSB versions now error
+  (previously any typo silently became `LSB5`, changing fortify-check
+  semantics); the lenient `From<String>` remains for compatibility,
+  and `capa_cli` uses the strict parse.
+- **`from_file` accepts `impl AsRef<Path>`** (was `AsRef<str>`);
+  existing `&str`/`String` callers keep compiling.
+
 ## [0.5.2] — xor-zero number(0), regex /i fast path, rule pre-pruning
 
 ### Fixed — feature extraction parity
