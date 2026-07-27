@@ -103,7 +103,11 @@ impl super::Function for Function {
         for i in &self.f.instructions {
             insts.push(Box::new(Instruction { i: i.clone() }));
         }
-        res.insert(self.f.instructions[0].offset as u64, insts);
+        // Methods without a body (abstract / P/Invoke stubs) have no
+        // instructions — indexing `[0]` would panic (#20).
+        if let Some(first) = self.f.instructions.first() {
+            res.insert(first.offset as u64, insts);
+        }
         Ok(res)
     }
     fn as_any(&self) -> &dyn std::any::Any {
@@ -1282,7 +1286,13 @@ pub fn resolve_dotnet_token<'a>(
     //    }
     if let cil::instruction::Operand::Token(t) = token {
         let table = pe.net()?.md_table_by_index(&t.table())?;
-        return Ok(table.get_row(t.rid() - 1)?.get_row().as_any());
+        // rid 0 ("no reference" in ECMA-335) would underflow the `- 1`
+        // (#20); row indices are 1-based.
+        let row_index = t
+            .rid()
+            .checked_sub(1)
+            .ok_or_else(|| crate::Error::InvalidToken(format!("{:?}", token)))?;
+        return Ok(table.get_row(row_index)?.get_row().as_any());
     }
     Err(crate::Error::InvalidToken(format!("{:?}", token)))
 }
@@ -1355,5 +1365,18 @@ mod tests {
             fields.len(),
             total_fields
         );
+    }
+
+    /// #20: a token with rid == 0 (ECMA-335 "no reference") must error,
+    /// not underflow `rid - 1`.
+    #[test]
+    fn resolve_token_with_zero_rid_errors_instead_of_underflowing() {
+        let path = "data/dotnet_1c444ebeba24dcba8628b7dfe5fec7c6.exe_";
+        let bytes =
+            std::fs::read(path).unwrap_or_else(|e| panic!("test fixture missing: {path}: {e}"));
+        let pe = DnPe::parse(&bytes).expect("dnfile parse dotnet fixture");
+        // table 0x06 (MethodDef), rid 0
+        let token = cil::instruction::Operand::Token(clr::token::Token::new(0x0600_0000));
+        assert!(resolve_dotnet_token(&pe, &token).is_err());
     }
 }

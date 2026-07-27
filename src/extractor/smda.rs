@@ -1041,7 +1041,7 @@ impl<'data> Extractor<'data> {
         }
         if let Some(o) = insn.format_operands() {
             let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
-            if operands[0] == operands[1] {
+            if operands.len() >= 2 && operands[0] == operands[1] {
                 // 0.5.2 (upstream parity #2997): `xor eax, eax` (and the SSE
                 // / packed variants Xorpd/Xorps/Pxor) zero the destination
                 // register. Emit Number(0) for rules matching the produced
@@ -1616,7 +1616,11 @@ pub fn read_bytes<'a>(
     num_bytes: usize,
 ) -> Result<&'a [u8]> {
     let raw = report.binary_info.raw_data;
-    let rva = offset - report.base_addr;
+    // checked_sub: an offset below the image base is invalid input,
+    // not a huge RVA (#20; matches detect_ascii_len's checked version).
+    let rva = offset
+        .checked_sub(report.base_addr)
+        .ok_or(Error::BufferOverflowError)?;
     let buffer_end = raw.len();
     let mut end_of_string = rva + num_bytes as u64;
 
@@ -1649,7 +1653,6 @@ pub fn read_string(report: &DisassemblyReport<'_>, offset: &u64) -> Result<Strin
 
 pub fn detect_ascii_len(report: &DisassemblyReport<'_>, offset: &u64) -> Result<usize> {
     let raw = report.binary_info.raw_data;
-    let buffer_len = raw.len() as u64;
     let rva = offset.checked_sub(report.base_addr).ok_or_else(|| {
         std::io::Error::other("Offset is out of bounds relative to the base address")
     })?;
@@ -1664,12 +1667,9 @@ pub fn detect_ascii_len(report: &DisassemblyReport<'_>, offset: &u64) -> Result<
         .take_while(|&&ch| b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+, -./:;<=>?@[\\]^_`{|}~ \r\n".contains(&ch))
         .count();
 
-    if rva + ascii_len as u64 >= buffer_len {
-        Err(std::io::Error::other(
-            "Buffer overflow detected while detecting ASCII length",
-        ))?;
-    }
-
+    // A string running right up to the end of the buffer with no
+    // trailing NUL is valid (common in truncated/packed binaries);
+    // `read_bytes` already clamps the final read (#20).
     Ok(ascii_len)
 }
 
@@ -1713,7 +1713,9 @@ pub fn is_security_cookie(f: &Function, insn: &Instruction) -> Result<bool> {
     //# security cookie check should use SP or BP
     if let Some(o) = insn.format_operands() {
         let operands: Vec<String> = o.split(',').map(|s| s.trim().to_string()).collect();
-        if !["esp", "ebp", "rsp", "rbp"].contains(&&operands[1][..]) {
+        // Malformed/single-operand formatting must not panic on
+        // `operands[1]` — just treat it as "not a security cookie" (#20).
+        if operands.len() < 2 || !["esp", "ebp", "rsp", "rbp"].contains(&&operands[1][..]) {
             return Ok(false);
         }
         for (index, block) in f.get_blocks()?.iter().enumerate() {
@@ -2101,5 +2103,28 @@ mod tests {
             strings.iter().any(|(s, off)| s == "WIDE" && *off == 8),
             "UTF-16BE string not decoded at offset 8: {strings:?}"
         );
+    }
+
+    /// #20: `read_bytes` on an offset below the image base must return
+    /// an error, not underflow `offset - base_addr`.
+    #[test]
+    fn read_bytes_below_image_base_errors_instead_of_underflowing() {
+        let data = vec![0u8; 0x100];
+        let extractor =
+            Extractor::from_buffer(&data, 0x1000, 64, false, false).expect("parse buffer");
+        assert!(read_bytes(extractor.report(), &0x800, 4).is_err());
+    }
+
+    /// #20: a printable string ending exactly at the end of the buffer
+    /// (no trailing NUL — common in truncated/packed binaries) must be
+    /// returned, not reported as a buffer-overflow error.
+    #[test]
+    fn read_string_at_exact_end_of_buffer() {
+        let mut data = vec![0u8; 0x10];
+        data.extend_from_slice(b"WXYZ"); // runs right up to EOF, no NUL
+        let extractor =
+            Extractor::from_buffer(&data, 0x1000, 64, false, false).expect("parse buffer");
+        let s = read_string(extractor.report(), &(0x1000 + 0x10)).expect("read_string at EOF");
+        assert_eq!(s, "WXYZ");
     }
 }

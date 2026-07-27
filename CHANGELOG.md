@@ -26,6 +26,35 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `u16::from_be_bytes` received the chunk bytes in reverse order, turning
   every UTF-16BE string into non-ASCII garbage that was then dropped.
 
+### Fixed — robustness on malformed input (closes [#20](https://github.com/marirs/capa-rs/issues/20))
+
+Rule YAML and binaries are untrusted input; these sites panicked or
+aborted whole-file analysis on malformed data:
+
+- **Rule parser panics** `number/` / `offset/` with an empty bitness
+  suffix sliced out of bounds (`&suffix[1..]`); the suffix is now
+  validated (`x32`/`x64` per capa-rules `doc/format.md`, bare numbers
+  accepted, out-of-range rejected). A bare `string: /` or `/i` panicked
+  in `RegexFeature::new` — now rejected up front. `topologically_order_rules`
+  panicked on a dependency missing from the input — now returns
+  `MatchRuleNotFound`.
+- **Silent wrap-around and mangling in `count(...)`** an integer count
+  of `-1` wrapped to `u32::MAX` (the string forms were hardened in
+  0.4.2, the integer arm was missed), and an unbalanced
+  `count(mnemonic(mov)` silently parsed the argument as `mo`. Both now
+  raise `InvalidRule`. Inline descriptions split on the first `" = "`
+  only, keeping a tail that itself contains the separator.
+- **One malformed instruction no longer aborts whole-file analysis**
+  per-instruction feature extraction errors are logged and skipped
+  (best-effort) instead of propagating through the rayon loop.
+- **Extractor panics / false errors** `read_bytes` underflowed on an
+  offset below the image base; `detect_ascii_len` reported a printable
+  string ending exactly at end-of-buffer (no NUL) as an overflow error,
+  aborting the instruction's features; `is_security_cookie` and the
+  self-XOR check indexed `operands[1]` on single-operand formatting;
+  the .NET extractor panicked on methods without a body
+  (`instructions[0]`) and underflowed on tokens with rid 0.
+
 ## [0.5.2] — xor-zero number(0), regex /i fast path, rule pre-pruning
 
 ### Fixed — feature extraction parity

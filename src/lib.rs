@@ -1038,7 +1038,17 @@ fn find_function_capabilities<'a>(
 
         let insns = extractor.get_instructions(f, &bb)?;
         for insn in insns.iter() {
-            for (feature, va) in extractor.extract_insn_features(f, insn)? {
+            // Best-effort (#20): a single malformed instruction (bad
+            // operand encoding, truncated read, …) must not abort
+            // analysis of the whole file — log and continue.
+            let insn_features = match extractor.extract_insn_features(f, insn) {
+                Ok(features) => features,
+                Err(e) => {
+                    logger(&format!("skipping instruction feature extraction: {e}"));
+                    continue;
+                }
+            };
+            for (feature, va) in insn_features {
                 if features_dump {
                     map_features_by_scope
                         .entry("instruction")

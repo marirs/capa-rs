@@ -396,6 +396,19 @@ impl Rule {
         }
     }
 
+    /// Bitness suffix of `number/…` / `offset/…` feature keys. The
+    /// documented form (capa-rules `doc/format.md`) is `x32` / `x64`;
+    /// a bare number is accepted too. Pre-#20 this was
+    /// `parse_int(&suffix[1..]) as u32`, which panicked on an empty
+    /// suffix (`number/`) and silently truncated out-of-range values.
+    fn parse_bitness_suffix(suffix: &str, key: &str) -> Result<u32> {
+        let digits = suffix.trim();
+        let digits = digits.strip_prefix('x').unwrap_or(digits);
+        digits
+            .parse::<u32>()
+            .map_err(|_| Error::InvalidRule(line!(), key.to_string()))
+    }
+
     /// 0.4.2: parse an `N or more` / `N or fewer` count operand and
     /// validate that the value fits in `u32`. Pre-0.4.2 the code did
     /// `value as u32` after parsing via `i64`, which silently
@@ -473,15 +486,15 @@ impl Rule {
             "class" => Ok(RuleFeatureType::Class),
             "arch" => Ok(RuleFeatureType::Arch),
             _ => {
-                if key.starts_with("number/") {
-                    let parts: Vec<&str> = key.split('/').collect();
-                    let bitness = Rule::parse_int(&parts[1].trim()[1..])? as u32;
-                    return Ok(RuleFeatureType::Number(bitness));
+                if let Some(suffix) = key.strip_prefix("number/") {
+                    return Ok(RuleFeatureType::Number(Rule::parse_bitness_suffix(
+                        suffix, key,
+                    )?));
                 }
-                if key.starts_with("offset/") {
-                    let parts: Vec<&str> = key.split('/').collect();
-                    let bitness = Rule::parse_int(&parts[1].trim()[1..])? as u32;
-                    return Ok(RuleFeatureType::Offset(bitness));
+                if let Some(suffix) = key.strip_prefix("offset/") {
+                    return Ok(RuleFeatureType::Offset(Rule::parse_bitness_suffix(
+                        suffix, key,
+                    )?));
                 }
                 if let Some(rest) = key
                     .strip_prefix("operand[")
@@ -532,7 +545,7 @@ impl Rule {
                 let v; // = "";
                 //other features can have inline descriptions, like `number: 10 = CONST_FOO`.
                 //in this case, the RHS will be like `10 = CONST_FOO` or some other string
-                if s.contains(" = ") {
+                if let Some((value_part, ddd)) = s.split_once(" = ") {
                     if description.is_some() {
                         // there is already a description passed in as a sub node, like:
                         //
@@ -540,9 +553,9 @@ impl Rule {
                         //      description: CONST_FOO
                         return Err(Error::InvalidRule(line!(), s.to_string()));
                     }
-                    let parts: Vec<&str> = s.split(" = ").collect();
-                    v = parts[0].trim();
-                    let ddd = parts[1];
+                    // split on the FIRST " = " only — the description
+                    // itself may contain the separator (#20).
+                    v = value_part.trim();
                     if ddd.is_empty() {
                         //# sanity check:
                         //# there is an empty description, like `number: 10 =`
@@ -1030,7 +1043,12 @@ impl Rule {
                         let arg = if parts.len() > 1 { parts[1] } else { "" };
                         let feature_type = Rule::parse_feature_type(term)?;
                         let arg = if !arg.is_empty() {
-                            &arg[..arg.len() - ")".len()]
+                            // `count(mnemonic(mov)` — the whole key still
+                            // ends with ')' so we get here, but the arg
+                            // itself doesn't; blindly stripping the last
+                            // byte would mangle "mov" to "mo" (#20).
+                            arg.strip_suffix(')')
+                                .ok_or_else(|| Error::InvalidRule(line!(), kkey.to_string()))?
                         } else {
                             ""
                         };
@@ -1054,11 +1072,21 @@ impl Rule {
                         // format!("{:?} must be string", vval)))?;
                         match vval {
                             Yaml::Integer(i) => {
+                                // The string count forms are validated by
+                                // `parse_count_u32` (0.4.2); the integer
+                                // arm still did `*i as u32`, silently
+                                // wrapping e.g. -1 to u32::MAX (#20).
+                                let count = u32::try_from(*i).map_err(|_| {
+                                    Error::InvalidRule(
+                                        line!(),
+                                        format!("count value {i} out of range for u32"),
+                                    )
+                                })?;
                                 return Ok(StatementElement::Statement(Box::new(
                                     Statement::Range(RangeStatement::new(
                                         StatementElement::Feature(Box::new(feature)),
-                                        *i as u32,
-                                        *i as u32,
+                                        count,
+                                        count,
                                         "",
                                     )?),
                                 )));
@@ -1837,12 +1865,13 @@ pub fn topologically_order_rules(rules: Vec<&Rule>) -> Result<Vec<&Rule>> {
         }
         let mut rett = vec![];
         for dep in rule.get_dependencies(namespaces)? {
-            rett.append(&mut rec(
-                rules_by_name[&dep],
-                seen,
-                rules_by_name,
-                namespaces,
-            )?);
+            // Public entry point: a caller can pass a rule subset whose
+            // dependencies aren't all present — return an error instead
+            // of panicking on the map index (#20).
+            let dep_rule = rules_by_name
+                .get(&dep)
+                .ok_or_else(|| Error::MatchRuleNotFound(dep.clone()))?;
+            rett.append(&mut rec(dep_rule, seen, rules_by_name, namespaces)?);
         }
 
         rett.push(rule);
@@ -2094,5 +2123,97 @@ rule:
             !ns.contains("unreachable some"),
             "unsatisfiable Some-count rule was not pruned: {ns:?}"
         );
+    }
+
+    // ————— #20: malformed-rule hardening —————
+
+    /// `number/` / `offset/` bitness suffixes: the documented
+    /// `x32` / `x64` forms parse, empty or out-of-range suffixes error
+    /// (pre-#20 the parser panicked on `number/` — `&suffix[1..]` was
+    /// out of bounds — and silently truncated over-u32 values).
+    #[test]
+    fn bitness_suffix_is_validated_instead_of_panicking() {
+        assert!(matches!(
+            Rule::parse_feature_type("number/x32"),
+            Ok(RuleFeatureType::Number(32))
+        ));
+        assert!(matches!(
+            Rule::parse_feature_type("offset/x64"),
+            Ok(RuleFeatureType::Offset(64))
+        ));
+        assert!(Rule::parse_feature_type("number/").is_err());
+        assert!(Rule::parse_feature_type("offset/").is_err());
+        assert!(Rule::parse_feature_type("number/x18446744073709551616").is_err());
+    }
+
+    /// A negative integer count must error (pre-#20 `-1 as u32`
+    /// silently wrapped to `u32::MAX`), and an unbalanced `count(`
+    /// argument must error instead of silently dropping its last
+    /// character (`count(mnemonic(mov)` parsed "mo").
+    #[test]
+    fn malformed_counts_error_instead_of_wrapping_or_mangling() {
+        let negative = r#"
+rule:
+  meta:
+    name: bad count
+    scopes:
+      static: function
+      dynamic: process
+  features:
+    - and:
+      - count(mnemonic(mov)): -1
+"#;
+        assert!(
+            Rule::from_yaml(negative).is_err(),
+            "negative count must be rejected"
+        );
+
+        let unbalanced = r#"
+rule:
+  meta:
+    name: bad count paren
+    scopes:
+      static: function
+      dynamic: process
+  features:
+    - and:
+      - count(mnemonic(mov): 2
+"#;
+        assert!(
+            Rule::from_yaml(unbalanced).is_err(),
+            "unbalanced count( argument must be rejected"
+        );
+    }
+
+    /// Inline descriptions split on the FIRST " = " only — the
+    /// description itself may contain the separator (pre-#20
+    /// `split(" = ")` silently dropped the tail).
+    #[test]
+    fn inline_description_keeps_tail_after_first_separator() {
+        let (_value, description) =
+            Rule::parse_description("CreateFile = opens = files", &RuleFeatureType::Api, &None)
+                .expect("parse_description");
+        assert_eq!(description.as_deref(), Some("opens = files"));
+    }
+
+    /// A rule whose `match:` dependency is absent from the input must
+    /// produce an error, not a HashMap-index panic (#20).
+    #[test]
+    fn topological_order_missing_dependency_errors_instead_of_panicking() {
+        let rule = Rule::from_yaml(
+            r#"
+rule:
+  meta:
+    name: depends on missing
+    scopes:
+      static: function
+      dynamic: process
+  features:
+    - and:
+      - match: no such rule
+"#,
+        )
+        .expect("from_yaml");
+        assert!(topologically_order_rules(vec![&rule]).is_err());
     }
 }
