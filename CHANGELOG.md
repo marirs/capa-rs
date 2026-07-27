@@ -3,6 +3,29 @@
 All notable changes to **capa** are documented here.
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed — silent feature loss (closes [#16](https://github.com/marirs/capa-rs/issues/16))
+
+- **.NET managed-method and field maps keyed by real metadata tokens**
+  `get_dotnet_managed_methods` keyed entries by a `MemberRef` token built
+  from the *TypeDef* row id, and `get_dotnet_fields` by a `TypeDef` token —
+  but `call`/`callvirt` operands carry `MethodDef` (`0x06`) tokens and
+  `ldfld`/`stfld` operands carry `Field` (`0x04`) tokens, so callee and
+  field lookups never matched and API/namespace/class/property features
+  for managed code were silently lost. All members of one type also shared
+  a key and overwrote each other. Both maps are now keyed by the actual
+  referenced row, matching upstream Python capa.
+- **`derefs` reads bitness-sized pointers**
+  It always read 4 bytes, so on x64 images based above 4 GiB (e.g.
+  `0x140000000`) every pointer chain stopped after the first hop and
+  string/bytes features behind double indirection were never found.
+  Truncated reads at the end of the image now stop the chain instead of
+  erroring out.
+- **UTF-16BE strings decoded with swapped bytes**
+  `u16::from_be_bytes` received the chunk bytes in reverse order, turning
+  every UTF-16BE string into non-ASCII garbage that was then dropped.
+
 ## [0.5.2] — xor-zero number(0), regex /i fast path, rule pre-pruning
 
 ### Fixed — feature extraction parity

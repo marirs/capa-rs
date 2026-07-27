@@ -522,7 +522,12 @@ impl<'data> Extractor<'data> {
         for rid in 0..typedef.row_count() {
             let row = typedef.row::<TypeDef>(rid)?;
             for metdef in &row.method_list {
-                let token = calculate_dotnet_token_value("MemberRef", rid + 1)?;
+                // Key by the referenced MethodDef row: call/callvirt
+                // operands carry MethodDef (0x06) tokens, and every method
+                // needs its own key (previously all methods of a type shared
+                // a MemberRef token built from the TypeDef rid, so lookups
+                // missed and same-type methods overwrote each other).
+                let token = calculate_dotnet_token_value("MethodDef", metdef.row_index())?;
                 res.insert(
                     token,
                     DnMethod::new(
@@ -649,7 +654,11 @@ impl<'data> Extractor<'data> {
             let row = type_defs.row::<TypeDef>(rid)?;
             for index in &row.field_list {
                 let ss = self.pe().net()?.resolve_coded_index::<Field>(index)?;
-                let token = calculate_dotnet_token_value("TypeDef", rid + 1)?;
+                // Key by the referenced Field row: ldfld/stfld/etc.
+                // operands carry Field (0x04) tokens (previously the key
+                // was a TypeDef token, so lookups never matched and
+                // same-type fields overwrote each other).
+                let token = calculate_dotnet_token_value("Field", index.row_index())?;
                 res.insert(
                     token,
                     DnMethod::new(token, &row.type_namespace, &row.type_name, &ss.name, None),
@@ -1281,4 +1290,70 @@ pub fn resolve_dotnet_token<'a>(
 ///read user string from #US stream
 pub fn _read_dotnet_user_string(pe: &dnfile::DnPe, token: &clr::token::Token) -> Result<String> {
     Ok(pe.net()?.metadata.get_us(token.rid())?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for marirs/capa-rs#16: managed-method and field
+    /// maps must be keyed by the real MethodDef (0x06) / Field (0x04)
+    /// tokens that call/ldfld operands carry. They were keyed by
+    /// MemberRef/TypeDef tokens built from the TypeDef row id, so
+    /// `get_callee` / field lookups never hit, and all members of one
+    /// type shared a key and overwrote each other.
+    #[test]
+    fn managed_method_and_field_maps_use_real_tokens() {
+        let path = "data/dotnet_1c444ebeba24dcba8628b7dfe5fec7c6.exe_";
+        let bytes =
+            std::fs::read(path).unwrap_or_else(|e| panic!("test fixture missing: {path}: {e}"));
+        let extractor = Extractor::new(&bytes).expect("dnfile parse dotnet fixture");
+
+        let typedef = extractor
+            .pe()
+            .net()
+            .expect("net metadata")
+            .md_table("TypeDef")
+            .expect("TypeDef table");
+        let (mut total_methods, mut total_fields) = (0_usize, 0_usize);
+        for rid in 0..typedef.row_count() {
+            let row = typedef.row::<TypeDef>(rid).expect("TypeDef row");
+            total_methods += row.method_list.len();
+            total_fields += row.field_list.len();
+        }
+
+        let methods = extractor
+            .get_dotnet_managed_methods()
+            .expect("managed methods");
+        assert!(
+            !methods.is_empty(),
+            "no managed methods found in {path} — test would pass vacuously"
+        );
+        for key in methods.keys() {
+            assert_eq!(
+                key >> 24,
+                0x06,
+                "managed-method key {key:#x} is not a MethodDef token"
+            );
+        }
+        assert_eq!(
+            methods.len(),
+            total_methods,
+            "managed methods overwrote each other: {} entries for {} MethodDef rows",
+            methods.len(),
+            total_methods
+        );
+
+        let fields = extractor.get_dotnet_fields().expect("fields");
+        for key in fields.keys() {
+            assert_eq!(key >> 24, 0x04, "field key {key:#x} is not a Field token");
+        }
+        assert_eq!(
+            fields.len(),
+            total_fields,
+            "fields overwrote each other: {} entries for {} Field rows",
+            fields.len(),
+            total_fields
+        );
+    }
 }
