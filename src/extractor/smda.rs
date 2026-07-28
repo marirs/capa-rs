@@ -310,15 +310,18 @@ impl<'data> super::Extractor for Extractor<'data> {
             if instr.is_mov_imm_to_stack()? {
                 count += instr.get_printable_len()?;
             }
-            if count > 8 {
-                //MIN_STACKSTRING_LEN
-                res.push((
-                    crate::rules::features::Feature::Characteristic(
-                        crate::rules::features::CharacteristicFeature::new("stack string", "")?,
-                    ),
-                    *bb.0,
-                ));
-            }
+        }
+        if count > 8 {
+            //MIN_STACKSTRING_LEN
+            // Emitted once per basic block — previously the push sat
+            // inside the loop with no `break`, so every instruction
+            // past the threshold added a duplicate (#24).
+            res.push((
+                crate::rules::features::Feature::Characteristic(
+                    crate::rules::features::CharacteristicFeature::new("stack string", "")?,
+                ),
+                *bb.0,
+            ));
         }
         Ok(res)
     }
@@ -1263,7 +1266,16 @@ impl<'data> Extractor<'data> {
 
         // case 2: if operand is like 1234h
         if let Some(stripped_operand) = operand.strip_suffix('h') {
-            return i128::from_str_radix(stripped_operand, 16).ok();
+            // Intel convention: an h-suffixed hex literal must start
+            // with a digit (0ABh). Without this check the register
+            // names ah/bh/ch/dh parsed as 0xA/0xB/0xC/0xD (#24).
+            if stripped_operand
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit())
+            {
+                return i128::from_str_radix(stripped_operand, 16).ok();
+            }
         }
 
         // case 3: if operand is like +0x1234
@@ -1288,8 +1300,13 @@ impl<'data> Extractor<'data> {
             return Some(val);
         }
 
-        // case 5: if operand is like 0x1234
-        i128::from_str_radix(operand, 16).ok()
+        // case 5: bare hex without 0x/h, e.g. 0dead. Must start with a
+        // digit — otherwise hex-looking labels (beef, face, add) parse
+        // as numbers (#24).
+        if operand.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+            return i128::from_str_radix(operand, 16).ok();
+        }
+        None
     }
 
     pub fn extract_insn_number_features(
@@ -1317,7 +1334,12 @@ impl<'data> Extractor<'data> {
                             insn.offset,
                         ));
                     } else {
-                        let masked_value = (s as u32) as i128; // Convierte a u32 y de vuelta a i128
+                        // Negative immediates are emitted as their
+                        // unsigned interpretation at the function's
+                        // bitness — masking to u32 truncated x64 values
+                        // (mov rax, -1 → 0xFFFFFFFF instead of
+                        // 0xFFFFFFFFFFFFFFFF) (#24).
+                        let masked_value = mask_to_bitness(s, f.bitness);
                         res.push((
                             crate::rules::features::Feature::Number(
                                 crate::rules::features::NumberFeature::new(
@@ -1570,6 +1592,16 @@ pub fn generate_symbols(dll: &Option<String>, symbol: &Option<String>) -> Result
     Ok(res)
 }
 
+/// Unsigned interpretation of a negative immediate at the given bitness
+/// (#24): `-1` is `0xFFFFFFFF` on 32-bit and `0xFFFFFFFFFFFFFFFF` on
+/// 64-bit. Previously the mask was always u32, truncating x64 values.
+fn mask_to_bitness(value: i128, bitness: u32) -> i128 {
+    match bitness {
+        64 => (value as u64) as i128,
+        _ => (value as u32) as i128,
+    }
+}
+
 pub fn derefs(report: &DisassemblyReport<'_>, p: &u64) -> Result<Vec<u64>> {
     let mut res = vec![];
     let mut depth = 0;
@@ -1784,7 +1816,6 @@ pub fn extract_unicode_strings(data: &[u8], min_length: usize) -> Result<Vec<(St
     // regex pattern for UTF-16LE and UTF-16BE
     let re_le = regex::bytes::Regex::new(&format!(r"((?:[\x20-\x7E]\x00){{{},}})", min_length))?;
     let re_be = regex::bytes::Regex::new(&format!(r"((?:\x00[\x20-\x7E]){{{},}})", min_length))?;
-    let re_utf8 = regex::bytes::Regex::new(&format!(r"((?:[\x20-\x7E]){{{},}})", min_length))?;
 
     // UTF-16LE
     for mat in re_le.find_iter(data) {
@@ -1810,12 +1841,11 @@ pub fn extract_unicode_strings(data: &[u8], min_length: usize) -> Result<Vec<(St
         }
     }
 
-    // UTF-8
-    for mat in re_utf8.find_iter(data) {
-        let matched_bytes = mat.as_bytes();
-        let decoded_string = String::from_utf8_lossy(matched_bytes).to_string();
-        results.push((decoded_string, mat.start() as u64));
-    }
+    // NOTE (#24): there used to be a third, plain-ASCII pass here
+    // (`[\x20-\x7E]{4,}`) — it duplicated `extract_ascii_strings`,
+    // which `extract_file_strings` runs alongside this function, so
+    // every ASCII string was emitted twice. ASCII stays with
+    // `extract_ascii_strings`; this function is UTF-16 only.
 
     let cleaned_results = results
         .into_iter()
@@ -2100,6 +2130,56 @@ mod tests {
         assert!(
             strings.iter().any(|(s, off)| s == "WIDE" && *off == 8),
             "UTF-16BE string not decoded at offset 8: {strings:?}"
+        );
+    }
+
+    /// #24: register names (ah/bh/ch/dh) and hex-looking labels must not
+    /// parse as numbers; h-suffixed and bare hex literals starting with
+    /// a digit still do.
+    #[test]
+    fn registers_and_labels_are_not_numbers() {
+        let data = vec![0u8; 0x10];
+        let extractor =
+            Extractor::from_buffer(&data, 0x1000, 64, false, false).expect("parse buffer");
+        // Pre-#24 these parsed as 0xA / 0xB / 0xC / 0xD via the 'h' strip.
+        for reg in ["ah", "bh", "ch", "dh"] {
+            assert_eq!(extractor.parse_operand_to_number(reg), None, "{reg}");
+        }
+        // Hex-looking labels parsed via the bare-hex fallback.
+        for label in ["beef", "face", "add"] {
+            assert_eq!(extractor.parse_operand_to_number(label), None, "{label}");
+        }
+        // Legitimate literals keep working.
+        assert_eq!(extractor.parse_operand_to_number("0ABh"), Some(0xAB));
+        assert_eq!(extractor.parse_operand_to_number("1234h"), Some(0x1234));
+        assert_eq!(extractor.parse_operand_to_number("0dead"), Some(0xdead));
+        assert_eq!(extractor.parse_operand_to_number("0x1234"), Some(0x1234));
+        assert_eq!(extractor.parse_operand_to_number("1234"), Some(1234));
+    }
+
+    /// #24: negative immediates are emitted as their unsigned
+    /// interpretation at the function's bitness (was always u32).
+    #[test]
+    fn negative_immediates_mask_at_bitness() {
+        assert_eq!(mask_to_bitness(-1, 32), 0xFFFF_FFFF);
+        assert_eq!(mask_to_bitness(-1, 64), 0xFFFF_FFFF_FFFF_FFFF);
+    }
+
+    /// #24: the UTF-16 extractor must not also emit plain ASCII strings —
+    /// `extract_file_strings` runs `extract_ascii_strings` alongside it,
+    /// so every ASCII string used to appear twice.
+    #[test]
+    fn unicode_extractor_does_not_duplicate_ascii() {
+        let data = b"HELLO WORLD";
+        assert!(
+            extract_unicode_strings(data, 4)
+                .expect("unicode")
+                .is_empty(),
+            "ASCII string leaked into the UTF-16 extractor"
+        );
+        assert_eq!(
+            extract_ascii_strings(data, 4).expect("ascii")[0].0,
+            "HELLO WORLD"
         );
     }
 }
