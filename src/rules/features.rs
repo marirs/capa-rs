@@ -1315,6 +1315,22 @@ fn unicode_safe_byte_escapes(pat: &str) -> String {
 
 impl RegexFeature {
     pub fn new(value: &str, description: &str) -> Result<RegexFeature> {
+        // A bare "/" (or "/i") passes StringFactory's starts/ends-with-'/'
+        // check but has no body — the `&value[1..len-1]` slice below
+        // would be out of bounds (#20). "//" (empty body) stays legal,
+        // matching Python's `value[1:-1]`.
+        let case_insensitive = value.ends_with("/i");
+        let min_len = if case_insensitive {
+            "//i".len()
+        } else {
+            "//".len()
+        };
+        if value.len() < min_len {
+            return Err(Error::InvalidRule(
+                line!(),
+                format!("malformed regex feature: {value}"),
+            ));
+        }
         let body = &value["/".len()..value.len() - "/".len()];
         // 0.3.21: pre-0.3.21 we prepended `(?-u)` to put the regex into
         // byte mode (matched the `mnaza/fancy-regex` fork's behaviour).
@@ -1786,7 +1802,7 @@ impl FeatureT for FormatFeature {
 
 #[cfg(test)]
 mod tests {
-    use super::unicode_safe_byte_escapes;
+    use super::{RegexFeature, unicode_safe_byte_escapes};
 
     #[test]
     fn passes_ascii_byte_escapes_through_unchanged() {
@@ -1846,5 +1862,15 @@ mod tests {
         let pat = "中文\\x80";
         let expected = "中文\\u{80}";
         assert_eq!(unicode_safe_byte_escapes(pat), expected);
+    }
+
+    /// #20: a bare "/" or "/i" passes StringFactory's starts/ends-with-'/'
+    /// check but has no body — pre-#20 `&value[1..len-1]` sliced out of
+    /// bounds. "//" (empty body) stays legal, matching Python.
+    #[test]
+    fn regex_without_body_errors_instead_of_panicking() {
+        assert!(RegexFeature::new("/", "").is_err());
+        assert!(RegexFeature::new("/i", "").is_err());
+        assert!(RegexFeature::new("//", "").is_ok());
     }
 }
