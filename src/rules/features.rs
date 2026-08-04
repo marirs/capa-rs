@@ -413,8 +413,8 @@ impl FunctionNameFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::FunctionName(self.clone())) {
-            return Ok((true, features[&Feature::FunctionName(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::FunctionName(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -458,8 +458,8 @@ impl SectionFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::Section(self.clone())) {
-            return Ok((true, features[&Feature::Section(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::Section(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -503,8 +503,8 @@ impl ImportFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::Import(self.clone())) {
-            return Ok((true, features[&Feature::Import(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::Import(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -548,8 +548,8 @@ impl ExportFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::Export(self.clone())) {
-            return Ok((true, features[&Feature::Export(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::Export(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -588,8 +588,8 @@ impl BasicBlockFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::BasicBlock(self.clone())) {
-            return Ok((true, features[&Feature::BasicBlock(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::BasicBlock(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -614,8 +614,8 @@ impl MnemonicFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::Mnemonic(self.clone())) {
-            return Ok((true, features[&Feature::Mnemonic(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::Mnemonic(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -661,8 +661,8 @@ impl OffsetFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::Offset(self.clone())) {
-            return Ok((true, features[&Feature::Offset(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::Offset(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -708,11 +708,8 @@ impl OperandOffsetFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::OperandOffset(self.clone())) {
-            return Ok((
-                true,
-                features[&Feature::OperandOffset(self.clone())].clone(),
-            ));
+        if let Some(locations) = features.get(&Feature::OperandOffset(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -766,8 +763,8 @@ impl NumberFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::Number(self.clone())) {
-            return Ok((true, features[&Feature::Number(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::Number(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -813,11 +810,8 @@ impl OperandNumberFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::OperandNumber(self.clone())) {
-            return Ok((
-                true,
-                features[&Feature::OperandNumber(self.clone())].clone(),
-            ));
+        if let Some(locations) = features.get(&Feature::OperandNumber(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -888,8 +882,8 @@ impl ApiFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::Api(self.clone())) {
-            return Ok((true, features[&Feature::Api(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::Api(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -936,8 +930,8 @@ impl PropertyFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::Property(self.clone())) {
-            return Ok((true, features[&Feature::Property(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::Property(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -989,8 +983,8 @@ impl MatchedRuleFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::MatchedRule(self.clone())) {
-            return Ok((true, features[&Feature::MatchedRule(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::MatchedRule(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -1068,11 +1062,8 @@ impl CharacteristicFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::Characteristic(self.clone())) {
-            return Ok((
-                true,
-                features[&Feature::Characteristic(self.clone())].clone(),
-            ));
+        if let Some(locations) = features.get(&Feature::Characteristic(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -1124,8 +1115,8 @@ impl StringFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::String(self.clone())) {
-            return Ok((true, features[&Feature::String(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::String(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -1552,8 +1543,8 @@ impl ArchFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::Arch(self.clone())) {
-            return Ok((true, features[&Feature::Arch(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::Arch(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -1610,8 +1601,8 @@ impl NamespaceFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::Namespace(self.clone())) {
-            return Ok((true, features[&Feature::Namespace(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::Namespace(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -1661,8 +1652,8 @@ impl ClassFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::Class(self.clone())) {
-            return Ok((true, features[&Feature::Class(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::Class(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -1716,8 +1707,8 @@ impl OsFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::Os(self.clone())) {
-            return Ok((true, features[&Feature::Os(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::Os(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
@@ -1778,8 +1769,8 @@ impl FormatFeature {
         &self,
         features: &std::collections::HashMap<Feature, Vec<u64>>,
     ) -> Result<(bool, Vec<u64>)> {
-        if features.contains_key(&Feature::Format(self.clone())) {
-            return Ok((true, features[&Feature::Format(self.clone())].clone()));
+        if let Some(locations) = features.get(&Feature::Format(self.clone())) {
+            return Ok((true, locations.clone()));
         }
         Ok((false, vec![]))
     }
