@@ -10,7 +10,7 @@ use clap::Parser;
 use prettytable::{Attr, Cell, Row, Table, color, format::Alignment};
 use serde_json::{Map, Value, to_value};
 
-use capa::{BinarySecurityCheckOptions, FileCapabilities};
+use capa::{BinarySecurityCheckOptions, FileCapabilities, LibCSpec};
 
 #[derive(Parser)]
 #[clap(
@@ -77,7 +77,16 @@ fn main() {
     let json_path = cli.output;
     let libc = cli.libc.map(|s| s.into());
     let sysroot = cli.sysroot.map(|s| s.into());
-    let libc_spec = cli.libc_spec.map(|s| s.into());
+    // Strict parse (0.5.3, #22): an unknown LSB version used to fall
+    // back to LSB5 silently, changing fortify-check semantics.
+    let libc_spec = match cli.libc_spec.map(|s| s.parse::<LibCSpec>()) {
+        Some(Ok(spec)) => Some(spec),
+        Some(Err(e)) => {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
+        None => None,
+    };
     let security_check_opts = BinarySecurityCheckOptions::new(libc, sysroot, libc_spec);
 
     let start = Instant::now();
