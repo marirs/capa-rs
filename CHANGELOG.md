@@ -26,6 +26,23 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `u16::from_be_bytes` received the chunk bytes in reverse order, turning
   every UTF-16BE string into non-ASCII garbage that was then dropped.
 
+### Performance (closes [#18](https://github.com/marirs/capa-rs/issues/18))
+
+- **Global features computed once per file instead of once per
+  instruction** `extract_global_features` paid a full
+  `goblin::Object::parse` for the OS feature on every call — and it was
+  called per instruction, per basic block and per function. The result
+  (OS/arch — constant per file) is now cached in a
+  `once_cell::sync::OnceCell` on the smda extractor (thread-safe for the
+  rayon per-function loop). Instruction-level extraction on
+  `data/mimikatz.exe_` (808 KiB, ~136k instructions) drops from ~8.4 s to
+  ~0.2 s (**~40×**); `data/Demo64.dll` from ~23 ms to ~3.4 ms.
+- **Single hash lookup in `Feature::evaluate`** All 20 feature types used
+  `contains_key` + indexing, doing two hash-map lookups and cloning
+  `self` (including its `HashSet<Scope>`) twice on every hit — the
+  hottest operation of the rule engine. All sites now do one
+  `HashMap::get`, matching the pattern `RangeStatement` already used.
+
 ### Fixed — public API gaps (closes [#22](https://github.com/marirs/capa-rs/issues/22))
 
 - **Types in public fields are now nameable downstream** `pub use`
