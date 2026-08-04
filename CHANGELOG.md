@@ -43,6 +43,25 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   hottest operation of the rule engine. All sites now do one
   `HashMap::get`, matching the pattern `RangeStatement` already used.
 
+### Fixed — silent feature corruption in the smda extractor (closes [#24](https://github.com/marirs/capa-rs/issues/24))
+
+- **Registers and labels no longer parse as numbers** the `h`-suffix
+  case of `parse_operand_to_number` stripped the suffix and parsed the
+  rest as hex, so `mov al, ah` emitted `Number(0xA)` (same for
+  `bh`/`ch`/`dh`); the bare-hex fallback also accepted hex-looking
+  labels (`beef`, `face`). Both paths now require a leading digit, per
+  the Intel convention for hex literals.
+- **Negative immediates mask at the function's bitness** previously
+  always masked to u32, so `mov rax, -1` on x64 emitted
+  `Number(0xFFFFFFFF)` instead of `Number(0xFFFFFFFFFFFFFFFF)`.
+- **`stack string` emitted once per basic block** the push sat inside
+  the instruction loop with no `break`, adding a duplicate
+  characteristic for every instruction past the threshold.
+- **ASCII strings no longer emitted twice** `extract_unicode_strings`
+  ran a plain-ASCII pass with the same printable class as
+  `extract_ascii_strings`, and `extract_file_strings` calls both; the
+  UTF-16 extractor is now UTF-16-only.
+
 ## [0.5.2] — xor-zero number(0), regex /i fast path, rule pre-pruning
 
 ### Fixed — feature extraction parity
