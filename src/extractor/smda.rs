@@ -110,6 +110,14 @@ pub struct Extractor<'a> {
     report: DisassemblyReport<'a>,
     buf: &'a [u8],
     path: String,
+    /// Cache for `extract_global_features` (issue marirs/capa-rs#18):
+    /// OS/arch are constant per file, but computing the OS feature
+    /// costs a full `goblin::Object::parse` of the buffer — and the
+    /// feature was recomputed on every instruction and basic block.
+    /// `OnceCell` (not `lazy_static`) because the value is per-file;
+    /// the `sync` flavour because `find_capabilities` shares the
+    /// extractor across rayon worker threads.
+    global_features_cache: once_cell::sync::OnceCell<Vec<(crate::rules::features::Feature, u64)>>,
 }
 
 impl std::fmt::Debug for Extractor<'_> {
@@ -175,22 +183,34 @@ impl<'data> super::Extractor for Extractor<'data> {
     }
 
     fn extract_global_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
-        Ok(vec![
-            (
-                crate::rules::features::Feature::Os(crate::rules::features::OsFeature::new(
-                    &self.extract_os()?.to_string(),
-                    "",
-                )?),
-                0,
-            ),
-            (
-                crate::rules::features::Feature::Arch(crate::rules::features::ArchFeature::new(
-                    &self.extract_arch()?.to_string(),
-                    "",
-                )?),
-                0,
-            ),
-        ])
+        // Issue marirs/capa-rs#18: computed once per extractor, then
+        // cloned — the uncached version paid a full goblin parse for
+        // the OS feature on every call (i.e. per instruction).
+        Ok(self
+            .global_features_cache
+            .get_or_try_init(|| -> Result<Vec<(crate::rules::features::Feature, u64)>> {
+                Ok(vec![
+                    (
+                        crate::rules::features::Feature::Os(
+                            crate::rules::features::OsFeature::new(
+                                &self.extract_os()?.to_string(),
+                                "",
+                            )?,
+                        ),
+                        0,
+                    ),
+                    (
+                        crate::rules::features::Feature::Arch(
+                            crate::rules::features::ArchFeature::new(
+                                &self.extract_arch()?.to_string(),
+                                "",
+                            )?,
+                        ),
+                        0,
+                    ),
+                ])
+            })?
+            .clone())
     }
 
     fn extract_file_features(&self) -> Result<Vec<(crate::rules::features::Feature, u64)>> {
@@ -458,6 +478,7 @@ impl<'data> Extractor<'data> {
             report,
             buf: data,
             path: path.to_string(),
+            global_features_cache: once_cell::sync::OnceCell::new(),
         })
     }
 
@@ -486,6 +507,7 @@ impl<'data> Extractor<'data> {
             // Synthetic path — no real file backs a buffer-mode
             // extractor. Kept stable so `Debug` output is uniform.
             path: "<buffer>".to_string(),
+            global_features_cache: once_cell::sync::OnceCell::new(),
         })
     }
 
