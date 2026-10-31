@@ -1661,7 +1661,9 @@ pub fn read_string(report: &DisassemblyReport<'_>, offset: &u64) -> Result<Strin
     if ulen > 2 {
         let bytes = read_bytes(report, offset, ulen)?;
         let utf16_units: Vec<u16> = bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|arr| u16::from_le_bytes([arr[0], arr[1]]))
             .collect();
         return Ok(std::string::String::from_utf16(&utf16_units)?);

@@ -519,15 +519,12 @@ impl Rule {
         value_type: &RuleFeatureType,
         description: &Option<String>,
     ) -> Result<(Value, Option<String>)> {
-        let value; // = Value::Str(String::from(""));
         let mut dd = description.clone();
-        match value_type {
+        let value = match value_type {
             //string features cannot have inline descriptions,
             //so we assume the entire value is the string,
             //like: `string: foo = bar` -> "foo = bar"
-            RuleFeatureType::String => {
-                value = Value::Str(s.to_string());
-            }
+            RuleFeatureType::String => Value::Str(s.to_string()),
             _ => {
                 let v; // = "";
                 //other features can have inline descriptions, like `number: 10 = CONST_FOO`.
@@ -560,7 +557,7 @@ impl Rule {
                 //we need to convert the value to the expected type.
                 //for example, from `number: 10 = CONST_FOO` we have
                 //the string "10" that needs to become the number 10.
-                value = match value_type {
+                match value_type {
                     RuleFeatureType::Bytes => Value::Bytes(Rule::parse_bytes(v)?),
                     RuleFeatureType::Number(_) | RuleFeatureType::OperandNumber(_) => {
                         Value::Int(Rule::parse_int(v)?)
@@ -569,9 +566,9 @@ impl Rule {
                         Value::Int(Rule::parse_int(v)?)
                     }
                     _ => Value::Str(v.to_string()),
-                };
+                }
             }
-        }
+        };
         Ok((value, dd))
     }
 
