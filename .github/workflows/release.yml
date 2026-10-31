@@ -19,9 +19,9 @@ env:
 jobs:
   verify:
     name: verify build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
@@ -31,12 +31,11 @@ jobs:
   package-source:
     name: package source + cargo .crate
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -74,7 +73,7 @@ jobs:
           ls -la release
 
       - name: Upload source artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: capa-source-artifacts
           path: |
@@ -82,20 +81,12 @@ jobs:
             release/*.tar.gz
             release/*.sha256
           if-no-files-found: error
-
-  # 0.4.3: separate `flirt-sigs.tar.gz` artifact shipped alongside the
-  # CLI binaries. The `flirt-sigs/` directory in the repo is ~70 MB
-  # raw (~25-35 MB compressed) — too big for crates.io, but a
-  # one-time download for CLI users. Single tarball is platform-
-  # independent; users extract once and point `--signatures` at the
-  # extracted path.
   package-flirt-sigs:
     name: package flirt-sigs tarball
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@v7
       - name: Determine tag
         id: tag
         run: |
@@ -120,14 +111,13 @@ jobs:
           ls -lh release
 
       - name: Upload flirt-sigs artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: flirt-sigs
           path: |
             release/flirt-sigs-*.tar.gz
             release/flirt-sigs-*.sha256
           if-no-files-found: error
-
   build-cli:
     name: build capa_cli — ${{ matrix.target }}
     needs: verify
@@ -137,10 +127,10 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
             cross: false
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
             cross: true
           - target: x86_64-apple-darwin
             os: macos-latest
@@ -155,8 +145,7 @@ jobs:
             os: windows-latest
             cross: false
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@v7
       - name: Install Rust + target
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -219,23 +208,21 @@ jobs:
           ls -la release
 
       - name: Upload binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: capa_cli-${{ matrix.target }}
           path: |
             release/capa_cli-*
             release/capa_cli-*.sha256
           if-no-files-found: error
-
   github-release:
     name: create GitHub release
     needs: [package-source, package-flirt-sigs, build-cli]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
       - name: Determine tag
         id: tag
         run: |
@@ -294,10 +281,9 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
-
       - name: Flatten artifact tree
         run: |
           mkdir -p release
@@ -306,7 +292,7 @@ jobs:
           ls -la release
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.tag }}
